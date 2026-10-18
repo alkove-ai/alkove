@@ -4,17 +4,17 @@ import type { Warning } from '../lex'
 import { NEG, Search } from './search'
 import { BOUNDS, type Chain, clampThreshold, PAUSE_GAP, type SpotFrame, Word } from './spot'
 
-// provisional: to set on the calibrated words of the bench by drawing 3 takes of one voice
+// set on 3 takes drawn per voice: a well-said take scores 0 whatever the word, so k carries most of the threshold
 export const ENROLL = {
   takes: 3,
   // the threshold stays this far under the worst take
-  k: 0.3,
+  k: 0.8,
   // and this far over the best score of everything that is not a take
-  margin: 0.15,
+  margin: 1,
   // a speech segment whose best score stays under this is not the word
   detect: BOUNDS.min,
   // takes further apart than this (best minus worst) were said differently
-  spread: 0.8,
+  spread: 1,
 }
 
 export interface Take {

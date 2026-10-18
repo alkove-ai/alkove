@@ -25,11 +25,12 @@ export interface WordJSON {
   chain: Chain
 }
 
-// provisional, from the words calibrated at 0.5 false alarm / h (Camille, Ok Kiwi, Hey Jarvis): to replace by a median over many words per language
-const UNCALIBRATED: Partial<Record<Lang, number>> = { fr: -1.13, en: -1.94 }
-const UNCALIBRATED_ANY = -1.14
-// the threshold after a pause sits this much under the one anywhere (mean over the calibrated words)
-export const PAUSE_GAP = -0.59
+// median of ~30 typed words per language at 0.5 false alarm / h on the published Spot; ro's test set is too short, set by hand
+const UNCALIBRATED: Partial<Record<Lang, number>> = { fr: -1.23, en: -1.21, es: -1.14, it: -1.01, pt: -1.39, ca: -1.12, ro: -1.2 }
+const UNCALIBRATED_ANY = -1.17
+// the threshold after a pause sits this much under the one anywhere (mean over the typed words)
+export const PAUSE_GAP = -0.77
+// shared by both thresholds: a hard word's pause threshold (under -2.2) is clamped, stricter than 0.5 false alarm / h
 export const BOUNDS = { max: -0.6, min: -2.2 }
 // a Lex variant under this probability is not searched: on common words variants only add false alarms
 export const VARIANT = 0.25
