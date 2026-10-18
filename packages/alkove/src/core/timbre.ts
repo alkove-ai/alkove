@@ -149,20 +149,44 @@ function unpackWindows(text: string): Center[] {
 
 export type Level = 'lenient' | 'balanced' | 'strict'
 
-// cosine of `id`, a ~12 s print against `seconds` of voice (Common Voice tests): 1 % false rejects, EER, 1 % false accepts; a shorter print rejects more
-// the cosine over which `seconds` of voice match a print made from `printSeconds` of voice
-export function threshold(level: Level, seconds: number, _printSeconds: number): number {
-  const pts = LEVELS[level]
-  const s = Math.min(Math.max(seconds, pts[0]![0]), pts[pts.length - 1]![0])
-  const i = Math.max(1, pts.findIndex(([x]) => x >= s))
-  const [[s0, c0], [s1, c1]] = [pts[i - 1]!, pts[i]!]
-  return c0 + ((c1 - c0) * (s - s0)) / (s1 - s0)
+// cosine of `id` over which `seconds` of voice match a print made from `printSeconds` (Common Voice tests: 1 % false rejects, EER, 1 % false accepts): bilinear in the log of both, bounded to the table
+export function threshold(level: Level, seconds: number, printSeconds: number): number {
+  const at = (xs: number[], x: number): [number, number, number] => {
+    const v = Math.min(Math.max(x, xs[0]!), xs[xs.length - 1]!)
+    const i = Math.max(1, xs.findIndex((y) => y >= v))
+    return [i - 1, i, Math.log(v / xs[i - 1]!) / Math.log(xs[i]! / xs[i - 1]!)]
+  }
+  const [p0, p1, wp] = at(LEVELS.print, printSeconds)
+  const [h0, h1, wh] = at(LEVELS.heard, seconds)
+  const t = LEVELS[level]
+  const row = (p: number) => t[p]![h0]! + (t[p]![h1]! - t[p]![h0]!) * wh
+  return row(p0) + (row(p1) - row(p0)) * wp
 }
 
-const LEVELS: Record<Level, [seconds: number, cosine: number][]> = {
-  lenient: [[0.6, 0.0775], [0.9, 0.14], [1.5, 0.195], [3, 0.2275]],
-  balanced: [[0.6, 0.25], [0.9, 0.29], [1.5, 0.3375], [3, 0.37]],
-  strict: [[0.6, 0.37], [0.9, 0.3925], [1.5, 0.415], [3, 0.4425]],
+const LEVELS: { print: number[]; heard: number[] } & Record<Level, number[][]> = {
+  print: [1.5, 3, 6, 12, 24],
+  heard: [0.6, 0.9, 1.5, 3],
+  lenient: [
+    [-0.07, -0.065, -0.05, -0.0325],
+    [0.0025, 0.0275, 0.0825, 0.1075],
+    [0.045, 0.105, 0.135, 0.17],
+    [0.07, 0.1125, 0.2025, 0.255],
+    [0.0875, 0.15, 0.23, 0.2825],
+  ],
+  balanced: [
+    [0.1675, 0.195, 0.2225, 0.245],
+    [0.2, 0.2325, 0.2675, 0.2925],
+    [0.23, 0.27, 0.3125, 0.335],
+    [0.2475, 0.295, 0.34, 0.37],
+    [0.26, 0.3125, 0.36, 0.3925],
+  ],
+  strict: [
+    [0.335, 0.35, 0.365, 0.38],
+    [0.3475, 0.365, 0.385, 0.405],
+    [0.3625, 0.3825, 0.4075, 0.4275],
+    [0.3725, 0.395, 0.4225, 0.445],
+    [0.38, 0.405, 0.4325, 0.455],
+  ],
 }
 
 // a voice from 16 kHz audio: Timbre on 1.5 s windows, half overlapping
