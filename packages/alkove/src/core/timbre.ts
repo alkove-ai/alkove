@@ -139,11 +139,11 @@ function unpackWindows(text: string): Center[] {
 
 export type Level = 'lenient' | 'balanced' | 'strict'
 
-// cosine of `id` over which two windows are the same voice, by window length (provisional: from the 1.5 s and word + 0.5 s points measured)
-const LEVELS: Record<Level, [short: number, long: number]> = {
-  lenient: [0.15, 0.2],
-  balanced: [0.25, 0.3],
-  strict: [0.35, 0.4],
+// cosine of `id`, a ~12 s print against `seconds` of voice (Common Voice tests): 1 % false rejects, EER, 1 % false accepts; a shorter print rejects more
+const LEVELS: Record<Level, [seconds: number, cosine: number][]> = {
+  lenient: [[0.6, 0.0775], [0.9, 0.14], [1.5, 0.195], [3, 0.2275]],
+  balanced: [[0.6, 0.25], [0.9, 0.29], [1.5, 0.3375], [3, 0.37]],
+  strict: [[0.6, 0.37], [0.9, 0.3925], [1.5, 0.415], [3, 0.4425]],
 }
 
 // a voice from 16 kHz audio: Timbre on 1.5 s windows, half overlapping
@@ -170,8 +170,11 @@ export class Timbre {
 
   static verify(a: Voiceprint, b: Voiceprint, { level = 'balanced', seconds = 1.5 }: { level?: Level; seconds?: number } = {}): { same: boolean; score: number } {
     const score = a.similarity(b)
-    const [short, long] = LEVELS[level]
-    return { same: score >= (seconds < 1.5 ? short : long), score }
+    const pts = LEVELS[level]
+    const s = Math.min(Math.max(seconds, pts[0]![0]), pts[pts.length - 1]![0])
+    const i = Math.max(1, pts.findIndex(([x]) => x >= s))
+    const [[s0, c0], [s1, c1]] = [pts[i - 1]!, pts[i]!]
+    return { same: score >= c0 + ((c1 - c0) * (s - s0)) / (s1 - s0), score }
   }
 
   static identify(voice: Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level } = {}): { who: string; score: number } | null {
