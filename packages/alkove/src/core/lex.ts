@@ -81,12 +81,17 @@ export class Lex {
         .sort((a, b) => b.p - a.p)
         .slice(0, max)
     }
-    return out
-      .map((v) => {
-        const ids = v.ids.filter((x, i, a) => i === 0 || x !== a[i - 1])
-        return { ids, ipa: toIpa(ids), p: v.p }
-      })
-      .filter((v) => v.ids.length)
+    // two beams can differ only by a repeated phoneme: once folded they are the same pronunciation
+    const merged = new Map<string, Pronunciation>()
+    for (const v of out) {
+      const ids = v.ids.filter((x, i, a) => i === 0 || x !== a[i - 1])
+      if (!ids.length) continue
+      const key = ids.join(',')
+      const seen = merged.get(key)
+      if (seen) seen.p += v.p
+      else merged.set(key, { ids, ipa: toIpa(ids), p: v.p })
+    }
+    return [...merged.values()].sort((a, b) => b.p - a.p)
   }
 
   // 0 = same sound; a substitution inside a class of interchangeable phonemes costs half
