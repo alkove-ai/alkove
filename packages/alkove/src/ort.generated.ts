@@ -2,6 +2,6 @@
 export const ORT_WASM = {
   name: 'alkove-ort',
   file: 'alkove-ort.wasm',
-  bytes: 6778149,
-  sha256: '21e4d1bc2219e579c31d64382816d0a05d5ca63a77d396b57a553e8c5377b458',
+  bytes: 7567743,
+  sha256: 'd7f78dff133bf43fd99854556bd74b914e998d6f50a0059131fc9ef39fdaf9ea',
 }
