@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alkove call input</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; color: #111; background: #fff; }
+  button { font: inherit; padding: 0.4rem 1rem; }
+  pre { background: #f4f4f4; padding: 0.5rem; white-space: pre-wrap; }
+</style>
+<h1>Call input</h1>
+<p>Wear headphones: you hear what would go out on a call.</p>
+<button id="start">Start</button>
+<label><input type="checkbox" id="on" checked> Alkove on</label>
+<pre id="log"></pre>
+<script type="module">
+  import { Alkove, createCallInput } from '../packages/alkove/dist/index.js'
+
+  Alkove.configure({ modelBaseUrl: '../models/' })
+  const log = (...a) => (document.getElementById('log').textContent += a.join(' ') + '\n')
+
+  document.getElementById('start').onclick = async () => {
+    const ctx = new AudioContext()
+    const input = await createCallInput({ audioContext: ctx, learn: true })
+    input.on('mode', ({ mode, reason }) => log('mode', mode, reason ?? ''))
+    input.on('speechstart', ({ start }) => log('speech from', start.toFixed(2), 's'))
+    input.on('learn', ({ progress }) => log('print', Math.round(progress * 100), '%'))
+    ctx.createMediaStreamSource(new MediaStream([input.track])).connect(ctx.destination)
+    document.getElementById('on').onchange = (e) => input.setEnabled(e.target.checked)
+  }
+</script>

@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alkove wake then voice</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; color: #111; background: #fff; }
+  button, input { font: inherit; padding: 0.4rem; }
+  pre { background: #f4f4f4; padding: 0.5rem; white-space: pre-wrap; }
+</style>
+<h1>Wake word, then the next sentence</h1>
+<p><input id="word" value="Camille"> <select id="lang"><option>fr</option><option>en</option><option>es</option><option>it</option><option>pt</option><option>ca</option><option>ro</option></select> <button id="start">Start</button></p>
+<pre id="log"></pre>
+<script type="module">
+  import { Alkove, createAgentInput, createWakeListener, Spot } from '../packages/alkove/dist/index.js'
+
+  Alkove.configure({ modelBaseUrl: '../models/' })
+  const log = (...a) => (document.getElementById('log').textContent += a.join(' ') + '\n')
+
+  document.getElementById('start').onclick = async () => {
+    const ctx = new AudioContext()
+    const word = await Spot.compile(document.getElementById('word').value, { lang: document.getElementById('lang').value })
+    for (const w of word.warnings) log('warning:', w.message)
+    const wake = await createWakeListener({ audioContext: ctx, words: [word] })
+    const agent = await createAgentInput({ audioContext: ctx })
+    let armedUntil = 0
+    wake.on('wake', ({ word, score }) => {
+      log(`heard « ${word} » (${score.toFixed(2)}), listening…`)
+      armedUntil = agent.now() + 8
+    })
+    // the agent input runs all along; only the sentence that follows the word is kept
+    agent.on('utterance', ({ pcm, start, end }) => {
+      if (start > armedUntil) return
+      armedUntil = 0
+      log(`sentence ${start.toFixed(2)}–${end.toFixed(2)} s: ${(pcm.byteLength / 4 / 16000).toFixed(1)} s of audio to transcribe`)
+    })
+    log('say the word, then a sentence')
+  }
+</script>
