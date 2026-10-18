@@ -1,5 +1,6 @@
 export { Alkove, Lex, Spot, Timbre, VoiceprintLearner } from './api'
-export type { ProcessInput, Usage, UsageOptions } from './api'
+export type { Enrollment, ProcessInput, Usage, UsageOptions } from './api'
+export type { Take } from './core/spot/enroll'
 export type { SpeechParams } from './core/cue'
 export type { Pronunciation, Warning } from './core/lex'
 export type { Context, Thresholds, WakeEvent, Word, WordJSON } from './core/spot/spot'

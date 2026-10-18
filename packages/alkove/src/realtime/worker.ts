@@ -5,6 +5,7 @@ import { Cue } from '../core/cue'
 import { WasmEngine } from '../core/engine'
 import { Focus } from '../core/focus'
 import { LEARN, rms, VoiceprintLearner } from '../core/learner'
+import { ENROLL, Enroller } from '../core/spot/enroll'
 import { type Context, Spot, Spotter, type WordJSON, wordOf } from '../core/spot/spot'
 import { dot, Voiceprint, type VoiceprintJSON } from '../core/timbre'
 import { Resampler } from '../dsp/resample'
@@ -46,7 +47,8 @@ export interface OutputOptions {
 }
 
 export interface RealtimeOptions {
-  pipeline: 'call' | 'agent' | 'wake'
+  pipeline: 'call' | 'agent' | 'wake' | 'enroll'
+  enroll?: { word: WordJSON; takes: number }
   chain?: ChainOptions
   words?: WordJSON[]
   context?: Context
@@ -111,6 +113,7 @@ interface Realtime {
   history: { buf: Float32Array; pos: number; total: number } | null
   utterance: { parts: Float32Array[]; start: number } | null
   hops: number
+  enroll: { net: Spot; enroller: Enroller; tape: Float32Array; audio: Float32Array[]; sent: boolean } | null
 }
 
 const inputs = new Map<number, Realtime>()
@@ -125,7 +128,7 @@ function emitTo(r: Realtime, e: Record<string, unknown>): void {
 
 function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out: MessagePort | null): Realtime {
   const e = engine!
-  const chain = opts.pipeline === 'wake' ? null : new Chain(new Focus(e.stream('focus')), new Cue(e.stream('cue')), opts.chain)
+  const chain = opts.pipeline === 'wake' || opts.pipeline === 'enroll' ? null : new Chain(new Focus(e.stream('focus')), new Cue(e.stream('cue')), opts.chain)
   const o = opts.output
   const r: Realtime = {
     id,
@@ -147,6 +150,11 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
     history: o?.utterance ? { buf: new Float32Array(4 * RATE), pos: 0, total: 0 } : null,
     utterance: null,
     hops: 0,
+    enroll: null,
+  }
+  if (opts.enroll) {
+    const w = wordOf(opts.enroll.word)
+    r.enroll = { net: new Spot(e.stream('spot')), enroller: new Enroller(w.text, w.lang, w.phonemes, 'raw', { ...ENROLL, takes: opts.enroll.takes }), tape: new Float32Array(TAPE), audio: [], sent: false }
   }
   if (o?.audio) r.audio = new Packer(o, (chunk) => send(r, { type: 'audio', pcm: chunk }, [chunk]))
   if (opts.words?.length) setWords(r, opts.words, opts.context ?? 'anywhere')
@@ -186,6 +194,37 @@ function feedSpot(r: Realtime, pcm: Float32Array): void {
   })
 }
 
+// the last seconds of the mic, to cut the takes out of for the voiceprint
+const TAPE = 8 * RATE
+
+function feedEnroll(r: Realtime, hop: Float32Array): void {
+  const en = r.enroll!
+  const pos = (r.hops * HOP) % TAPE
+  en.tape.set(hop, pos)
+  en.net.push(hop, (f) =>
+    en.enroller.frame(f, (take) => {
+      emitTo(r, { type: 'take', ...take })
+      if (!take.ok) return
+      const now = (r.hops + 1) * HOP
+      const from = Math.max(now - TAPE + HOP, Math.round(take.start * RATE))
+      const to = Math.min(now, Math.round(take.end * RATE))
+      const cut = new Float32Array(Math.max(0, to - from))
+      for (let i = 0; i < cut.length; i++) cut[i] = en.tape[(from + i) % TAPE]!
+      en.audio.push(cut)
+    }),
+  )
+  if (en.enroller.done && !en.sent) {
+    en.sent = true
+    try {
+      const { word, takes, warnings } = en.enroller.result()
+      const audio = concat(en.audio)
+      emitTo(r, { type: 'enrolled', word: word.toJSON(), takes, warnings, audio })
+    } catch (err) {
+      emitTo(r, { type: 'enrolled', error: String((err as Error).message) })
+    }
+  }
+}
+
 function tapLearn(r: Realtime, hop: Float32Array): void {
   const l = r.learn!
   if (!r.chain!.speaking) {
@@ -217,6 +256,7 @@ function onHop(r: Realtime, buf: ArrayBuffer, port: MessagePort): void {
   if (r.chain) out = r.chain.step(hop, (e) => emitTo(r, e))
   else {
     feedSpot(r, hop)
+    if (r.enroll) feedEnroll(r, hop)
     out = hop
   }
   const ms = performance.now() - t0

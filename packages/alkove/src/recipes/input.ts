@@ -1,6 +1,8 @@
 import type { ChainOptions } from '../core/chain'
 import type { SpeechParams } from '../core/cue'
+import type { Take } from '../core/spot/enroll'
 import { type Context, type WakeEvent, type Word, type WordJSON, wordOf } from '../core/spot/spot'
+import type { Warning } from '../core/lex'
 import { Voiceprint, type VoiceprintJSON } from '../core/timbre'
 import { AlkoveError, type Diag } from '../errors'
 import { Emitter } from '../events'
@@ -30,6 +32,8 @@ export interface InputEvents {
   trace: Record<string, unknown>[]
   audio: ArrayBuffer
   utterance: { pcm: ArrayBuffer; start: number; end: number }
+  take: Take
+  enrolled: { word?: WordJSON; takes?: Take[]; warnings?: Warning[]; audio?: Float32Array; error?: string }
 }
 
 export interface CommonOptions {
@@ -295,6 +299,16 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       case 'wake':
         this.emit('wake', e as unknown as WakeEvent)
         break
+      case 'take': {
+        const { type: _, ...take } = e
+        this.emit('take', take as unknown as Take)
+        break
+      }
+      case 'enrolled': {
+        const { type: _, ...r } = e
+        this.emit('enrolled', r)
+        break
+      }
       case 'heard':
         this.emit('heard', { speech: e.speech, scores: e.scores })
         break
@@ -729,4 +743,41 @@ export function createWakeListener(opts: WakeOptions): Promise<WakeListener> {
   return new WakeListener(opts).start()
 }
 
-export type { AgentInput, CallInput, WakeListener }
+// ---- word enrollment: Spot on the raw mic, the takes counted in the worker
+
+class EnrollInput extends AlkoveInput {
+  protected readonly kind = 'wake' as const
+
+  constructor(
+    protected opts: CommonOptions & FocusOptions,
+    private word: WordJSON,
+    private takes: number,
+  ) {
+    super(opts)
+  }
+
+  protected models(): ('focus' | 'cue' | 'spot')[] {
+    return ['spot']
+  }
+
+  protected connectOutput(): void {
+    const mute = this.ctx.createGain()
+    mute.gain.value = 0
+    this.node.connect(mute).connect(this.ctx.destination)
+  }
+
+  protected realtimeOptions(): RealtimeOptions {
+    return { pipeline: 'enroll', enroll: { word: this.word, takes: this.takes } }
+  }
+
+  async start(): Promise<this> {
+    await this.open()
+    return this
+  }
+}
+
+export function createEnrollInput(opts: CommonOptions, word: WordJSON, takes: number): Promise<EnrollInput> {
+  return new EnrollInput(opts, word, takes).start()
+}
+
+export type { AgentInput, CallInput, EnrollInput, WakeListener }
