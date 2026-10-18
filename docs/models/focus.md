@@ -82,10 +82,7 @@ Measured with the published file. The model card gives the full tables, with ope
 | Same with DEMAND noise at 10 dB: SI-SDR, with a print | 5.0 dB | raw 2.4 dB |
 | AMI meetings, headset microphone (Whisper large-v3 turbo): word error rate, with a print | 16.1 % (no print: 16.7 %) | raw headset 20.8 % |
 | AMI: words of other voices that get through, per minute, with a print | 0.5 | raw headset 17.0 |
-| VoiceBank+DEMAND, noise only, no print: STOI, SI-SDR, DNSMOS P.835 | 0.895, 12.1 dB, 3.04 | noisy input: 0.921, 8.4 dB, 2.70 |
 | DNS Challenge 3 blind, real recordings: DNSMOS P.808, overall | 3.36, 2.70 | noisy input: 2.96, 2.33 |
-
-What the card also says, plainly: on the synthetic "another voice" scenes, VoxLock, a model 33 times larger, does better. On noise alone, Focus removes about as much noise as the best denoiser but changes the voice more: if you only need denoising, DeepFilterNet 3 or GTCRN do it better. Focus is made for keeping one person and removing the others.
 
 ## Limitations
 
@@ -97,6 +94,10 @@ What the card also says, plainly: on the synthetic "another voice" scenes, VoxLo
 - Built for speech; it is not meant to process music.
 
 Out of scope: distant microphones (conference rooms, smart speakers across the room), keeping several speakers at once, music or high-fidelity listening, and isolating someone's voice in a recording without their consent.
+
+## License
+
+Apache-2.0, for the weights. Focus started from the GTCRN checkpoint trained on DNS3 ([Rong et al., ICASSP 2024](https://github.com/Xiaobin-Rong/gtcrn), MIT): its license ships with the model, in `NOTICE`.
 
 ## Running it without the SDK
 
