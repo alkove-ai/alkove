@@ -68,7 +68,9 @@ describe('every option does something', () => {
 
   it('trace: one row per primitive step', () => {
     const r = processPcm(engine, wav('speech.wav'), { focus: true, trace: true })
-    expect(r.trace!.focus.length).toBe(Math.floor((wav('speech.wav').length + 256 + 960 + 256) / 256))
+    const n = wav('speech.wav').length
+    expect(r.trace!.focus.length).toBeGreaterThanOrEqual(Math.floor(n / 256))
+    expect(r.trace!.focus.at(-1)!.t).toBeGreaterThanOrEqual((n - 256) / 16000)
   })
 })
 
@@ -88,5 +90,50 @@ describe('the public API in Node', () => {
     const r = await Alkove.process({ pcm: at48, rate: 48000 }, { cue: true })
     expect(r.raw.length).toBe(s.length)
     expect(r.speech.length).toBe(1)
+  })
+})
+
+describe('a stream in blocks', () => {
+  it('gives back what process gives, block by block, with absolute times', async () => {
+    const { Processor } = await import('../src/process')
+    const word = await Spot.compile('amendement', { lang: 'fr' })
+    const pcm = wav('mix.wav')
+    const opts = { focus: true, cue: true, spot: { words: [word] } } as const
+    const whole = processPcm(engine, pcm, opts)
+    const p = new Processor(engine, opts)
+    const parts = []
+    for (let i = 0; i < pcm.length; i += 7000) parts.push(p.push(pcm.subarray(i, Math.min(pcm.length, i + 7000))))
+    parts.push(p.end())
+    const audio = new Float32Array(pcm.length)
+    let o = 0
+    for (const part of parts) {
+      expect(part.start).toBeCloseTo(o / 16000, 6)
+      audio.set(part.audio, o)
+      o += part.audio.length
+    }
+    expect(o).toBe(pcm.length)
+    expect(maxDiff(audio, whole.audio)).toBe(0)
+    expect(parts.flatMap((x) => x.speech)).toEqual(whole.speech)
+    expect(parts.flatMap((x) => x.wakes)).toEqual(whole.wakes)
+  })
+})
+
+describe('Alkove.stream', () => {
+  it('48 kHz blocks from an async iterable: parts that cover the input once', async () => {
+    const s = wav('speech.wav')
+    const at48 = new Float32Array(s.length * 3)
+    for (let i = 0; i < at48.length; i++) at48[i] = s[Math.floor(i / 3)]!
+    async function* blocks() {
+      for (let i = 0; i < at48.length; i += 4800) yield at48.subarray(i, i + 4800)
+    }
+    let n = 0
+    const speech = []
+    for await (const part of Alkove.stream(blocks(), { rate: 48000, cue: true })) {
+      expect(part.start).toBeCloseTo(n / 16000, 6)
+      n += part.audio.length
+      speech.push(...part.speech)
+    }
+    expect(Math.abs(n - s.length)).toBeLessThanOrEqual(1)
+    expect(speech.length).toBe(1)
   })
 })

@@ -467,6 +467,9 @@ function call({ id, method, args }: Rpc): unknown {
     case 'phonemize':
     case 'compile':
     case 'process':
+    case 'streamOpen':
+    case 'streamPush':
+    case 'streamEnd':
       return (calls[method] as (...a: unknown[]) => unknown)(...args)
     case 'learner': {
       const l = learning.get(args[0])

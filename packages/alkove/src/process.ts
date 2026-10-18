@@ -10,7 +10,7 @@ import { CUE, FOCUS, RATE } from './manifest'
 export interface ProcessOptions {
   focus?: boolean | { voiceprint?: Voiceprint | VoiceprintJSON | string | null; strength?: number }
   cue?: boolean | Partial<SpeechParams>
-  spot?: { words: (Word | WordJSON | string)[]; context?: Context }
+  spot?: { words: readonly (Word | WordJSON | string)[]; context?: Context }
   normalize?: boolean
   trace?: boolean
   onProgress?: (p: { done: number; total: number }) => void
@@ -22,14 +22,30 @@ export interface TraceRow {
   [key: string]: number
 }
 
+export interface Trace {
+  focus: TraceRow[]
+  cue: TraceRow[]
+  spot: TraceRow[]
+}
+
 export interface ProcessResult {
   audio: Float32Array
   raw: Float32Array
   speech: { start: number; end: number }[]
   wakes: WakeEvent[]
   diag: ChainEvent[]
-  trace?: { focus: TraceRow[]; cue: TraceRow[]; spot: TraceRow[] }
+  trace?: Trace
   toWav(which?: 'audio' | 'raw' | 'both'): Uint8Array
+}
+
+// one block of a stream: its audio, and what was found while it went through (times from the stream's start)
+export interface ProcessPart {
+  start: number
+  audio: Float32Array
+  speech: { start: number; end: number }[]
+  wakes: WakeEvent[]
+  diag: ChainEvent[]
+  trace?: Trace
 }
 
 export function printOf(p: Voiceprint | VoiceprintJSON | string | null | undefined): Voiceprint | null {
@@ -38,118 +54,155 @@ export function printOf(p: Voiceprint | VoiceprintJSON | string | null | undefin
   return Voiceprint.fromJSON(p)
 }
 
-const BLOCK = 16000
+// every chosen primitive over 16 kHz audio pushed in blocks, as real time feeds them; the output comes back aligned with the input
+export class Processor {
+  private chain: Chain | null = null
+  private cue: Cue | null = null
+  private tracker: SpeechTracker | null = null
+  private spot: Spot | null = null
+  private spotter: Spotter | null = null
+  private focus: Focus | null = null
+  private shift: number
+  private skip: number
+  private delay: number
+  private pushed = 0
+  private given = 0
+  private open: number | null = null
+  private part: Omit<ProcessPart, 'start' | 'audio'> = { speech: [], wakes: [], diag: [] }
+  private closed = false
 
-// 16 kHz in, every chosen primitive over it in blocks as real time would feed them, delays taken out of the result
-export function processPcm(engine: Engine, pcm: Float32Array, opts: ProcessOptions = {}): ProcessResult {
-  const useFocus = opts.focus !== undefined && opts.focus !== false
-  const focusOpts = typeof opts.focus === 'object' ? opts.focus : {}
-  const speechParams = { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) }
-  const speech: { start: number; end: number }[] = []
-  const wakes: WakeEvent[] = []
-  const diag: ChainEvent[] = []
-  const trace = opts.trace ? { focus: [] as TraceRow[], cue: [] as TraceRow[], spot: [] as TraceRow[] } : undefined
-  const words = opts.spot?.words.map(wordOf) ?? []
-  const spotter = words.length ? new Spotter(words, opts.spot?.context ?? 'anywhere') : null
-  const spot = spotter ? new Spot(engine.stream('spot')) : null
-  const shift = useFocus ? FOCUS.lag / RATE : 0
-  const onSpot = (pcm16: Float32Array) =>
-    spot!.push(pcm16, (f, step) => {
-      spotter!.frame(f, (e) => wakes.push({ ...e, start: Math.max(0, e.start - shift), end: Math.max(0, e.end - shift) }))
-      if (trace) trace.spot.push({ t: step * 0.03 - shift, speech: f.speech ?? 0, ...Object.fromEntries(spotter!.scores.map((s) => [s.word, s.score])) })
-    })
-  let open: number | null = null
-  const onSpeech = (e: ChainEvent) => {
-    if (e.type === 'speechstart') open = e.start
-    else if (e.type === 'speechend') {
-      speech.push({ start: e.start, end: e.end })
-      open = null
-    } else diag.push(e)
-  }
-
-  let audio: Float32Array
-  const total = pcm.length
-  if (useFocus) {
-    const focus = new Focus(engine.stream('focus'))
-    const cue = new Cue(engine.stream('cue'))
-    const voiceprint = printOf(focusOpts.voiceprint)
-    const chain = new Chain(focus, cue, {
-      gate: false,
-      normalize: opts.normalize ?? false,
-      strength: focusOpts.strength ?? 1,
-      print: voiceprint?.embedding ?? null,
-      speech: speechParams,
-    })
-    if (spot || trace) {
-      chain.onFocus = (hop, t) => {
-        if (spot) onSpot(hop)
-        if (trace) {
+  constructor(
+    engine: Engine,
+    readonly opts: Omit<ProcessOptions, 'onProgress' | 'signal'> = {},
+  ) {
+    const useFocus = opts.focus !== undefined && opts.focus !== false
+    const focusOpts = typeof opts.focus === 'object' ? opts.focus : {}
+    const speech = { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) }
+    const words = opts.spot?.words.map(wordOf) ?? []
+    if (words.length) {
+      this.spotter = new Spotter(words, opts.spot?.context ?? 'anywhere')
+      this.spot = new Spot(engine.stream('spot'))
+    }
+    this.shift = useFocus ? FOCUS.lag / RATE : 0
+    if (useFocus) {
+      this.focus = new Focus(engine.stream('focus'))
+      this.cue = new Cue(engine.stream('cue'))
+      this.chain = new Chain(this.focus, this.cue, {
+        gate: false,
+        normalize: opts.normalize ?? false,
+        strength: focusOpts.strength ?? 1,
+        print: printOf(focusOpts.voiceprint)?.embedding ?? null,
+        speech,
+      })
+      this.chain.onFocus = (hop, t) => {
+        if (this.spot) this.feedSpot(hop)
+        if (opts.trace) {
           let s = 0
           for (const x of hop) s += x * x
-          trace.focus.push({ t: t / RATE - shift, db: +(10 * Math.log10(s / hop.length + 1e-12)).toFixed(2) })
+          this.trace().focus.push({ t: t / RATE - this.shift, db: +(10 * Math.log10(s / hop.length + 1e-12)).toFixed(2) })
         }
       }
+    } else if (opts.cue) {
+      this.cue = new Cue(engine.stream('cue'))
+      this.tracker = new SpeechTracker(speech)
     }
-    const parts: Float32Array[] = []
-    const run = (block: Float32Array) => parts.push(chain.push(block, onSpeech))
-    for (let i = 0; i < total; i += BLOCK) {
-      opts.signal?.throwIfAborted()
-      run(pcm.subarray(i, Math.min(total, i + BLOCK)))
-      opts.onProgress?.({ done: Math.min(total, i + BLOCK), total })
-    }
-    run(new Float32Array(chain.delay + CUE.chunk * 2 + FOCUS.chunk))
-    audio = concat(parts).subarray(chain.delay, chain.delay + total)
-    focus.release()
-    cue.release()
-  } else {
-    audio = pcm
-    if (opts.cue) {
-      const cue = new Cue(engine.stream('cue'))
-      const tracker = new SpeechTracker(speechParams)
-      const feed = (block: Float32Array) =>
-        cue.push(block, (p, k) => {
-          if (trace) trace.cue.push({ t: k * 0.03, speech: p })
-          const e = tracker.push(p, k)
-          if (e) onSpeech(e)
-        })
-      for (let i = 0; i < total; i += BLOCK) {
-        opts.signal?.throwIfAborted()
-        feed(pcm.subarray(i, Math.min(total, i + BLOCK)))
-        opts.onProgress?.({ done: Math.min(total, i + BLOCK), total })
-      }
-      feed(new Float32Array(CUE.chunk * (CUE.lagSteps + 1)))
-      cue.release()
-    }
-    if (spot) {
-      for (let i = 0; i < total; i += BLOCK) {
-        opts.signal?.throwIfAborted()
-        onSpot(pcm.subarray(i, Math.min(total, i + BLOCK)))
-      }
-      onSpot(new Float32Array(480 * 4))
-    }
+    this.delay = this.chain?.delay ?? 0
+    this.skip = this.delay
   }
-  if (open !== null) speech.push({ start: open, end: total / RATE })
-  spot?.release()
-  const raw = pcm
-  return {
-    audio,
-    raw,
-    speech: opts.cue === false ? [] : speech,
-    wakes,
-    diag,
-    trace,
-    toWav(which = 'audio') {
-      return encodeWav(which === 'both' ? [raw, audio] : [which === 'raw' ? raw : audio], RATE)
-    },
+
+  private trace(): Trace {
+    return (this.part.trace ??= { focus: [], cue: [], spot: [] })
+  }
+
+  private onEvent = (e: ChainEvent) => {
+    if (e.type === 'speechstart') this.open = e.start
+    else if (e.type === 'speechend') {
+      if (this.opts.cue !== false) this.part.speech.push({ start: e.start, end: e.end })
+      this.open = null
+    } else this.part.diag.push(e)
+  }
+
+  private feedSpot(pcm: Float32Array): void {
+    this.spot!.push(pcm, (f, step) => {
+      this.spotter!.frame(f, (e) => this.part.wakes.push({ ...e, start: Math.max(0, e.start - this.shift), end: Math.max(0, e.end - this.shift) }))
+      if (this.opts.trace) this.trace().spot.push({ t: step * 0.03 - this.shift, speech: f.speech ?? 0, ...Object.fromEntries(this.spotter!.scores.map((s) => [s.word, s.score])) })
+    })
+  }
+
+  private run(pcm: Float32Array): Float32Array {
+    if (this.chain) return this.chain.push(pcm, this.onEvent)
+    if (this.cue)
+      this.cue.push(pcm, (p, k) => {
+        if (this.opts.trace) this.trace().cue.push({ t: k * 0.03, speech: p })
+        const e = this.tracker!.push(p, k)
+        if (e) this.onEvent(e)
+      })
+    if (this.spot) this.feedSpot(pcm)
+    return pcm
+  }
+
+  private take(out: Float32Array, final: boolean): ProcessPart {
+    const cut = Math.min(this.skip, out.length)
+    this.skip -= cut
+    let audio = out.subarray(cut)
+    if (final) audio = audio.subarray(0, Math.max(0, this.pushed - this.given))
+    const part: ProcessPart = { start: this.given / RATE, audio: audio.slice(), ...this.part }
+    this.given += audio.length
+    this.part = { speech: [], wakes: [], diag: [] }
+    return part
+  }
+
+  push(pcm: Float32Array): ProcessPart {
+    if (this.closed) throw new Error('push after end')
+    this.pushed += pcm.length
+    return this.take(this.run(pcm), false)
+  }
+
+  // the samples still inside the primitives come out, and the speech still open closes at the end
+  end(): ProcessPart {
+    this.closed = true
+    const tail = this.run(new Float32Array(this.delay + CUE.chunk * (CUE.lagSteps + 2) + FOCUS.chunk + 480 * 4))
+    if (this.open !== null && this.opts.cue !== false && (this.chain || this.cue)) this.part.speech.push({ start: this.open, end: this.pushed / RATE })
+    const part = this.take(tail, true)
+    for (const n of [this.focus, this.cue, this.spot]) n?.release()
+    return part
   }
 }
 
-function concat(parts: Float32Array[]): Float32Array {
-  const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
-  let o = 0
-  for (const p of parts) {
-    out.set(p, o)
-    o += p.length
+const BLOCK = 16000
+
+export function processPcm(engine: Engine, pcm: Float32Array, opts: ProcessOptions = {}): ProcessResult {
+  const { onProgress, signal, ...rest } = opts
+  const p = new Processor(engine, rest)
+  const parts: ProcessPart[] = []
+  for (let i = 0; i < pcm.length; i += BLOCK) {
+    signal?.throwIfAborted()
+    parts.push(p.push(pcm.subarray(i, Math.min(pcm.length, i + BLOCK))))
+    onProgress?.({ done: Math.min(pcm.length, i + BLOCK), total: pcm.length })
   }
-  return out
+  parts.push(p.end())
+  const audio = new Float32Array(pcm.length)
+  let o = 0
+  for (const part of parts) {
+    audio.set(part.audio.subarray(0, audio.length - o), o)
+    o += part.audio.length
+  }
+  const raw = pcm
+  const merged = parts.reduce<Omit<ProcessPart, 'start' | 'audio'>>(
+    (m, x) => ({
+      speech: [...m.speech, ...x.speech],
+      wakes: [...m.wakes, ...x.wakes],
+      diag: [...m.diag, ...x.diag],
+      trace: x.trace || m.trace ? { focus: [...(m.trace?.focus ?? []), ...(x.trace?.focus ?? [])], cue: [...(m.trace?.cue ?? []), ...(x.trace?.cue ?? [])], spot: [...(m.trace?.spot ?? []), ...(x.trace?.spot ?? [])] } : undefined,
+    }),
+    { speech: [], wakes: [], diag: [] },
+  )
+  return {
+    audio: rest.focus ? audio : pcm,
+    raw,
+    ...merged,
+    toWav(which = 'audio') {
+      return encodeWav(which === 'both' ? [raw, this.audio] : [which === 'raw' ? raw : this.audio], RATE)
+    },
+  }
 }

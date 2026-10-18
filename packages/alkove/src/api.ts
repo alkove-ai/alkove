@@ -11,7 +11,7 @@ import { decodeWav, encodeWav } from './dsp/wav'
 import { AlkoveError } from './errors'
 import { configure, isCached, onDiag, type Progress } from './loader'
 import { type Lang, type ModelName, MODELS, ORT_WASM, RATE } from './manifest'
-import type { ProcessOptions, ProcessResult } from './process'
+import type { ProcessOptions, ProcessPart, ProcessResult } from './process'
 import { micPermission, supported } from './recipes/mic'
 import type { CallName } from './runtime/calls'
 import { Host } from './runtime/host'
@@ -77,6 +77,7 @@ function mono(buf: AudioBuffer): Float32Array {
 
 export const Alkove = {
   configure,
+  stream,
   supported,
   micPermission,
   onDiag,
@@ -103,20 +104,10 @@ export const Alkove = {
   // a file, faster than real time, in the background worker: the same output as the real time for the same 16 kHz audio
   async process(input: ProcessInput, opts: ProcessOptions = {}): Promise<ProcessResult> {
     const pcm = await decode(input)
-    const names: ModelName[] = []
-    if (opts.focus) names.push('focus', 'cue')
-    else if (opts.cue) names.push('cue')
-    if (opts.spot?.words.length) names.push('spot')
-    const { onProgress, signal, ...rest } = opts
-    const wire = {
-      ...rest,
-      focus: typeof opts.focus === 'object' ? { ...opts.focus, voiceprint: opts.focus.voiceprint instanceof Voiceprint ? opts.focus.voiceprint.toJSON() : opts.focus.voiceprint } : opts.focus,
-      spot: opts.spot ? { ...opts.spot, words: opts.spot.words.map((w) => wordOf(w).toJSON()) } : undefined,
-    }
-    signal?.throwIfAborted()
-    const b = await backend(names)
-    const r = await b.call<Omit<ProcessResult, 'toWav'>>('process', [pcm, wire])
-    onProgress?.({ done: pcm.length, total: pcm.length })
+    opts.signal?.throwIfAborted()
+    const b = await backend(modelsOf(opts))
+    const r = await b.call<Omit<ProcessResult, 'toWav'>>('process', [pcm, wireOf(opts)])
+    opts.onProgress?.({ done: pcm.length, total: pcm.length })
     return {
       ...r,
       toWav(which = 'audio') {
@@ -124,6 +115,63 @@ export const Alkove = {
       },
     }
   },
+}
+
+function modelsOf(opts: ProcessOptions): ModelName[] {
+  const names: ModelName[] = []
+  if (opts.focus) names.push('focus', 'cue')
+  else if (opts.cue) names.push('cue')
+  if (opts.spot?.words.length) names.push('spot')
+  return names
+}
+
+// what crosses to the worker: words and prints as JSON
+function wireOf(opts: ProcessOptions) {
+  const { onProgress: _p, signal: _s, ...rest } = opts
+  return {
+    ...rest,
+    focus: typeof opts.focus === 'object' ? { ...opts.focus, voiceprint: opts.focus.voiceprint instanceof Voiceprint ? opts.focus.voiceprint.toJSON() : opts.focus.voiceprint } : opts.focus,
+    spot: opts.spot ? { ...opts.spot, words: opts.spot.words.map((w) => wordOf(w).toJSON()) } : undefined,
+  }
+}
+
+export type StreamSource = AsyncIterable<Float32Array> | ReadableStream<Float32Array>
+
+// long files (an hour) without keeping them in memory: blocks in, parts out, the same as process() on the whole
+async function* stream(source: StreamSource, opts: ProcessOptions & { rate?: number } = {}): AsyncGenerator<ProcessPart> {
+  const b = await backend(modelsOf(opts))
+  const id = await b.call<number>('streamOpen', [wireOf(opts)])
+  const rate = opts.rate ?? RATE
+  const resampler = new Resampler(rate, RATE)
+  const lead = rate === RATE ? 0 : Math.round(Resampler.HALF / (rate / RATE))
+  let skip = lead
+  const iter: AsyncIterable<Float32Array> = Symbol.asyncIterator in source ? (source as AsyncIterable<Float32Array>) : readable(source as ReadableStream<Float32Array>)
+  try {
+    for await (const chunk of iter) {
+      opts.signal?.throwIfAborted()
+      const out: number[] = []
+      resampler.push(chunk, (x) => (skip > 0 ? skip-- : out.push(x)))
+      if (out.length) yield await b.call<ProcessPart>('streamPush', [id, Float32Array.from(out)])
+    }
+    const tail: number[] = []
+    if (lead) resampler.push(new Float32Array(Resampler.HALF * 2 + 8), (x) => (skip > 0 ? skip-- : tail.push(x)))
+    if (tail.length) yield await b.call<ProcessPart>('streamPush', [id, Float32Array.from(tail.slice(0, lead))])
+  } finally {
+    yield await b.call<ProcessPart>('streamEnd', [id])
+  }
+}
+
+async function* readable(s: ReadableStream<Float32Array>): AsyncIterable<Float32Array> {
+  const reader = s.getReader()
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return
+      yield value
+    }
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 export class Timbre {

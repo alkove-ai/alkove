@@ -712,7 +712,7 @@ export function createAgentInput(opts: AgentOptions = {}): Promise<AgentInput> {
 // ---- wake word: Spot alone on the raw mic
 
 export interface WakeOptions extends CommonOptions {
-  words: (Word | WordJSON | string)[]
+  words: readonly (Word | WordJSON | string)[]
   context?: Context
   // only this voice wakes: Timbre on the word + 0.5 s once Spot heard it (+0.5 s of latency)
   onlyMyVoice?: Voiceprint | VoiceprintJSON | string | null
