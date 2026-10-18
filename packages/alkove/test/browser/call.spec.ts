@@ -4,6 +4,8 @@ import { align, expect, fromB64, locate, open, reference, residualDb, SECONDS, S
 const CHAIN = 256 + 1600
 // a MediaStream hop (destination to source) varies from one connection to the next, by up to ~10 ms in Chromium
 const HOP_SPREAD_MS = 12
+// Cue's and Spot's frame (CUE.chunk, SPOT.chunk)
+const FRAME = 480 / 16000
 
 test.describe('createCallInput', () => {
   test('on getUserMedia with a fake microphone: focus, speech and the word where the file has them, every loop', async ({ page, origin, browserName }) => {
@@ -24,18 +26,21 @@ test.describe('createCallInput', () => {
       const ctx = new AudioContext({ sampleRate: 48000 })
       const input = await lib.sdk.createCallInput({ audioContext: ctx })
       const log = lib.watch(input)
+      const mic = await lib.record(ctx, got!.getAudioTracks()[0])
       const wakes: any[] = []
       input.spot([word]).on('wake', (w: any) => wakes.push(lib.plain(w)))
       await lib.until(() => input.mode === 'focus', 20000, 'focus mode')
       const recStart = input.now()
-      const recorded = input.record(7)
+      const toInput = ctx.currentTime - recStart
+      const recorded = input.record(8)
       const rec = await lib.record(ctx, input.track)
       const { left, right } = await lib.stereo(await recorded)
       const proc = await lib.sdk.Alkove.process({ pcm: left, rate: 16000 }, { focus: true, normalize: true })
       await lib.until(() => input.now() > 2 * 5.772 + 1.5, 30000, 'two loops of the file')
       const out = rec.stop()
+      const micPcm = mic.stop()
       input.dispose()
-      return { asked, settings: got!.getAudioTracks()[0]!.getSettings(), state: got!.getAudioTracks()[0]!.readyState, ctxState: ctx.state, log, wakes, latency: input.latency, recStart, left: lib.b64(left), right: lib.b64(right), proc: lib.b64(proc.audio), out: lib.b64(out) }
+      return { asked, settings: got!.getAudioTracks()[0]!.getSettings(), state: got!.getAudioTracks()[0]!.readyState, ctxState: ctx.state, log, wakes, latency: input.latency, recStart, toInput, mic: lib.b64(micPcm), micAt: mic.startTime, left: lib.b64(left), right: lib.b64(right), proc: lib.b64(proc.audio), out: lib.b64(out) }
     })
     // the SDK opened the mic itself, the browser's processing off but echo cancellation; dispose stopped it, not the app's context
     expect(r.asked).toHaveLength(1)
@@ -62,11 +67,19 @@ test.describe('createCallInput', () => {
     expect(offset).toBeLessThan(1)
     expect(Math.abs(starts[0] - offset - ref.speech[0].start)).toBeLessThanOrEqual(0.04)
     expect(Math.abs(ends[0] - offset - ref.speech[0].end)).toBeLessThanOrEqual(0.04)
-    // the next loop one file later: the events' 16 kHz clock runs at the mic's pace
-    for (const x of [starts, ends, words]) expect(Math.abs(x[1] - x[0] - SECONDS)).toBeLessThanOrEqual(0.04)
+    // Chromium's fake mic loops a little later than the file (16 ms here): the loop measured on the track itself, in the context's clock
+    const at48 = Math.round((starts[0] + 0.1 + r.toInput - r.micAt) * 48000)
+    const loop48 = align(fromB64(r.mic), fromB64(r.mic), at48, 24000, Math.round(SECONDS * 48000), Math.round((SECONDS + 0.05) * 48000)).lag
+    // the mic the worker got loops the same, to the 16 kHz sample: no block dropped or doubled between the track and the worker
+    const left = fromB64(r.left)
+    const at16 = Math.round((starts[0] + 0.1 - r.recStart) * 16000)
+    const loop = align(left, left, at16, 8000, Math.round(SECONDS * 16000), Math.round((SECONDS + 0.05) * 16000))
+    expect(loop.corr).toBeGreaterThan(0.99)
+    expect(Math.abs(3 * loop.lag - loop48)).toBeLessThanOrEqual(3)
+    // the events one loop later: each lands on the frame its score crosses a threshold on, the grid slides along the loop and the score there varies a little, a frame each
+    for (const x of [starts, ends, words]) expect(Math.abs(x[1] - x[0] - loop.lag / 16000)).toBeLessThanOrEqual(2 * FRAME + 1e-6)
 
     // input.record(): the output is Alkove.process of the mic the worker got (WebRTC's echo canceller ran on it), CHAIN samples later, where the gate is open
-    const left = fromB64(r.left)
     const right = fromB64(r.right)
     const proc = fromB64(r.proc)
     const from = Math.round((starts[0] - r.recStart + 0.15) * 16000)
