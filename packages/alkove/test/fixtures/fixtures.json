@@ -1,0 +1,22 @@
+{
+ "speech": {
+  "text": "Cet amendement porte sur la composition du Haut conseil.",
+  "lang": "fr",
+  "lead": 0.5,
+  "seconds": 5.772
+ },
+ "enroll": {
+  "text": "Le dernier constat concerne les inégalités territoriales et sociales en matière de santé.",
+  "lang": "fr",
+  "same_voice_as": "speech"
+ },
+ "mix": {
+  "voice": "speech",
+  "other": "Monsieur le ministre, ce n’est certainement pas vous que j’accablerais.",
+  "other_from": 1.0,
+  "other_db": -6,
+  "noise": "pink, generated",
+  "noise_db": -10
+ },
+ "reference": "onnxruntime (Python, CPU, 1 thread) on the published models, one step per call from a zero state"
+}

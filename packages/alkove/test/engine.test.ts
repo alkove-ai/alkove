@@ -33,7 +33,7 @@ describe('engine against onnxruntime-web 1.30.0', () => {
         binding.f32('audio').set(audio)
         binding.run()
         for (const o of ref.outputNames.filter((n) => n !== 'next_state')) worst = Math.max(worst, maxDiff(binding.f32(o), out[o]!.data as Float32Array))
-        state = out.next_state!.data as Float32Array
+        state = out.next_state!.data as Float32Array<ArrayBuffer>
         worst = Math.max(worst, maxDiff(binding.f32('state'), state))
       }
       expect(worst).toBe(0)

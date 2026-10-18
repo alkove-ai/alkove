@@ -37,3 +37,12 @@ export const maxDiff = (a: ArrayLike<number>, b: ArrayLike<number>) => {
   for (let i = 0; i < a.length; i++) d = Math.max(d, Math.abs(a[i]! - b[i]!))
   return a.length === b.length ? d : Infinity
 }
+
+import { decodeWav } from '../src/dsp/wav'
+
+export const fixture = (name: string) => readFileSync(join(root, 'test/fixtures', name))
+export const wav = (name: string) => decodeWav(new Uint8Array(fixture(name))).pcm
+export const f32 = (name: string) => {
+  const b = fixture(name)
+  return new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))
+}
