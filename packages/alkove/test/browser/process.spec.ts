@@ -102,8 +102,7 @@ test.describe('Alkove.process in the background worker', () => {
     expect(residualDb(wav, fromB64(r.pcm48.raw), 8000, 64000, 0)).toBeLessThan(-20)
   })
 
-  // SDK defect: Resampler.all rounds its lead to whole output samples, 0.35 sample late at 44.1 kHz (src/dsp/resample.ts, static all)
-  test.fail('a 44.1 kHz AudioBuffer comes back on the same samples, without a sub-sample shift', async ({ page, origin }) => {
+  test('a 44.1 kHz AudioBuffer comes back on the same samples, without a sub-sample shift', async ({ page, origin }) => {
     await open(page, origin)
     const raw = fromB64(
       await page.evaluate(async () => {

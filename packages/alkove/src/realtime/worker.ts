@@ -96,6 +96,8 @@ function encode(pcm: Float32Array, format: 'f32' | 's16'): ArrayBuffer {
 
 interface Realtime {
   id: number
+  port: MessagePort | null
+  closed: boolean
   timer: ReturnType<typeof setInterval>
   opts: RealtimeOptions
   chain: Chain | null
@@ -136,6 +138,8 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
   const o = opts.output
   const r: Realtime = {
     id,
+    port: null,
+    closed: false,
     timer: setInterval(() => flush(r), EVENT_MS),
     opts,
     chain,
@@ -196,9 +200,20 @@ function send(r: Realtime, m: Record<string, unknown>, transfer: Transferable[])
   else post({ ...m, kind: m.type, type: 'pcm', input: r.id }, transfer)
 }
 
+// building a session blocks this worker for hundreds of ms: the worklet goes raw at the same delay meanwhile, instead of starving into an overload
+function stream(r: Realtime, model: 'spot'): Spot {
+  const pause = !engine!.has(model) && r.port
+  if (pause) r.port!.postMessage({ pause: true })
+  try {
+    return new Spot(engine!.stream(model))
+  } finally {
+    if (pause) r.port!.postMessage({ pause: false })
+  }
+}
+
 function setWords(r: Realtime, words: WordJSON[], context: Context): void {
   const list = words.map(wordOf)
-  if (!r.spot) r.spot = { net: new Spot(engine!.stream('spot')), spotter: new Spotter(list, context), shift: r.chain ? FOCUS.lag / RATE : 0 }
+  if (!r.spot) r.spot = { net: stream(r, 'spot'), spotter: new Spotter(list, context), shift: r.chain ? FOCUS.lag / RATE : 0 }
   else r.spot.spotter = new Spotter(list, context)
 }
 
@@ -250,7 +265,7 @@ function startEnroll(r: Realtime, spec: { word: WordJSON; takes: number } | null
   if (!spec) return
   const w = wordOf(spec.word)
   const chain = r.chain ? 'focus' : 'raw'
-  r.enroll = { net: new Spot(engine!.stream('spot')), enroller: new Enroller(w.text, w.lang, w.phonemes, chain, { ...ENROLL, takes: spec.takes }), audio: [], sent: false }
+  r.enroll = { net: stream(r, 'spot'), enroller: new Enroller(w.text, w.lang, w.phonemes, chain, { ...ENROLL, takes: spec.takes }), audio: [], sent: false }
   if (!r.tape) {
     r.tape = new Float32Array(TAPE)
     r.written = 0
@@ -523,6 +538,8 @@ function call({ id, method, args }: Rpc): unknown {
 function dispose(input: number): void {
   const r = inputs.get(input)
   if (r) {
+    r.closed = true
+    r.port?.close()
     clearInterval(r.timer)
     r.spot?.net.release()
     r.enroll?.net.release()
@@ -559,7 +576,10 @@ self.onmessage = async (e: MessageEvent) => {
         const r = inputs.get(m.input)
         const port = m.port as MessagePort
         if (!r) break
+        r.port = port
         port.onmessage = (ev: MessageEvent) => {
+          // hops still on their way when the input was closed land on released sessions
+          if (r.closed) return
           if (ev.data instanceof ArrayBuffer) onHop(r, ev.data, port)
           else if (typeof ev.data?.clock === 'number') r.shift = ev.data.clock / RATE - (r.chain?.time ?? (r.hops * HOP) / RATE)
         }

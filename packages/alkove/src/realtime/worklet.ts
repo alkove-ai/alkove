@@ -27,7 +27,8 @@ class AlkoveProcessor extends AudioWorkletProcessor {
       if (m.type === 'connect') {
         this.worker = m.port as MessagePort
         this.worker.onmessage = (ev: MessageEvent) => {
-          const buf = ev.data as ArrayBuffer
+          if (!(ev.data instanceof ArrayBuffer)) return this.core.pause(!!ev.data?.pause)
+          const buf = ev.data
           this.core.receive(new Float32Array(buf))
           this.pool.push(buf)
         }

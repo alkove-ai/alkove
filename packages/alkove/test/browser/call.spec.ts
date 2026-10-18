@@ -45,7 +45,9 @@ test.describe('createCallInput', () => {
     expect(r.ctxState).toBe('running')
     expect(r.log.filter((e: any) => e.type === 'diag' && e.v.code === 'mic.processed')).toEqual([])
     expect(r.log.find((e: any) => e.type === 'mode').v).toEqual({ mode: 'focus' })
-    expect(r.latency).toBe(149)
+    // the announced delay, plus the queue's debt when the worker was late
+    expect(r.latency).toBeGreaterThanOrEqual(149)
+    expect(r.latency).toBeLessThan(149 + 100)
 
     const starts = r.log.filter((e: any) => e.type === 'speechstart').map((e: any) => e.v.start)
     const ends = r.log.filter((e: any) => e.type === 'speechend').map((e: any) => e.v.end)
@@ -104,8 +106,7 @@ test.describe('createCallInput', () => {
     expect(r.unknown).toBe('AlkoveError mic.not-found')
   })
 
-  // SDK defect: the abort goes through openMic's catch, whose AbortError branch (getUserMedia's own) maps it to mic.busy (src/recipes/mic.ts:63)
-  test.fail('an aborted signal rejects with the signal\'s AbortError', async ({ page, origin, browserName }) => {
+  test('an aborted signal rejects with the signal\'s AbortError', async ({ page, origin, browserName }) => {
     test.skip(browserName !== 'chromium', 'fake devices: Chromium')
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
@@ -113,15 +114,13 @@ test.describe('createCallInput', () => {
       ac.abort()
       return window.lib.sdk.createCallInput({ signal: ac.signal }).then(
         (i: any) => (i.dispose(), 'resolved'),
-        (e: any) => `${e.name} ${e.code ?? ''}`.trim(),
+        (e: any) => (e.name === 'AlkoveError' ? `${e.name} ${e.code}` : e.name),
       )
     })
-    // today: "AlkoveError mic.busy", « the microphone is used by another app »
     expect(r).toBe('AbortError')
   })
 
-  // SDK defect: these diags are emitted inside createCallInput, before the app can call input.on('diag'), and not through Alkove.onDiag either (src/recipes/input.ts:155, 158, 634)
-  test.fail('diags raised while the input is created reach the app: learn.no-far-end, mic.twice, mic.processed', async ({ page, origin, browserName }) => {
+  test('diags raised while the input is created reach the app: learn.no-far-end, mic.twice, mic.processed', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
@@ -210,14 +209,13 @@ test.describe('createCallInput', () => {
     // the output track: the announced delay once the two MediaStream hops (in, out) are taken off
     const hopIn = locate(wavPcm('speech.wav'), fromB64(r.inp), r.inAt, 0.01, 0.15).at - r.inAt
     const outAt = locate(ref.audio, fromB64(r.out), r.outAt + r.latency / 1000, 0.05, 0.3)
-    expect(r.latency).toBe(149)
+    expect(r.latency).toBeGreaterThanOrEqual(149)
     expect(Math.abs((outAt.at - r.outAt - 2 * hopIn) * 1000 - r.latency)).toBeLessThanOrEqual(HOP_SPREAD_MS)
     // close to Alkove.process of the file itself: the same voice, through two resamplers and two MediaStream hops
     expect(outAt.corr).toBeGreaterThan(0.9)
   })
 
-  // SDK defect: input.latency is sent once at connect and never updated, the starvation debt is not in it (src/realtime/worklet.ts:35, src/recipes/input.ts:208)
-  test.fail('input.latency follows the real delay when the worklet starved (call.spot() mid-call blocks the worker)', async ({ page, origin, browserName }) => {
+  test('input.latency follows the real delay when the worklet starved (call.spot() mid-call blocks the worker)', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     const ref = await reference('speech.wav', { focus: true })
     await open(page, origin)
@@ -289,8 +287,7 @@ test.describe('createCallInput', () => {
     expect(Math.abs((outAt.at - r.outAt - 2 * hopIn) * 1000 - r.latency)).toBeLessThanOrEqual(HOP_SPREAD_MS)
   })
 
-  // SDK defect: on an input with no channel (Firefox, a stream with nothing playing) WorkletCore.process returns before the retry check (src/realtime/core.ts, process)
-  test.fail('after an overload, the new try comes 10 s later even on silence', async ({ page, origin, browserName }) => {
+  test('after an overload, the new try comes 10 s later even on silence', async ({ page, origin, browserName }) => {
     test.skip(browserName !== 'firefox', 'only Firefox under Playwright is slow enough, and gives a silent stream no channel')
     await open(page, origin)
     const r: any = await page.evaluate(async () => {

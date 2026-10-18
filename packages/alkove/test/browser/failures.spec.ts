@@ -56,8 +56,7 @@ test.describe('failures', () => {
     expect(Math.abs((outAt.at - r.outAt - 2 * hopIn) * 1000 - r.latency)).toBeLessThanOrEqual(12)
   })
 
-  // SDK defect: the worklet posts its latency only when the models connect, input.latency is 0 while the raw mic already goes out 149 ms late (src/recipes/input.ts:86, src/realtime/worklet.ts:35)
-  test.fail('input.latency is the real delay before the models are in too', async ({ page, origin, browserName }) => {
+  test('input.latency is the real delay before the models are in too', async ({ page, origin, browserName }) => {
     const token = `l${Date.now()}${browserName}`
     await open(page, origin, { modelBaseUrl: `/flaky/${token}/` })
     const latency = await page.evaluate(async () => {
@@ -128,8 +127,7 @@ test.describe('failures', () => {
     expect(s).toEqual({ supported: { worklet: true, simd: false, secure: true }, mode: 'raw', status: 'running' })
   })
 
-  // SDK defect: startModels() decides this synchronously inside createCallInput, its mode event and diag go out before the app can listen (src/recipes/input.ts:236-239)
-  test.fail('without SIMD, the app learns why the input stays raw (mode reason "unsupported", diag engine.unsupported)', async ({ context, origin }) => {
+  test('without SIMD, the app learns why the input stays raw (mode reason "unsupported", diag engine.unsupported)', async ({ context, origin }) => {
     const page = await context.newPage()
     await page.addInitScript(() => (WebAssembly.validate = () => false))
     await open(page, origin)

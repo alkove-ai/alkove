@@ -126,6 +126,13 @@ export class WorkletCore {
   }
 
   // the models are gone for good (engine crashed): raw until a new connect
+  // the worker builds a session: raw at the same delay, then the models again, without counting it as an overload
+  pause(on: boolean): void {
+    if (on) {
+      if (this.mode === 'active') this.mode = 'raw'
+    } else if (this.mode === 'raw' && !this.stopped && !this.retryAt && this.send) this.activate()
+  }
+
   stop(): void {
     this.stopped = true
     this.mode = 'raw'

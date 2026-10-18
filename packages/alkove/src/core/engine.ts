@@ -28,6 +28,10 @@ export class WasmEngine implements Engine {
     private bytes: (model: ModelName) => Uint8Array,
   ) {}
 
+  has(model: ModelName): boolean {
+    return this.sessions.has(model)
+  }
+
   session(model: ModelName): Session {
     let s = this.sessions.get(model)
     if (!s) this.sessions.set(model, (s = this.ort.session(this.bytes(model))))

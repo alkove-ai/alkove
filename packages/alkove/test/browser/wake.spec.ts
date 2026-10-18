@@ -53,8 +53,6 @@ test.describe('createWakeListener', () => {
   })
 
   test('times stay on the input clock after a silent stream (2 s before the file)', async ({ page, origin, browserName }) => {
-    // SDK defect: Firefox gives the worklet no channel on a silent stream, WorkletCore.process returns before sending hops and the worker's clock stops (src/realtime/core.ts, process)
-    test.fail(browserName === 'firefox', 'SDK defect: event times early by the silent time in Firefox')
     const ref = await onRaw('anywhere')
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
