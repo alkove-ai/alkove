@@ -10,7 +10,7 @@ const HOP = FOCUS.chunk
 const RESET_SILENCE = 1 * RATE
 const RESET_EVERY = 30 * RATE
 const RESET_FORCE = 60 * RATE
-// asleep once Focus's output stayed under QUIET for SLEEP_AFTER; woken when the mic rises WAKE_DB over its noise floor
+// asleep once Focus's output stayed under QUIET and the mic near its noise floor for SLEEP_AFTER; woken when the mic rises WAKE_DB over that floor
 const QUIET = 0.005
 const SLEEP_AFTER = 2 * RATE
 const WAKE_DB = 9
@@ -146,7 +146,9 @@ export class Chain {
     this.cueIn.push(this.focusOut, (c) => this.cueFrame(c, emit))
     let peak = 0
     for (let i = 0; i < HOP; i++) peak = Math.max(peak, Math.abs(this.focusOut[i]!))
-    this.quiet = peak < QUIET ? this.quiet + HOP : 0
+    // with a print the output is also quiet while another voice talks: asleep only when the mic too is at its noise floor
+    const voiced = this.micLevel > WAKE_MIN && this.micLevel > this.floor * 10 ** (WAKE_DB / 10)
+    this.quiet = peak < QUIET && !voiced ? this.quiet + HOP : 0
     if (this.opts.sleep && !this.asleep && this.quiet >= SLEEP_AFTER) {
       this.asleep = true
       emit({ type: 'idle', asleep: true, at })
