@@ -1,0 +1,19 @@
+{
+ "model": "alkove-lex-1-preview",
+ "file": "alkove-lex-1-preview.onnx",
+ "bytes": 1775231,
+ "sha256": "9af6466a7def8916a81349c830eb25bd81f20e5307338d5b732a2dac3476defe",
+ "benchmarks": [
+  {
+   "id": "held-out-words",
+   "data": [],
+   "protocol": "300 held-out words across the 7 languages.",
+   "metrics": {
+    "first_right": "first pronunciation right, %"
+   },
+   "results": {
+    "first_right": 86.0
+   }
+  }
+ ]
+}

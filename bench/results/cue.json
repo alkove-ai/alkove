@@ -1,0 +1,89 @@
+{
+ "model": "alkove-cue-1-preview",
+ "file": "alkove-cue-1-preview.onnx",
+ "bytes": 1156915,
+ "sha256": "00a8a49b08653d067dba276a6bd8c3868a06b154d6cb72ef0d7211c3981f340a",
+ "benchmarks": [
+  {
+   "id": "streams-behind-focus",
+   "data": [
+    {
+     "name": "Common Voice French dev",
+     "license": "CC0-1.0"
+    },
+    {
+     "name": "LibriTTS-R dev-clean",
+     "license": "CC-BY-4.0"
+    },
+    {
+     "name": "MUSAN",
+     "license": "CC-BY-4.0"
+    }
+   ],
+   "protocol": "24 test streams of one minute behind alkove-focus: a voice between -45 and -25 dBFS over noise or music, another voice alone in 40 % of the gaps. Cue at 0.5 / 0.1, Silero VAD v6 at 0.65 / 0.5.",
+   "metrics": {
+    "miss": "missed speech, %",
+    "fa": "false starts over the 24 minutes",
+    "open_while_silent_pct": "open during the speaker's silences, %",
+    "onset_vs_silero_ms": "speech onset, ms after Silero"
+   },
+   "results": {
+    "Cue": {
+     "miss": 2.89,
+     "fa": 4,
+     "open_while_silent_pct": 6.4,
+     "onset_vs_silero_ms": 10.0
+    },
+    "Silero VAD v6": {
+     "miss": 2.96,
+     "fa": 4,
+     "open_while_silent_pct": 5.9
+    }
+   }
+  },
+  {
+   "id": "alone-behind-focus",
+   "data": [
+    {
+     "name": "MUSAN",
+     "license": "CC-BY-4.0"
+    }
+   ],
+   "protocol": "Noise, music or TV voices alone behind alkove-focus.",
+   "metrics": {
+    "false_starts_per_min": "false starts per minute",
+    "open_pct": "time open, %"
+   },
+   "results": {
+    "Silero VAD v6": {
+     "noise": {
+      "false_starts_per_min": 0.0,
+      "open_pct": 0.0
+     },
+     "music": {
+      "false_starts_per_min": 0.4,
+      "open_pct": 1.0
+     },
+     "tv": {
+      "false_starts_per_min": 8.9,
+      "open_pct": 81.0
+     }
+    },
+    "Cue": {
+     "noise": {
+      "false_starts_per_min": 0.0,
+      "open_pct": 0.0
+     },
+     "music": {
+      "false_starts_per_min": 0.1,
+      "open_pct": 0.0
+     },
+     "tv": {
+      "false_starts_per_min": 7.3,
+      "open_pct": 50.0
+     }
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,294 @@
+{
+ "model": "alkove-focus-1-preview",
+ "file": "alkove-focus-1-preview.onnx",
+ "bytes": 931249,
+ "sha256": "67753cbc5b1da4292e118782f5d77e39c4bf7d26e3421ac28905369b4559937d",
+ "benchmarks": [
+  {
+   "id": "another-voice",
+   "data": [
+    {
+     "name": "Common Voice test sets",
+     "license": "CC0-1.0"
+    },
+    {
+     "name": "DEMAND",
+     "license": "CC-BY-SA-3.0"
+    }
+   ],
+   "protocol": "10 s scenes, 7 languages, 30 per case and language: the target speaks, both speak at the same level, the other voice speaks alone; voice+noise adds DEMAND noise at 10 dB. Print from 3 other clips of the target (alkove-timbre); VoxLock enrolls on the same clips.",
+   "metrics": {
+    "sisdr": "SI-SDR of the target, dB, higher is better",
+    "other_db": "level of the other voice while it speaks alone, dB, lower is better"
+   },
+   "results": {
+    "voice": {
+     "raw": {
+      "sisdr": 3.37,
+      "other_db": 0.0
+     },
+     "alkove-focus, print": {
+      "sisdr": 7.14,
+      "other_db": -22.54
+     },
+     "alkove-focus, no print": {
+      "sisdr": 4.46,
+      "other_db": -7.76
+     },
+     "VoxLock": {
+      "sisdr": 11.74,
+      "other_db": -28.55
+     },
+     "Hush": {
+      "sisdr": 2.32,
+      "other_db": -11.4
+     },
+     "DeepFilterNet 3": {
+      "sisdr": 2.63,
+      "other_db": -0.96
+     },
+     "GTCRN": {
+      "sisdr": 3.45,
+      "other_db": -0.58
+     }
+    },
+    "voice+noise": {
+     "raw": {
+      "sisdr": 2.42,
+      "other_db": 0.0
+     },
+     "alkove-focus, print": {
+      "sisdr": 4.99,
+      "other_db": -18.05
+     },
+     "alkove-focus, no print": {
+      "sisdr": 3.66,
+      "other_db": -8.01
+     },
+     "VoxLock": {
+      "sisdr": 8.86,
+      "other_db": -24.83
+     },
+     "Hush": {
+      "sisdr": 2.04,
+      "other_db": -13.01
+     },
+     "DeepFilterNet 3": {
+      "sisdr": 2.74,
+      "other_db": -2.4
+     },
+     "GTCRN": {
+      "sisdr": 3.02,
+      "other_db": -1.36
+     }
+    }
+   }
+  },
+  {
+   "id": "ami-headset",
+   "data": [
+    {
+     "name": "AMI Meeting Corpus",
+     "license": "CC-BY-4.0",
+     "cite": "Carletta et al., 2005"
+    }
+   ],
+   "protocol": "VoxLock's protocol, same draws: windows of the wearer's headset while others talk. Transcribed with Whisper large-v3 turbo. With print: another turn of the wearer, up to 8 s.",
+   "metrics": {
+    "wer": "word error rate on the wearer's words, %",
+    "leak_wpm": "words of the other voices that get through, per minute"
+   },
+   "results": {
+    "raw": {
+     "wer": 20.8,
+     "leak_wpm": 16.98,
+     "windows": 134
+    },
+    "GTCRN": {
+     "wer": 21.22,
+     "leak_wpm": 19.5,
+     "windows": 134
+    },
+    "DeepFilterNet 3": {
+     "wer": 24.22,
+     "leak_wpm": 19.11,
+     "windows": 134
+    },
+    "Hush": {
+     "wer": 21.46,
+     "leak_wpm": 1.06,
+     "windows": 134
+    },
+    "VoxLock": {
+     "wer": 15.1,
+     "leak_wpm": 0.4,
+     "windows": 134
+    },
+    "alkove-focus, no print": {
+     "wer": 16.66,
+     "leak_wpm": 1.19,
+     "windows": 134
+    },
+    "alkove-focus, print": {
+     "wer": 16.07,
+     "leak_wpm": 0.53,
+     "windows": 134
+    }
+   },
+   "gap_vs_voxlock": {
+    "points": 0.97,
+    "ci95": [
+     -0.44,
+     2.74
+    ],
+    "speakers": 19
+   }
+  },
+  {
+   "id": "voicebank-demand",
+   "data": [
+    {
+     "name": "VoiceBank+DEMAND",
+     "license": "CC-BY-4.0",
+     "cite": "Valentini-Botinhao, C. (2017). Noisy speech database for training speech enhancement algorithms and TTS models. University of Edinburgh, CSTR. https://doi.org/10.7488/ds/2117"
+    }
+   ],
+   "protocol": "824 test clips, Focus without a print, VoxLock enrolled on the noisy clip. DNSMOS (Reddy et al., ICASSP 2021 and 2022); WER: Whisper large-v3 turbo.",
+   "metrics": {
+    "stoi": "STOI",
+    "sisdr": "SI-SDR, dB",
+    "ovr": "DNSMOS P.835 overall",
+    "p808": "DNSMOS P.808",
+    "bak": "DNSMOS P.835 background",
+    "wer": "word error rate, %"
+   },
+   "results": {
+    "raw": {
+     "stoi": 0.921,
+     "sisdr": 8.445,
+     "ovr": 2.697,
+     "p808": 3.054,
+     "bak": 3.126,
+     "wer": 2.72,
+     "n": 824
+    },
+    "GTCRN": {
+     "stoi": 0.918,
+     "sisdr": 14.603,
+     "ovr": 2.909,
+     "p808": 3.42,
+     "bak": 3.877,
+     "wer": 3.47,
+     "n": 824
+    },
+    "alkove-focus": {
+     "stoi": 0.895,
+     "sisdr": 12.066,
+     "ovr": 3.039,
+     "p808": 3.466,
+     "bak": 4.092,
+     "wer": 4.04,
+     "n": 824
+    },
+    "DeepFilterNet 3": {
+     "stoi": 0.925,
+     "sisdr": 17.243,
+     "ovr": 3.205,
+     "p808": 3.576,
+     "bak": 4.11,
+     "wer": 3.66,
+     "n": 824
+    },
+    "Hush": {
+     "stoi": 0.93,
+     "sisdr": 13.509,
+     "ovr": 3.104,
+     "p808": 3.368,
+     "bak": 3.986,
+     "wer": 3.58,
+     "n": 824
+    },
+    "VoxLock": {
+     "stoi": 0.919,
+     "sisdr": 13.551,
+     "ovr": 2.994,
+     "p808": 3.339,
+     "bak": 3.767,
+     "wer": 4.61,
+     "n": 824
+    },
+    "GTCRN, trained on VoiceBank+DEMAND": {
+     "stoi": 0.94,
+     "sisdr": 18.796,
+     "ovr": 3.106,
+     "p808": 3.471,
+     "bak": 4.038,
+     "wer": 3.47,
+     "n": 824
+    }
+   }
+  },
+  {
+   "id": "dns-blind",
+   "data": [
+    {
+     "name": "DNS Challenge 3 blind test set",
+     "license": "CC-BY-4.0",
+     "cite": "Reddy et al., Interspeech 2021",
+     "use": "evaluation only"
+    }
+   ],
+   "protocol": "600 clips, 490 real recordings, no clean reference. DNSMOS (Reddy et al., ICASSP 2021 and 2022). VoxLock enrolled on the noisy clip.",
+   "metrics": {
+    "p808": "DNSMOS P.808",
+    "bak": "P.835 background",
+    "sig": "P.835 speech",
+    "ovr": "P.835 overall"
+   },
+   "results": {
+    "raw": {
+     "p808": 2.964,
+     "bak": 2.648,
+     "sig": 3.199,
+     "ovr": 2.334,
+     "n": 600
+    },
+    "GTCRN": {
+     "p808": 3.447,
+     "bak": 3.893,
+     "sig": 3.003,
+     "ovr": 2.709,
+     "n": 600
+    },
+    "alkove-focus": {
+     "p808": 3.359,
+     "bak": 3.952,
+     "sig": 2.97,
+     "ovr": 2.698,
+     "n": 600
+    },
+    "DeepFilterNet 3": {
+     "p808": 3.513,
+     "bak": 3.978,
+     "sig": 3.144,
+     "ovr": 2.851,
+     "n": 600
+    },
+    "Hush": {
+     "p808": 3.11,
+     "bak": 3.573,
+     "sig": 3.015,
+     "ovr": 2.562,
+     "n": 600
+    },
+    "VoxLock": {
+     "p808": 3.223,
+     "bak": 3.303,
+     "sig": 3.094,
+     "ovr": 2.58,
+     "n": 600
+    }
+   }
+  }
+ ]
+}

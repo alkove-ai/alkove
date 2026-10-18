@@ -1,0 +1,103 @@
+{
+ "model": "alkove-timbre-1-preview",
+ "file": "alkove-timbre-1-preview.onnx",
+ "bytes": 867280,
+ "sha256": "53032a255010770e232dcc43611132996a4db85fc9272978caaa9f9498bcb437",
+ "benchmarks": [
+  {
+   "id": "common-voice",
+   "data": [
+    {
+     "name": "Common Voice test sets",
+     "license": "CC0-1.0"
+    }
+   ],
+   "protocol": "2029 speakers never heard in training, 8057 clips, 7 languages; CAM++ (3D-Speaker speech_campplus_sv_zh_en_16k-common_advanced, Apache-2.0) on the same trials. Mean of the languages.",
+   "metrics": {
+    "eer": "equal error rate, %"
+   },
+   "cases": {
+    "print-1.5s": "print of about 12 s (3 clips) against a 1.5 s window",
+    "print-1.5s:close": "the same, impostors only within 2 semitones",
+    "full": "clip against clip, whole clips",
+    "3s": "clip against clip, 3 s",
+    "1.5s": "clip against clip, 1.5 s"
+   },
+   "results": {
+    "alkove-timbre id": {
+     "print-1.5s": 2.95,
+     "print-1.5s:close": 4.08,
+     "full": 4.46,
+     "3s": 4.95,
+     "1.5s": 7.19
+    },
+    "CAM++": {
+     "print-1.5s": 1.72,
+     "print-1.5s:close": 2.32,
+     "full": 2.61,
+     "3s": 3.02,
+     "1.5s": 4.75
+    }
+   },
+   "per_language_print_1.5s": {
+    "fr": 2.68,
+    "en": 3.27,
+    "es": 2.71,
+    "it": 2.65,
+    "pt": 4.16,
+    "ca": 2.84,
+    "ro": 2.37
+   }
+  },
+  {
+   "id": "scene-windows",
+   "data": [
+    {
+     "name": "Common Voice French dev",
+     "license": "CC0-1.0"
+    },
+    {
+     "name": "Multilingual LibriSpeech French dev",
+     "license": "CC-BY-4.0"
+    },
+    {
+     "name": "LibriTTS-R dev-clean",
+     "license": "CC-BY-4.0"
+    },
+    {
+     "name": "MUSAN",
+     "license": "CC-BY-4.0"
+    },
+    {
+     "name": "DNS Challenge noise",
+     "license": "CC-BY-4.0"
+    },
+    {
+     "name": "RIRS_NOISES",
+     "license": "Apache-2.0"
+    }
+   ],
+   "protocol": "1,424 windows from scenes with noise, music or another voice: raw microphone, after alkove-focus with a print, after alkove-focus without one. About ±1 point.",
+   "metrics": {
+    "eer": "equal error rate, %"
+   },
+   "results": {
+    "id, 1.5 s": {
+     "raw": 11.9,
+     "focus, print": 9.9,
+     "focus, no print": 10.8
+    },
+    "id, 1 s": {
+     "raw": 14.2,
+     "focus, print": 14.0,
+     "focus, no print": 12.5
+    },
+    "embedding, 1.5 s": {
+     "raw": 15.9,
+     "focus, print": 18.8,
+     "focus, no print": 19.3
+    }
+   }
+  }
+ ]
+}

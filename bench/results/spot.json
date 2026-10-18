@@ -1,0 +1,54 @@
+{
+ "model": "alkove-spot-1-preview",
+ "file": "alkove-spot-1-preview.onnx",
+ "bytes": 2860508,
+ "sha256": "aa8ce7259528a78db9427a8d970c35be72e0c070af705f8c668a0b1e3cb02dc6",
+ "benchmarks": [
+  {
+   "id": "typed-words",
+   "data": [
+    {
+     "name": "MOCKS",
+     "license": "CC-BY-4.0 / MPL-2.0"
+    },
+    {
+     "name": "Common Voice test sets",
+     "license": "CC0-1.0"
+    }
+   ],
+   "protocol": "40 words per language, phonetized by alkove-lex alone (first pronunciation plus variants at 25 % or more). Per word, the threshold is set for the target false-alarm rate on half of the speakers, recall measured on the other half; false alarms counted on all the speech without the word. fr, en, es, it on MOCKS; ca, pt on Common Voice test. Romanian left out: its test set is too short to set a threshold at these rates.",
+   "metrics": {
+    "recall": "recall of the word, %, keyed by false alarms per hour"
+   },
+   "results": {
+    "recall": {
+     "1.0": {
+      "fr": 89.7,
+      "en": 66.9,
+      "es": 69.4,
+      "it": 78.7,
+      "ca": 91.6,
+      "pt": 84.5,
+      "mean": 80.1
+     },
+     "0.5": {
+      "fr": 85.5,
+      "en": 62.4,
+      "es": 61.0,
+      "it": 73.7,
+      "ca": 87.2,
+      "pt": 72.9,
+      "mean": 73.8
+     }
+    },
+    "after_pause_recall": {
+     "1.0": 85.6,
+     "0.5": 81.1
+    }
+   },
+   "notes": {
+    "after_pause_recall": "only after a pause (the word said after 300 ms without speech), mean of the 6 languages"
+   }
+  }
+ ]
+}
