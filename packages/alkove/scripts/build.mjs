@@ -65,6 +65,7 @@ await build({
   chunkNames: 'chunks/[name]-[hash]',
   plugins: [alias, assets],
 })
+await build({ ...common, entryPoints: [join(root, 'src/cli.ts')], outfile: join(dist, 'cli.js'), platform: 'node', banner: { js: '#!/usr/bin/env node' } })
 copyFileSync(wasm, join(dist, 'alkove-ort.wasm'))
 
 execFileSync('npx', ['tsc', '-p', 'tsconfig.build.json'], { cwd: root, stdio: 'inherit' })
