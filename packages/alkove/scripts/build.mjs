@@ -10,8 +10,8 @@ import { build } from 'esbuild'
 const root = join(import.meta.dirname, '..')
 const dist = join(root, 'dist')
 const stock = dirname(createRequire(import.meta.url).resolve('onnxruntime-web'))
-// ALKOVE_ORT: a folder with the reduced build's alkove-ort.mjs and alkove-ort.wasm; else onnxruntime-web's own, for development
-const ortDir = process.env.ALKOVE_ORT
+// vendor/ort: onnxruntime reduced to the models' operators (a separate build); ALKOVE_ORT=stock packs onnxruntime-web's own, for comparison
+const ortDir = process.env.ALKOVE_ORT === 'stock' ? null : (process.env.ALKOVE_ORT ?? join(root, 'vendor/ort'))
 const glue = ortDir ? join(ortDir, 'alkove-ort.mjs') : join(stock, 'ort-wasm-simd-threaded.mjs')
 const wasm = ortDir ? join(ortDir, 'alkove-ort.wasm') : join(stock, 'ort-wasm-simd-threaded.wasm')
 if (!existsSync(glue) || !existsSync(wasm)) throw new Error(`onnxruntime build not found: ${glue}, ${wasm}`)

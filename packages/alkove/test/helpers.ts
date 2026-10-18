@@ -9,10 +9,11 @@ import { MODELS, type ModelName } from '../src/manifest'
 const root = join(import.meta.dirname, '..')
 const stock = dirname(createRequire(import.meta.url).resolve('onnxruntime-web'))
 
-export const ortFiles = () => ({
-  mjs: process.env.ALKOVE_ORT_MJS ?? join(stock, 'ort-wasm-simd-threaded.mjs'),
-  wasm: process.env.ALKOVE_ORT_WASM ?? join(stock, 'ort-wasm-simd-threaded.wasm'),
-})
+// the reduced build the package ships; ALKOVE_ORT=stock for onnxruntime-web's own
+export const ortFiles = () =>
+  process.env.ALKOVE_ORT === 'stock'
+    ? { mjs: join(stock, 'ort-wasm-simd-threaded.mjs'), wasm: join(stock, 'ort-wasm-simd-threaded.wasm') }
+    : { mjs: join(root, 'vendor/ort/alkove-ort.mjs'), wasm: join(root, 'vendor/ort/alkove-ort.wasm') }
 
 export async function loadOrt(): Promise<Ort> {
   const { mjs, wasm } = ortFiles()
