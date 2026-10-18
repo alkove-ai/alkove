@@ -2,7 +2,7 @@ import { type Lang, SPOT } from '../../manifest'
 import { SpeechTracker } from '../cue'
 import type { Warning } from '../lex'
 import { NEG, Search } from './search'
-import { BOUNDS, type Chain, clampThreshold, PAUSE_GAP, type SpotFrame, Word } from './spot'
+import { BOUNDS, type Chain, clampPause, clampThreshold, defaultThresholds, PAUSE_GAP, type SpotFrame, Word } from './spot'
 
 // set on 3 takes drawn per voice: a well-said take scores 0 whatever the word, so k carries most of the threshold
 export const ENROLL = {
@@ -101,12 +101,15 @@ export class Enroller {
     const floor = this.rest + this.opts.margin
     if (bestTake - worst > this.opts.spread) warnings.push({ code: 'word.takes-differ', message: 'The takes were said differently: record them again.', spread: +(bestTake - worst).toFixed(2) })
     if (floor >= ceiling) warnings.push({ code: 'word.no-margin', message: 'Other speech scores as high as the word: it is too short, too close to a common word, or mispronounced.', floor: +floor.toFixed(2), ceiling: +ceiling.toFixed(2) })
-    const raw = floor < ceiling ? ceiling : (floor + ceiling) / 2
+    // three takes say little of the right threshold (a word said well scores ~0, easy to confuse or not): halfway to the language's median lands closer (measured)
+    const takes = floor < ceiling ? ceiling : (floor + ceiling) / 2
+    const blended = (takes + defaultThresholds(this.lang).anywhere) / 2
+    const raw = floor < ceiling ? Math.max(blended, floor) : blended
     const anywhere = clampThreshold(raw)
     if (anywhere !== raw) warnings.push({ code: 'word.bounded', message: 'The threshold hit its bounds.', threshold: +raw.toFixed(2) })
     // the pronunciations that won a take; the likeliest one when none did
     const kept = this.phonemes.filter((_, i) => this.wins[i]! > 0)
-    const word = new Word(this.text, this.lang, kept.length ? kept : [this.phonemes[0]!], { anywhere, pause: clampThreshold(anywhere + PAUSE_GAP) }, true, this.chain, warnings)
+    const word = new Word(this.text, this.lang, kept.length ? kept : [this.phonemes[0]!], { anywhere, pause: clampPause(anywhere + PAUSE_GAP) }, true, this.chain, warnings)
     return { word, takes: this.takes, warnings }
   }
 }

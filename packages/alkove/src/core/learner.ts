@@ -1,9 +1,10 @@
 import { RATE, TIMBRE } from '../manifest'
-import { type Center, dot, type Source, trimmedMean, Voiceprint } from './timbre'
+import { type Center, dot, type Source, threshold, trimmedMean, Voiceprint } from './timbre'
 
 export const LEARN = {
   ready: 4,
   max: 200,
+  // a window joins a print still being built over this cosine, a ready print over the measured `balanced` one for 1.5 s
   match: 0.25,
   restart: 5,
   level: 0.005,
@@ -40,13 +41,13 @@ export class VoiceprintLearner {
   }
 
   get voiceprint(): Voiceprint | null {
-    return this.ready ? new Voiceprint([trimmedMean(this.ws)], this.source, TIMBRE.model, this.ws.slice(-64)) : null
+    return this.ready ? new Voiceprint([{ ...trimmedMean(this.ws), seconds: this.ws.length * WINDOW_SECONDS }], this.source, TIMBRE.model, this.ws.slice(-64)) : null
   }
 
   // one window of my speech: its Timbre outputs, from a 1.5 s window the caller chose
   learn(w: Center): { accepted: boolean; score: number; restarted: boolean } {
     const score = this.ws.length ? dot(w.id, trimmedMean(this.ws).id) : 1
-    if (score < LEARN.match) {
+    if (score < (this.ready ? threshold('balanced', WINDOW_SECONDS, this.ws.length * WINDOW_SECONDS) : LEARN.match)) {
       const restarted = !this.ready && ++this.rejects >= LEARN.restart
       if (restarted) {
         this.ws = []

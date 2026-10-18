@@ -1,4 +1,4 @@
-import { TIMBRE } from '../manifest'
+import { RATE, TIMBRE } from '../manifest'
 import type { Net } from './engine'
 
 export type Source = 'raw' | 'focus'
@@ -6,13 +6,15 @@ export type Source = 'raw' | 'focus'
 export interface Center {
   embedding: Float32Array
   id: Float32Array
+  // seconds of voice it was made from, when known: a short print needs other thresholds
+  seconds?: number
 }
 
 export interface VoiceprintJSON {
   alkove: 'voiceprint'
   model: string
   source: Source
-  centers: { embedding: number[]; id: number[] }[]
+  centers: { embedding: number[]; id: number[]; seconds?: number }[]
   windows?: string
 }
 
@@ -61,9 +63,17 @@ export class Voiceprint {
   }
 
   similarity(other: Voiceprint | Center): number {
+    return this.closest(other).score
+  }
+
+  // the best pair of centers, and how much voice this side's center was made from
+  closest(other: Voiceprint | Center): { score: number; seconds: number | undefined } {
     const theirs = other instanceof Voiceprint ? other.centers : [other]
-    let best = -1
-    for (const a of this.centers) for (const b of theirs) best = Math.max(best, dot(a.id, b.id))
+    let best = { score: -1, seconds: undefined as number | undefined }
+    for (const a of this.centers) for (const b of theirs) {
+      const score = dot(a.id, b.id)
+      if (score > best.score) best = { score, seconds: a.seconds }
+    }
     return best
   }
 
@@ -77,7 +87,7 @@ export class Voiceprint {
       alkove: 'voiceprint',
       model: this.model,
       source: this.source,
-      centers: this.centers.map((c) => ({ embedding: round(c.embedding), id: round(c.id) })),
+      centers: this.centers.map((c) => ({ embedding: round(c.embedding), id: round(c.id), ...(c.seconds ? { seconds: +c.seconds.toFixed(1) } : {}) })),
       ...(this.windows.length ? { windows: packWindows(this.windows) } : {}),
     }
   }
@@ -87,7 +97,7 @@ export class Voiceprint {
     const j: VoiceprintJSON = typeof json === 'string' ? JSON.parse(json) : json
     if (j.alkove !== 'voiceprint') throw new TypeError('not an Alkove voiceprint')
     if (j.model !== TIMBRE.model) return null
-    const centers = j.centers.map((c) => ({ embedding: Float32Array.from(c.embedding), id: Float32Array.from(c.id) }))
+    const centers = j.centers.map((c) => ({ embedding: Float32Array.from(c.embedding), id: Float32Array.from(c.id), ...(c.seconds ? { seconds: c.seconds } : {}) }))
     return new Voiceprint(centers, j.source, j.model, j.windows ? unpackWindows(j.windows) : [])
   }
 
@@ -140,6 +150,15 @@ function unpackWindows(text: string): Center[] {
 export type Level = 'lenient' | 'balanced' | 'strict'
 
 // cosine of `id`, a ~12 s print against `seconds` of voice (Common Voice tests): 1 % false rejects, EER, 1 % false accepts; a shorter print rejects more
+// the cosine over which `seconds` of voice match a print made from `printSeconds` (unknown: a ~12 s print)
+export function threshold(level: Level, seconds: number, _printSeconds?: number): number {
+  const pts = LEVELS[level]
+  const s = Math.min(Math.max(seconds, pts[0]![0]), pts[pts.length - 1]![0])
+  const i = Math.max(1, pts.findIndex(([x]) => x >= s))
+  const [[s0, c0], [s1, c1]] = [pts[i - 1]!, pts[i]!]
+  return c0 + ((c1 - c0) * (s - s0)) / (s1 - s0)
+}
+
 const LEVELS: Record<Level, [seconds: number, cosine: number][]> = {
   lenient: [[0.6, 0.0775], [0.9, 0.14], [1.5, 0.195], [3, 0.2275]],
   balanced: [[0.6, 0.25], [0.9, 0.29], [1.5, 0.3375], [3, 0.37]],
@@ -165,16 +184,13 @@ export class Timbre {
   }
 
   embed(pcm: Float32Array, source: Source = 'raw'): Voiceprint {
-    return new Voiceprint([trimmedMean(this.windows(pcm))], source)
+    return new Voiceprint([{ ...trimmedMean(this.windows(pcm)), seconds: pcm.length / RATE }], source)
   }
 
+  // a: the known print, b: the voice heard (`seconds` long)
   static verify(a: Voiceprint, b: Voiceprint, { level = 'balanced', seconds = 1.5 }: { level?: Level; seconds?: number } = {}): { same: boolean; score: number } {
-    const score = a.similarity(b)
-    const pts = LEVELS[level]
-    const s = Math.min(Math.max(seconds, pts[0]![0]), pts[pts.length - 1]![0])
-    const i = Math.max(1, pts.findIndex(([x]) => x >= s))
-    const [[s0, c0], [s1, c1]] = [pts[i - 1]!, pts[i]!]
-    return { same: score >= c0 + ((c1 - c0) * (s - s0)) / (s1 - s0), score }
+    const { score, seconds: printSeconds } = a.closest(b)
+    return { same: score >= threshold(level, seconds, printSeconds), score }
   }
 
   static identify(voice: Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level; seconds?: number } = {}): { who: string; score: number } | null {

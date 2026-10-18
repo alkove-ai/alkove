@@ -31,7 +31,8 @@ const UNCALIBRATED_ANY = -1.17
 // the threshold after a pause sits this much under the one anywhere (mean over the typed words)
 export const PAUSE_GAP = -0.77
 // shared by both thresholds: a hard word's pause threshold (under -2.2) is clamped, stricter than 0.5 false alarm / h
-export const BOUNDS = { max: -0.6, min: -2.2 }
+// a threshold after a pause often sits under −2.2 (10 to 43 % of the typed words benchmarked): it has its own floor
+export const BOUNDS = { max: -0.6, min: -2.2, pauseMin: -2.9 }
 // a Lex variant under this probability is not searched: on common words variants only add false alarms
 export const VARIANT = 0.25
 export const PAUSE = { wait: 10, guard: 7, level: 0.5 }
@@ -86,10 +87,11 @@ export const wordOf = (w: Word | WordJSON | string): Word => {
 export function defaultThresholds(lang: Lang[]): Thresholds {
   const known = lang.map((l) => UNCALIBRATED[l]).filter((v): v is number => v !== undefined)
   const anywhere = known.length ? Math.min(...known) : UNCALIBRATED_ANY
-  return { anywhere, pause: clampThreshold(anywhere + PAUSE_GAP) }
+  return { anywhere, pause: clampPause(anywhere + PAUSE_GAP) }
 }
 
 export const clampThreshold = (v: number) => Math.max(BOUNDS.min, Math.min(BOUNDS.max, v))
+export const clampPause = (v: number) => Math.max(BOUNDS.pauseMin, Math.min(BOUNDS.max, v))
 
 export interface CompileOptions {
   lang?: Lang | Lang[]
