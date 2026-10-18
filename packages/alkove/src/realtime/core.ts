@@ -2,6 +2,8 @@ import { Resampler } from '../dsp/resample'
 
 // the audio-thread side, kept free of worklet globals so Node can drive it with a fake clock
 export const HOP = 256
+// a hop on the wire: 256 samples, then the far end's quiet time, then the activation it belongs to
+export const WIRE = HOP + 2
 const RATE16 = 16000
 // output primed with this many hops: the worker's round trip
 const PRIME_HOPS = 2
@@ -68,7 +70,8 @@ export class WorkletCore {
   private up!: Resampler
   private in16 = new Queue(4096)
   private out!: Queue
-  private hop = new Float32Array(HOP + 1)
+  private hop = new Float32Array(WIRE)
+  private epoch = 0
   private raw: Float32Array
   private rawPos = 0
   private mix = 0
@@ -81,7 +84,6 @@ export class WorkletCore {
   private sent = 0
   private received = 0
   private inFlight = 0
-  private drop = 0
   private retryMs = RETRY_MS
   private retryAt = 0
   private activatedAt = 0
@@ -107,9 +109,10 @@ export class WorkletCore {
     this.raw = new Float32Array(Math.max(1, this.latency))
   }
 
-  // the processed path's delay at the context rate, which the raw path copies so a switch moves nothing in time
+  // the processed path's delay at the context rate (priming, the chain, half of each resampler's window), which the raw path copies so a switch moves nothing in time
   get latency(): number {
-    return Math.round((PRIME_HOPS * HOP + this.delay16) * (this.rate / RATE16))
+    const resamplers = this.rate === RATE16 ? 0 : Resampler.HALF + Resampler.HALF * (this.rate / RATE16)
+    return Math.round((PRIME_HOPS * HOP + this.delay16) * (this.rate / RATE16) + resamplers)
   }
 
   get latencyMs(): number {
@@ -133,8 +136,10 @@ export class WorkletCore {
     this.up = new Resampler(RATE16, this.rate)
     this.in16 = new Queue(4096)
     this.out = new Queue(Math.ceil(this.rate * 2))
-    for (let i = 0; i < this.latency; i++) this.out.push(0)
-    this.drop = this.inFlight
+    // the chain's own delay comes back in the worker's hops: only the round trip is primed
+    const prime = Math.round(PRIME_HOPS * HOP * (this.rate / RATE16))
+    for (let i = 0; i < prime; i++) this.out.push(0)
+    this.epoch++
     this.inFlight = 0
     this.debt = 0
     this.starvedAt = 0
@@ -146,15 +151,12 @@ export class WorkletCore {
     this.onActivate?.(Math.round((this.frames * RATE16) / this.rate))
   }
 
-  receive(hop: Float32Array): void {
+  // a hop from before the last activation (a worker that hung, then caught up) is stale
+  receive(wire: Float32Array): void {
     this.received++
+    if (wire[HOP + 1] !== this.epoch || this.mode !== 'active') return
     if (this.inFlight > 0) this.inFlight--
-    if (this.drop > 0) {
-      this.drop--
-      return
-    }
-    if (this.mode !== 'active') return
-    this.up.push(hop, (x) => this.out.push(x))
+    this.up.push(wire.subarray(0, HOP), (x) => this.out.push(x))
   }
 
   private fail(): void {
@@ -186,6 +188,7 @@ export class WorkletCore {
       while (this.in16.size >= HOP) {
         this.in16.pull(this.hop, HOP)
         this.hop[HOP] = this.farQuietMs
+        this.hop[HOP + 1] = this.epoch
         this.send!(this.hop)
         this.inFlight++
         this.sent++

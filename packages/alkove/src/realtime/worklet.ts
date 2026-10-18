@@ -1,4 +1,4 @@
-import { HOP, WorkletCore } from './core'
+import { WIRE, WorkletCore } from './core'
 
 declare const sampleRate: number
 declare function registerProcessor(name: string, ctor: unknown): void
@@ -26,12 +26,12 @@ class AlkoveProcessor extends AudioWorkletProcessor {
         this.worker = m.port as MessagePort
         this.worker.onmessage = (ev: MessageEvent) => {
           const buf = ev.data as ArrayBuffer
-          this.core.receive(new Float32Array(buf, 0, HOP))
+          this.core.receive(new Float32Array(buf))
           this.pool.push(buf)
         }
         this.core.onActivate = (at16) => this.worker!.postMessage({ clock: at16 })
         this.core.connect((hop) => {
-          const buf = this.pool.pop() ?? new ArrayBuffer((HOP + 1) * 4)
+          const buf = this.pool.pop() ?? new ArrayBuffer(WIRE * 4)
           new Float32Array(buf).set(hop)
           this.worker!.postMessage(buf, [buf])
         })

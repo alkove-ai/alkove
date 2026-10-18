@@ -3,6 +3,8 @@ const PHASES = 128
 
 // polyphase windowed sinc at a fractional read position kept across chunks: any ratio (44.1 -> 16 kHz) without drift
 export class Resampler {
+  // the delay it adds, in input samples
+  static readonly HALF = TAPS / 2
   readonly identity: boolean
   private ratio = 1
   private half = TAPS / 2
