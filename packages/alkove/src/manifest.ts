@@ -5,14 +5,14 @@ export interface ModelFile {
   file: string
   bytes: number
   sha256: string
+  // the Hugging Face commit a model is read at (sha256 checked either way); the wasm has none, it comes with the package
+  revision?: string
 }
 
 export { ORT_WASM } from './ort.generated'
 
 export const RATE = 16000
 
-// the Hugging Face commit the files are read at, set when they are published (sha256 checked either way)
-export const HF_REVISION = 'main'
 export const HF_ORG = 'alkove-ai'
 
 export const MODELS: Record<ModelName, ModelFile> = {
@@ -21,30 +21,35 @@ export const MODELS: Record<ModelName, ModelFile> = {
     file: 'alkove-focus-1-preview.onnx',
     bytes: 931249,
     sha256: '67753cbc5b1da4292e118782f5d77e39c4bf7d26e3421ac28905369b4559937d',
+    revision: '6368e3a8f5164e878a5d7c45fdfe3e61697ade05',
   },
   cue: {
     name: 'alkove-cue-1-preview',
     file: 'alkove-cue-1-preview.onnx',
     bytes: 1156915,
     sha256: '00a8a49b08653d067dba276a6bd8c3868a06b154d6cb72ef0d7211c3981f340a',
+    revision: '62fd8463ff19c41044362ed3c26773cd9160fe87',
   },
   spot: {
     name: 'alkove-spot-1-preview',
     file: 'alkove-spot-1-preview.onnx',
     bytes: 2860508,
     sha256: 'aa8ce7259528a78db9427a8d970c35be72e0c070af705f8c668a0b1e3cb02dc6',
+    revision: 'bce514cc3bd52d439dc2aabd0825c21f5813f14b',
   },
   timbre: {
     name: 'alkove-timbre-1-preview',
     file: 'alkove-timbre-1-preview.onnx',
     bytes: 867280,
     sha256: '53032a255010770e232dcc43611132996a4db85fc9272978caaa9f9498bcb437',
+    revision: 'f67d1b563cd18dfac42bf2e20f9916e04c81f56c',
   },
   lex: {
     name: 'alkove-lex-1-preview',
     file: 'alkove-lex-1-preview.onnx',
     bytes: 1775231,
     sha256: '9af6466a7def8916a81349c830eb25bd81f20e5307338d5b732a2dac3476defe',
+    revision: '74a478a8dc1cca370365f90ab17d2f753ddcb7e0',
   },
 }
 

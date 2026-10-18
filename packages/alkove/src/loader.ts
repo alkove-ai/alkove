@@ -1,5 +1,5 @@
 import { AlkoveError, type Diag } from './errors'
-import { HF_ORG, HF_REVISION, type ModelFile, type ModelName, MODELS } from './manifest'
+import { HF_ORG, type ModelFile, type ModelName, MODELS } from './manifest'
 
 export type Source = ArrayBuffer | Uint8Array | URL | string
 
@@ -57,7 +57,7 @@ export function under(base: string | URL, file: string): string {
 function urlOf(file: ModelFile): string {
   if (config.modelBaseUrl) return under(config.modelBaseUrl, file.file)
   report({ code: 'models.default-host', level: 'warn', message: `${file.name} comes from Hugging Face: each user sends it their IP. Self-host the models in production (modelBaseUrl).` })
-  return `https://huggingface.co/${HF_ORG}/${file.name}/resolve/${HF_REVISION}/${file.file}`
+  return `https://huggingface.co/${HF_ORG}/${file.name}/resolve/${file.revision}/${file.file}`
 }
 
 async function fetchBytes(url: string, onProgress?: (p: Progress) => void, total = 0): Promise<Uint8Array> {

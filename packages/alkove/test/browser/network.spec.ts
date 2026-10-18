@@ -64,7 +64,7 @@ test.describe('network guarantee', () => {
     })
     expect(r.error).toBe('AlkoveError models.fetch')
     expect(r.diags).toContain('models.default-host')
-    expect(foreign).toEqual(['https://huggingface.co/alkove-ai/alkove-lex-1-preview/resolve/main/alkove-lex-1-preview.onnx'])
+    expect(foreign).toEqual(['https://huggingface.co/alkove-ai/alkove-lex-1-preview/resolve/74a478a8dc1cca370365f90ab17d2f753ddcb7e0/alkove-lex-1-preview.onnx'])
     // seen and expected: the fixture's check is for requests nobody asked for
     foreign.length = 0
   })
