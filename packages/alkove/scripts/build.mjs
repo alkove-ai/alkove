@@ -62,7 +62,8 @@ await build({
   splitting: true,
   platform: 'neutral',
   external: ['node:*', 'module', 'worker_threads'],
-  chunkNames: 'chunks/[name]-[hash]',
+  // next to alkove-ort.wasm, which the runtime finds through its own module URL
+  chunkNames: '[name]-[hash]',
   plugins: [alias, assets],
 })
 await build({ ...common, entryPoints: [join(root, 'src/cli.ts')], outfile: join(dist, 'cli.js'), platform: 'node', banner: { js: '#!/usr/bin/env node' } })
