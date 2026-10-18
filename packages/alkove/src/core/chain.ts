@@ -81,6 +81,10 @@ export class Chain {
     return this.asleep
   }
 
+  get time(): number {
+    return this.t / RATE
+  }
+
   get gainDb(): number {
     return this.level.db
   }
@@ -96,6 +100,13 @@ export class Chain {
 
   setEnabled(on: boolean): void {
     this.enabled = on
+  }
+
+  // exactly one hop, no allocation: the real-time worker's path; the result is valid until the next call
+  step(hop: Float32Array, emit: (e: ChainEvent) => void): Float32Array {
+    if (this.hops.pending || hop.length !== HOP) throw new RangeError('step() takes whole hops only')
+    this.hop(hop, emit)
+    return this.mix
   }
 
   push(pcm: Float32Array, emit: (e: ChainEvent) => void): Float32Array {

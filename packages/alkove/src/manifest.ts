@@ -7,6 +7,8 @@ export interface ModelFile {
   sha256: string
 }
 
+export { ORT_WASM } from './ort.generated'
+
 export const RATE = 16000
 
 // the Hugging Face commit the files are read at, set when they are published (sha256 checked either way)
