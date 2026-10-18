@@ -11,7 +11,7 @@
 <p><input id="word" value="Camille"> <select id="lang"><option>fr</option><option>en</option><option>es</option><option>it</option><option>pt</option><option>ca</option><option>ro</option></select> <button id="start">Start</button></p>
 <pre id="log"></pre>
 <script type="module">
-  import { Alkove, createAgentInput, createWakeListener, Spot } from '../packages/alkove/dist/index.js'
+  import { Alkove, createAgentInput, Spot } from '../packages/alkove/dist/index.js'
 
   Alkove.configure({ modelBaseUrl: '../models/' })
   const log = (...a) => (document.getElementById('log').textContent += a.join(' ') + '\n')
@@ -20,17 +20,18 @@
     const ctx = new AudioContext()
     const word = await Spot.compile(document.getElementById('word').value, { lang: document.getElementById('lang').value })
     for (const w of word.warnings) log('warning:', w.message)
-    const wake = await createWakeListener({ audioContext: ctx, words: [word] })
+    // one input, one microphone: the word is read behind Focus, in the same worker
     const agent = await createAgentInput({ audioContext: ctx })
-    let armedUntil = 0
-    wake.on('wake', ({ word, score }) => {
+    const spot = agent.spot([word], { context: 'pause' })
+    let heard = null
+    spot.on('wake', ({ word, score, start }) => {
       log(`heard « ${word} » (${score.toFixed(2)}), listening…`)
-      armedUntil = agent.now() + 8
+      heard = start
     })
-    // the agent input runs all along; only the sentence that follows the word is kept
+    // the sentence the word opens: it starts with the word, nothing before it goes out
     agent.on('utterance', ({ pcm, start, end }) => {
-      if (start > armedUntil) return
-      armedUntil = 0
+      if (heard === null || end < heard || start > heard + 8) return
+      heard = null
       log(`sentence ${start.toFixed(2)}–${end.toFixed(2)} s: ${(pcm.byteLength / 4 / 16000).toFixed(1)} s of audio to transcribe`)
     })
     log('say the word, then a sentence')

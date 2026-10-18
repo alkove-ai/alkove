@@ -92,10 +92,14 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   private printed = false
   private sender: RTCRtpSender | null = null
   private stalled = false
+  protected spotWords: { words: WordJSON[]; context: Context } | null = null
+  private running: Promise<void>
+  private markRunning!: () => void
   protected abstract readonly kind: 'call' | 'agent' | 'wake'
 
   constructor(protected opts: FocusOptions) {
     super()
+    this.running = new Promise((r) => (this.markRunning = r))
   }
 
   protected get disposed(): boolean {
@@ -237,7 +241,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     this.setMode('raw', 'loading')
     try {
       const host = Host.get()
-      const rt = await host.models('realtime', this.models())
+      const rt = await host.models('realtime', [...this.models(), ...(this.spotWords?.words.length ? (['spot'] as const) : [])])
       let bgPort: MessagePort | undefined
       if (this.wantsBackground()) {
         const bg = await host.models('background', ['timbre'])
@@ -255,6 +259,11 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       const out = (this.opts as { output?: { port?: MessagePort } }).output?.port
       const transfer: Transferable[] = [...(bgPort ? [bgPort] : []), ...(out ? [out] : [])]
       await rt.request({ type: 'realtime', input: this.id, opts: this.realtimeOptions(), bg: bgPort, out }, transfer)
+      if (this.spotWords?.words.length) {
+        await host.models('realtime', ['spot'])
+        rt.post({ type: 'set', input: this.id, ...this.spotWords })
+      }
+      this.markRunning()
       const channel = new MessageChannel()
       rt.post({ type: 'worklet', input: this.id, port: channel.port2 }, [channel.port2])
       this.node.port.postMessage({ type: 'connect', port: channel.port1 }, [channel.port1])
@@ -545,6 +554,35 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     for (const n of [this.source, this.node, this.dest, this.farSource]) n?.disconnect()
   }
 
+  // words read in Focus's output, in the same worker: no second microphone, no second Focus; with a print Focus already keeps only that voice (onlyMyVoice)
+  spot(words: readonly (Word | WordJSON | string)[], opts: { context?: Context; onlyMyVoice?: boolean } = {}): SpotHandle {
+    if (this.kind === 'wake') throw new TypeError('spot() reads Focus: use the wake listener itself')
+    return new SpotHandle(this, words.map((w) => wordOf(w).toJSON()), opts.context ?? 'anywhere')
+  }
+
+  // a word enrolled on this call, read behind Focus like call.spot() reads it
+  enrollWord(text: string, opts: { lang?: Lang | Lang[]; takes?: number } = {}): Enrollment {
+    return new Enrollment({
+      compile: async () => (await import('../api')).Spot.compile(text, { lang: opts.lang, chain: 'focus' }),
+      open: async (word) => {
+        await this.running
+        const rt = await Host.get().models('realtime', ['spot'])
+        rt.post({ type: 'set', input: this.id, enroll: { word, takes: opts.takes ?? 3 } })
+        return { on: this.on.bind(this) as EnrollTarget['on'], stop: () => rt.post({ type: 'set', input: this.id, enroll: null }), source: 'focus' }
+      },
+      embed: async (pcm, source) => (await (await import('../api')).Timbre.create()).embed(pcm, { source }),
+    })
+  }
+
+  // kept here and sent when the pipeline starts: spot() may come before the models are loaded
+  setWords(words: WordJSON[], context: Context): void {
+    this.spotWords = { words, context }
+    if (!this.rt) return
+    void Host.get()
+      .models('realtime', ['spot'])
+      .then((rt) => rt.post({ type: 'set', input: this.id, words, context }))
+  }
+
   dispose(): void {
     if (this.disposed) return
     clearTimeout(this.retryTimer)
@@ -570,7 +608,6 @@ export interface CallOptions extends FocusOptions {
 class CallInput extends AlkoveInput {
   protected readonly kind = 'call' as const
   private osc: OscillatorNode | null = null
-  private spots = new Set<SpotHandle>()
 
   constructor(protected opts: CallOptions) {
     super(opts)
@@ -609,39 +646,13 @@ class CallInput extends AlkoveInput {
     return this
   }
 
-  // words read in Focus's output, in the same worker: no second microphone, no second Focus; with a print Focus already keeps only that voice (onlyMyVoice)
-  spot(words: (Word | WordJSON | string)[], opts: { context?: Context; onlyMyVoice?: boolean } = {}): SpotHandle {
-    const handle = new SpotHandle(this, words.map((w) => wordOf(w).toJSON()), opts.context ?? 'anywhere')
-    this.spots.add(handle)
-    return handle
-  }
-
-  // a word enrolled on this call, read behind Focus like call.spot() reads it
-  enrollWord(text: string, opts: { lang?: Lang | Lang[]; takes?: number } = {}): Enrollment {
-    return new Enrollment({
-      compile: async () => (await import('../api')).Spot.compile(text, { lang: opts.lang, chain: 'focus' }),
-      open: async (word) => {
-        const rt = await Host.get().models('realtime', ['spot'])
-        rt.post({ type: 'set', input: this.id, enroll: { word, takes: opts.takes ?? 3 } })
-        return { on: this.on.bind(this) as EnrollTarget['on'], stop: () => rt.post({ type: 'set', input: this.id, enroll: null }), source: 'focus' }
-      },
-      embed: async (pcm, source) => (await (await import('../api')).Timbre.create()).embed(pcm, { source }),
-    })
-  }
-
-  setWords(words: WordJSON[], context: Context): void {
-    void (async () => {
-      const rt = await Host.get().models('realtime', ['spot'])
-      rt.post({ type: 'set', input: this.id, words, context })
-    })()
-  }
 }
 
 export class SpotHandle extends Emitter<{ wake: WakeEvent }> {
   private off: () => void
 
   constructor(
-    private input: CallInput,
+    private input: AlkoveInput,
     words: WordJSON[],
     context: Context,
   ) {

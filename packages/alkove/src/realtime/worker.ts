@@ -598,6 +598,8 @@ self.onmessage = async (e: MessageEvent) => {
       }
     }
   } catch (err) {
-    post({ type: 'reply', id: m.id, error: { message: String((err as Error)?.message ?? err), code: (err as { code?: string })?.code } })
+    const message = String((err as Error)?.message ?? err)
+    if (m.id !== undefined) post({ type: 'reply', id: m.id, error: { message, code: (err as { code?: string })?.code } })
+    else post({ type: 'events', input: m.input, list: [{ type: 'diag', code: 'worker.error', level: 'warn', data: { message, on: m.type } }] })
   }
 }
