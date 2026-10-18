@@ -525,6 +525,8 @@ function dispose(input: number): void {
   if (r) {
     clearInterval(r.timer)
     r.spot?.net.release()
+    r.enroll?.net.release()
+    r.chain?.release()
     inputs.delete(input)
   }
   learning.get(input)?.port.close()
@@ -544,6 +546,7 @@ self.onmessage = async (e: MessageEvent) => {
         post({ type: 'reply', id: m.id, result: true })
         break
       case 'realtime': {
+        dispose(m.input)
         const r = realtime(m.input, m.opts, m.bg ?? null, m.out ?? null)
         if (m.bg)
           (m.bg as MessagePort).onmessage = (ev: MessageEvent) => {

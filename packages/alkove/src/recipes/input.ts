@@ -532,6 +532,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       if (track) this.stream = new MediaStream([track])
       await this.build()
       this.watchContext()
+      this.rt?.post({ type: 'dispose', input: this.id })
       this.rt = null
       void this.startModels()
     } else if (track) await this.setStream(new MediaStream([track]))

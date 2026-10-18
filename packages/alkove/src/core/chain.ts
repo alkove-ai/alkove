@@ -89,6 +89,11 @@ export class Chain {
     return this.level.db
   }
 
+  release(): void {
+    this.focus.release()
+    this.cue.release()
+  }
+
   // applied at the next silence, from a fresh state
   setPrint(embedding: ArrayLike<number> | null): void {
     this.pending = embedding
