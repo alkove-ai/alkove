@@ -133,9 +133,8 @@ export class Chain {
     if (this.asleep && this.micLevel > WAKE_MIN && this.micLevel > this.floor * 10 ** (WAKE_DB / 10)) {
       this.asleep = false
       this.quiet = 0
-      this.fresh(emit, 'wake')
-      this.cue.reset()
-      this.cueSteps = 0
+      // the state is kept across the sleep, as chat's worklet did: a fresh one leaks the first frames of a voice the print refuses
+      if (this.pending !== undefined) this.fresh(emit, 'wake')
       emit({ type: 'idle', asleep: false, at })
     }
     if (this.asleep) this.focusOut.fill(0)
