@@ -68,7 +68,7 @@ localStorage.setItem('word', JSON.stringify(word))
 const wake = await createWakeListener({ words: [localStorage.getItem('word')!] })
 ```
 
-A word compiled for another version of Spot is refused with a `TypeError` (`word.version`): compile its text again, or enroll it again.
+A word compiled for another version of Spot is refused with an `AlkoveError` (`word.outdated`): compile its text again, or enroll it again.
 
 ## A level meter
 

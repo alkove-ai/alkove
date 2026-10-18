@@ -4,6 +4,8 @@ import { Resampler } from '../dsp/resample'
 export const HOP = 256
 // a hop on the wire: 256 samples, then the far end's quiet time, then the activation it belongs to
 export const WIRE = HOP + 2
+// in place of the activation: a raw-mode hop, for the app's audio only (agent input)
+export const RAW_HOP = -1
 const RATE16 = 16000
 // output primed with this many hops: the worker's round trip
 const PRIME_HOPS = 2
@@ -25,6 +27,7 @@ export type CoreMessage =
   | { type: 'overload'; queueMs: number; sent: number; received: number }
   | { type: 'retry' }
   | { type: 'timing'; queueMs: [number, number]; debtMs: number; droppedMs: number; latencyMs: number }
+  | { type: 'raw'; pcm: Float32Array }
 
 class Queue {
   buf: Float32Array
@@ -96,15 +99,19 @@ export class WorkletCore {
   farQuietMs = Infinity
   private frames = 0
   private silence = new Float32Array(0)
+  private tap: { down: Resampler; in16: Queue; hop: Float32Array } | null = null
   // the 16 kHz sample the next hop starts at: hops pause in raw mode, the worker's clock must not
   onActivate: ((at16: number) => void) | null = null
 
+  // tapRaw: in raw mode the 16 kHz mic still goes out, to the worker when it is there, else to the main thread
   constructor(
     readonly rate: number,
     readonly delay16: number,
     private now: () => number,
     private emit: (m: CoreMessage) => void,
+    tapRaw = false,
   ) {
+    if (tapRaw) this.tap = { down: new Resampler(rate, RATE16), in16: new Queue(4096), hop: new Float32Array(WIRE) }
     this.fade = 1 - Math.exp(-1 / ((FADE_MS / 1000) * rate))
     this.floor = Math.round(HOP * (rate / RATE16))
     this.raw = new Float32Array(Math.max(1, this.latency))
@@ -122,10 +129,9 @@ export class WorkletCore {
 
   connect(send: (hop: Float32Array) => void): void {
     this.send = send
-    if (!this.stopped) this.activate()
+    this.activate()
   }
 
-  // the models are gone for good (engine crashed): raw until a new connect
   // the worker builds a session: raw at the same delay, then the models again, without counting it as an overload
   pause(on: boolean): void {
     if (on) {
@@ -133,6 +139,7 @@ export class WorkletCore {
     } else if (this.mode === 'raw' && !this.stopped && !this.retryAt && this.send) this.activate()
   }
 
+  // the engine crashed: raw until a new connect
   stop(): void {
     this.stopped = true
     this.mode = 'raw'
@@ -200,7 +207,7 @@ export class WorkletCore {
         this.sent++
       }
       this.drain(output)
-    }
+    } else if (this.tap) this.tapRaw(input)
     for (let i = 0; i < n; i++) {
       const x = input[i] ?? 0
       const late = raw[this.rawPos]!
@@ -210,6 +217,19 @@ export class WorkletCore {
       output[i] = this.mode === 'active' || this.mix > 1e-4 ? this.mix * (this.mode === 'active' ? output[i]! : 0) + (1 - this.mix) * late : late
     }
     if (this.mode === 'active') this.track()
+  }
+
+  private tapRaw(input: Float32Array): void {
+    const t = this.tap!
+    t.down.push(input, (x) => t.in16.push(x))
+    while (t.in16.size >= HOP) {
+      t.in16.pull(t.hop, HOP)
+      if (this.send && !this.stopped) {
+        t.hop[HOP] = this.farQuietMs
+        t.hop[HOP + 1] = RAW_HOP
+        this.send(t.hop)
+      } else this.emit({ type: 'raw', pcm: t.hop.slice(0, HOP) })
+    }
   }
 
   private drain(output: Float32Array): void {

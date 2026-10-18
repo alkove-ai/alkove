@@ -6,10 +6,11 @@ import type { Warning } from '../core/lex'
 import { Voiceprint, type VoiceprintJSON } from '../core/timbre'
 import { AlkoveError, type Diag } from '../errors'
 import { Emitter } from '../events'
-import { onDiag, report } from '../loader'
+import { onDiag } from '../loader'
 import { FOCUS, type Lang, RATE } from '../manifest'
 import { printOf } from '../process'
-import type { OutputOptions, RealtimeOptions } from '../realtime/worker'
+import { type OutputOptions, Packer } from '../realtime/packer'
+import type { RealtimeOptions } from '../realtime/worker'
 import { Host, scriptUrl, type WorkerLink } from '../runtime/host'
 import { Enrollment, type EnrollTarget } from './enroll'
 import { openMic, processed, supported } from './mic'
@@ -67,6 +68,9 @@ const KEEP_ALIVE_GAIN = 0.002
 let ids = 0
 const contexts = new WeakMap<BaseAudioContext, Promise<void>>()
 const inputs = new Set<AlkoveInput>()
+// inputs created and not disposed, the ones still opening included: the workers close when none is left
+let alive = 0
+const STALE_PRINT = 'This print comes from another Timbre: ignored, learn it again.'
 
 export abstract class AlkoveInput extends Emitter<InputEvents> {
   protected readonly id = ++ids
@@ -88,6 +92,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   private retryMs = RETRY_MS
   private retryTimer: ReturnType<typeof setTimeout> | undefined
   private started = 0
+  private counted = false
   private enabled = true
   private printed = false
   private sender: RTCRtpSender | null = null
@@ -138,7 +143,22 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     return 0
   }
 
+  // a creation that fails leaves nothing behind: no mic, no context, no listener
   protected async open(): Promise<void> {
+    alive++
+    this.counted = true
+    try {
+      await this.opening()
+    } catch (e) {
+      this.dispose()
+      throw e
+    }
+  }
+
+  private async opening(): Promise<void> {
+    // first, so diags raised while opening (mic.waiting) reach the input too
+    this.offs.push(onDiag((d) => this.diag(d)))
+    if (this.opts.voiceprint && !printOf(this.opts.voiceprint)) this.diag({ code: 'voiceprint.reset', level: 'warn', message: STALE_PRINT })
     const s = supported()
     if (!s.secure) throw new AlkoveError('page.insecure', 'The microphone needs HTTPS (or localhost).')
     if (!s.worklet) throw new AlkoveError('browser.unsupported', 'No AudioWorklet in this browser (Safari 14.1 or later).')
@@ -167,7 +187,6 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     this.watchContext()
     this.watchTrack(track)
     if (this.ownStream && o.followDefault !== false && !o.deviceId) this.followDefault()
-    this.offs.push(onDiag((d) => this.diag(d)))
     void this.startModels()
     this.release()
   }
@@ -182,7 +201,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       contexts.set(ctx, loading)
     }
     await loading
-    this.node = new AudioWorkletNode(ctx, 'alkove', { numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: { delay16: this.delay16 } })
+    this.node = new AudioWorkletNode(ctx, 'alkove', { numberOfInputs: 2, numberOfOutputs: 1, outputChannelCount: [1], processorOptions: { delay16: this.delay16, tapRaw: this.kind === 'agent' } })
     this.node.port.onmessage = (e) => this.onWorklet(e.data)
     this.source = ctx.createMediaStreamSource(this.stream)
     this.source.connect(this.node, 0, 0)
@@ -207,11 +226,15 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       this.setMode('raw', 'overload')
     } else if (m.type === 'retry') this.setMode(this.activeMode())
     else if (m.type === 'latency') this._latency = Math.round(m.ms)
+    else if (m.type === 'raw') this.rawAudio(m.pcm)
     else if (m.type === 'timing') {
       this._latency = m.latencyMs
       this.diag({ code: 'queue', level: 'info', ...m })
     }
   }
+
+  // raw mode without a worker (models loading or failed, engine crashed): the agent's audio still goes out
+  protected rawAudio(_pcm: Float32Array): void {}
 
   protected activeMode(): Mode {
     if (!this.enabled) return 'raw'
@@ -276,8 +299,9 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       if (this.disposed) return
       this.rt = rt
       this.offs.push(rt.listen((m) => this.onRealtime(m)))
-      const out = (this.opts as { output?: { port?: MessagePort } }).output?.port
+      const out = this.appPort()
       const transfer: Transferable[] = [...(bgPort ? [bgPort] : []), ...(out ? [out] : [])]
+      if (out) this.portGiven = true
       await rt.request({ type: 'realtime', input: this.id, opts: this.realtimeOptions(), bg: bgPort, out }, transfer)
       if (this.spotWords?.words.length) {
         await host.models('realtime', ['spot'])
@@ -297,6 +321,12 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       this.retryTimer = setTimeout(() => void this.startModels(), this.retryMs)
       this.retryMs = Math.min(2 * this.retryMs, RETRY_MAX_MS)
     }
+  }
+
+  // the app's own port for audio and utterances, until it is handed to a worker (once: a crashed worker takes it along)
+  protected portGiven = false
+  protected appPort(): MessagePort | undefined {
+    return this.portGiven ? undefined : (this.opts as { output?: { port?: MessagePort } }).output?.port
   }
 
   // the background worker: Timbre for learning the print, or for checking the voice of a wake
@@ -322,7 +352,12 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       else this.emit('utterance', { pcm: m.pcm, start: m.start, end: m.end })
     } else if (m.type === 'crash') {
       this.node.port.postMessage({ type: 'stop' })
+      this.rt = null
+      this.diag({ code: 'engine.crash', level: 'warn', message: `The engine stopped: raw microphone; retry in ${this.retryMs / 1000} s.`, error: m.message })
       this.setMode('raw', 'failed')
+      clearTimeout(this.retryTimer)
+      this.retryTimer = setTimeout(() => void this.startModels(), this.retryMs)
+      this.retryMs = Math.min(2 * this.retryMs, RETRY_MAX_MS)
     }
   }
 
@@ -577,6 +612,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   // words read in Focus's output, in the same worker: no second microphone, no second Focus; with a print Focus already keeps only that voice (onlyMyVoice)
   spot(words: readonly (Word | WordJSON | string)[], opts: { context?: Context; onlyMyVoice?: boolean } = {}): SpotHandle {
     if (this.kind === 'wake') throw new TypeError('spot() reads Focus: use the wake listener itself')
+    if (opts.onlyMyVoice && !printOf(this.opts.voiceprint) && !this.opts.learn) this.diag({ code: 'spot.no-print', level: 'warn', message: "onlyMyVoice relies on this input's print: give it a voiceprint (or learn: true), else the closest voice wakes it." })
     return new SpotHandle(this, words.map((w) => wordOf(w).toJSON()), opts.context ?? 'anywhere')
   }
 
@@ -607,6 +643,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     if (this.disposed) return
     clearTimeout(this.retryTimer)
     this.setStatus('disposed')
+    if (this.counted && --alive === 0) void Host.get().idle()
     for (const off of this.offs) off()
     this.offs = []
     this.rt?.post({ type: 'dispose', input: this.id })
@@ -631,6 +668,10 @@ class CallInput extends AlkoveInput {
 
   constructor(protected opts: CallOptions) {
     super(opts)
+  }
+
+  get track(): MediaStreamTrack {
+    return super.track!
   }
 
   protected get delay16(): number {
@@ -702,9 +743,25 @@ export interface AgentOptions extends FocusOptions {
 
 class AgentInput extends AlkoveInput {
   protected readonly kind = 'agent' as const
+  private packer: Packer | null = null
 
   constructor(protected opts: AgentOptions) {
     super(opts)
+  }
+
+  protected rawAudio(pcm: Float32Array): void {
+    // with the app's own port, never on the main thread: once the port went to a worker, these few raw packets are dropped
+    this.packer ??= new Packer(this.output(), (chunk) => {
+      const port = this.appPort()
+      if (port) port.postMessage({ type: 'audio', pcm: chunk }, [chunk])
+      else if (!this.opts.output?.port) this.emit('audio', chunk)
+    })
+    this.packer.push(pcm)
+  }
+
+  private output(): OutputOptions {
+    const o = this.opts.output ?? {}
+    return { format: o.format ?? 'f32', rate: o.rate ?? RATE, chunkMs: Math.max(16, Math.round((o.chunkMs ?? 32) / 16) * 16) }
   }
 
   protected get delay16(): number {
@@ -724,7 +781,6 @@ class AgentInput extends AlkoveInput {
   }
 
   protected realtimeOptions(): RealtimeOptions {
-    const o = this.opts.output ?? {}
     const print = printOf(this.opts.voiceprint)
     return {
       pipeline: 'agent',
@@ -733,13 +789,7 @@ class AgentInput extends AlkoveInput {
       keepRecent: this.opts.keepRecent,
       trace: this.opts.trace,
       stats: this.opts.stats,
-      output: {
-        format: o.format ?? 'f32',
-        rate: o.rate ?? RATE,
-        chunkMs: Math.max(16, Math.round((o.chunkMs ?? 32) / 16) * 16),
-        audio: true,
-        utterance: true,
-      },
+      output: { ...this.output(), audio: true, utterance: true },
     }
   }
 
@@ -772,7 +822,8 @@ class WakeListener extends AlkoveInput {
     super(opts)
     this.words = opts.words.map((w) => wordOf(w).toJSON())
     if (!this.words.length) throw new TypeError('createWakeListener: no word')
-    for (const w of this.words) if (w.chain === 'focus') report({ code: 'word.chain', level: 'warn', message: `"${w.text}" was enrolled behind Focus: its thresholds are off on the raw microphone.` })
+    for (const w of this.words) if (w.chain === 'focus') this.diag({ code: 'word.chain', level: 'warn', message: `"${w.text}" was enrolled behind Focus: its thresholds are off on the raw microphone.` })
+    if (opts.onlyMyVoice && !this.reference()) this.diag({ code: 'voiceprint.reset', level: 'warn', message: `onlyMyVoice: ${STALE_PRINT}` })
   }
 
   protected models(): ('focus' | 'cue' | 'spot')[] {

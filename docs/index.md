@@ -11,7 +11,7 @@ Alkove turns a microphone into clean voice input, on the device. The `alkove` np
 import { createCallInput } from 'alkove'
 
 const input = await createCallInput()
-pc.addTrack(input.track!) // only the user's voice goes out
+pc.addTrack(input.track) // only the user's voice goes out
 ```
 
 ## Read this first

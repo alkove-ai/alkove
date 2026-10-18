@@ -39,7 +39,9 @@ An [`AlkoveError`](/docs/reference/classes/alkoveerror/) has `name` `'AlkoveErro
 | `mic.not-found` | no microphone, an unknown `deviceId`, or a stream without an audio track | ask for another device |
 | `mic.busy` | another app or a call holds the microphone | try again later |
 | `page.insecure` | the page is not served over HTTPS (or localhost) | serve it over HTTPS |
-| `browser.unsupported` | no `AudioWorklet` (Safari before 14.1) or no `getUserMedia`; also `Alkove.process` on a non-WAV file outside a browser, and `Lex.phonemize` with an unknown language | offer another browser; decode the file yourself and pass `{ pcm, rate }` |
+| `lang.unsupported` | `Spot.compile`, `Spot.enroll` or `Lex.phonemize` with a language outside the seven | use one of `Lex.langs` |
+| `word.outdated` | a stored word was compiled for another Spot | compile or enroll its text again |
+| `browser.unsupported` | no `AudioWorklet` (Safari before 14.1) or no `getUserMedia`; also `Alkove.process` on a non-WAV file outside a browser | offer another browser; decode the file yourself and pass `{ pcm, rate }` |
 | `models.fetch` | a model or the engine could not be downloaded (network, HTTP error) | check `modelBaseUrl` and your CSP `connect-src` |
 | `models.hash` | a downloaded file does not match its sha256 (truncated download, or a CDN that rewrites files) | serve the files byte for byte; see [Self-hosting](/docs/guides/self-hosting/) |
 | `engine.failed` | a worker failed to start or crashed; `record()` before the models run; an enrollment that could not finish | retry later; report it with the message |
@@ -67,7 +69,7 @@ input.on('mode', ({ mode, reason }) => log('mode', mode, reason))
 | Raw `reason` | Cause | Next |
 |---|---|---|
 | `loading` | the models are loading | `focus` once they run |
-| `failed` | the models could not be loaded, or the engine crashed | new tries after a model failure; see below |
+| `failed` | the models could not be loaded, or the engine crashed | new tries by themselves; see below |
 | `overload` | the device is too slow for the models | a new try after 10 s |
 | `off` | you called `setEnabled(false)` | `setEnabled(true)` |
 | `unsupported` | no WebAssembly SIMD | raw for the whole session |
@@ -80,7 +82,7 @@ input.on('mode', ({ mode, reason }) => log('mode', mode, reason))
 | overload | 10 s | 20 s, 40 s, up to 160 s; back to 10 s once the models held for a minute |
 | microphone lost (opened by the SDK) | right away | 5 s, then doubled up to 60 s; never after `denied` |
 
-The overload rule: the output went empty for 250 ms in a row, or for 400 ms within 10 s. After an engine crash the input stays raw: create a new one.
+The overload rule: the output went empty for 250 ms in a row, or for 400 ms within 10 s. After an engine crash (`engine.crash` diag) the input goes raw and starts a new engine with the same delays as a model failure: 5 s, then 10 s, up to 60 s.
 
 ## Status
 
@@ -96,7 +98,7 @@ See [Phones and Safari](/docs/guides/mobile/).
 
 ## Diags
 
-A [`Diag`](/docs/reference/interfaces/diag/) is `{ code, level, message?, ...fields }`, with `level` `'info'` or `'warn'`. Inputs emit their own as `diag` events. Diags that are not about one input (`config.late`, `models.default-host`) go to `Alkove.onDiag` and to every open input; the ones raised before an input exists (`mic.waiting`, `word.chain`) reach `Alkove.onDiag` only. Plug both into your logs:
+A [`Diag`](/docs/reference/interfaces/diag/) is `{ code, level, message?, ...fields }`, with `level` `'info'` or `'warn'`. Inputs emit their own as `diag` events. Diags that are not about one input (`config.late`, `models.default-host`) go to `Alkove.onDiag` and to every open input. The ones raised while an input is created (`mic.waiting`, `word.chain`, `voiceprint.reset`) reach that input's `diag` events as soon as you subscribe. Plug both into your logs:
 
 ```ts
 input.on('diag', (d) => (d.level === 'warn' ? console.warn : console.debug)(d.code, d))
@@ -105,7 +107,7 @@ const off = Alkove.onDiag((d) => console.warn(d.code, d))
 
 | `code` | Level | When | Fields | What to do |
 |---|---|---|---|---|
-| `mic.waiting` | info | the permission prompt has had no answer for 5 s (`Alkove.onDiag` only) | | show a hint, or abort with `signal` |
+| `mic.waiting` | info | the permission prompt has had no answer for 5 s | | show a hint, or abort with `signal` |
 | `mic.processed` | warn | the stream you gave is processed by the browser | `settings` | open it with those settings off |
 | `mic.twice` | warn | two inputs on the same microphone | | use `input.spot()` on one input |
 | `learn.no-far-end` | warn | a call input learns without `farEnd` | | pass the remote track |
@@ -121,9 +123,11 @@ const off = Alkove.onDiag((d) => console.warn(d.code, d))
 | `focus.print` | info | a print was applied, at a silence | `print`, `after`, `why` | nothing |
 | `focus.reset` | info | Focus restarted from a fresh state | `after`, `why` | nothing |
 | `print.learn` / `print.reject` / `print.restart` | info | a learning window was accepted, refused, or the print started over | `score`, `progress`, `ms` | nothing |
-| `voiceprint.reset` | warn | a print from another version of Timbre was ignored | | let it learn again |
+| `voiceprint.reset` | warn | a print from another version of Timbre was ignored (`voiceprint`, `setVoiceprint`, `onlyMyVoice`) | | let it learn again |
+| `spot.no-print` | warn | `input.spot(words, { onlyMyVoice: true })` on an input without a print: the closest voice wakes it | | give the input a `voiceprint`, or `learn: true` |
+| `engine.crash` | warn | the engine stopped: raw microphone, a new engine after the retry delay | `error` | nothing, or tell the user |
 | `wake.other-voice` | info | `onlyMyVoice` refused a detection | `word`, `voice` | nothing |
-| `word.chain` | warn | a word enrolled behind Focus is used on the raw microphone (`Alkove.onDiag` only) | | use it with `input.spot()`, or enroll it with `Spot.enroll()` |
+| `word.chain` | warn | a word enrolled behind Focus is used on the raw microphone | | use it with `input.spot()`, or enroll it with `Spot.enroll()` |
 | `worker.error` | warn | an error in a worker that no call was waiting for | `message`, `on` | report it |
 
-Words also carry warnings (`word.too-short`, `word.no-margin`, `word.takes-differ`, `word.bounded`, `text.digits`, `text.acronym`, `text.abbreviation`). They are not diags: they come with the word and with an enrollment's `warning` events. See [Wake words](/docs/guides/wake-words/).
+Words also carry warnings (`word.too-short`, `word.no-margin`, `word.takes-differ`, `word.bounded`, `text.digits`, `text.acronym`, `text.abbreviation`). They are not diags: they are on `word.warnings`, an enrolled word's included, and come as an enrollment's `warning` events. See [Wake words](/docs/guides/wake-words/).

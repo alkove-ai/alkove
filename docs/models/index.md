@@ -69,7 +69,7 @@ Each version of the SDK pins its set of models by SHA-256. A file whose hash doe
 When a model changes, the SDK version changes with it, and the changelog says what to redo:
 
 - **Timbre changes**: voiceprints made by the previous Timbre no longer mean anything. `Voiceprint.fromJSON()` returns `null` for them: learn the print again (about 6 s of the user's voice with `learn: true`).
-- **Spot changes**: compiled words carry the Spot they were compiled for. A word from another Spot is refused (a `TypeError` starting with `word.version`): compile its text again, or enroll it again.
+- **Spot changes**: compiled words carry the Spot they were compiled for. A word from another Spot (another name or other weights) is refused with an `AlkoveError` `word.outdated`: compile its text again, or enroll it again.
 
 The `-preview` suffix means the weights and their interface may still change before version 1.
 

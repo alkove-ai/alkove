@@ -13,7 +13,10 @@ import { encodeWav } from '../dsp/wav'
 import { Ort } from '../engine/ort'
 import { FOCUS, type ModelName, RATE, TIMBRE } from '../manifest'
 import { makeCalls } from '../runtime/calls'
-import { HOP } from './core'
+import { HOP, RAW_HOP } from './core'
+import { encode, type OutputOptions, Packer } from './packer'
+
+export type { OutputOptions }
 
 declare const self: DedicatedWorkerGlobalScope
 
@@ -40,12 +43,6 @@ const WINDOW_HOP = 0.5 * RATE
 const WINDOW_RESET = 1 * RATE
 const PREROLL = 0.3
 
-export interface OutputOptions {
-  format: 'f32' | 's16'
-  rate: number
-  chunkMs: number
-}
-
 export interface RealtimeOptions {
   pipeline: 'call' | 'agent' | 'wake' | 'enroll'
   enroll?: { word: WordJSON; takes: number }
@@ -58,40 +55,6 @@ export interface RealtimeOptions {
   trace?: boolean
   stats?: boolean
   output?: OutputOptions & { audio: boolean; utterance: boolean }
-}
-
-class Packer {
-  private resampler: Resampler
-  private buf: Float32Array
-  private fill = 0
-
-  constructor(
-    readonly opts: OutputOptions,
-    private send: (chunk: ArrayBuffer) => void,
-  ) {
-    this.resampler = new Resampler(RATE, opts.rate)
-    this.buf = new Float32Array(Math.round((opts.rate * opts.chunkMs) / 1000))
-  }
-
-  push(pcm: Float32Array): void {
-    this.resampler.push(pcm, (x) => {
-      this.buf[this.fill++] = x
-      if (this.fill === this.buf.length) {
-        this.send(encode(this.buf, this.opts.format))
-        this.fill = 0
-      }
-    })
-  }
-}
-
-function encode(pcm: Float32Array, format: 'f32' | 's16'): ArrayBuffer {
-  if (format === 'f32') return pcm.slice().buffer
-  const out = new Int16Array(pcm.length)
-  for (let i = 0; i < pcm.length; i++) {
-    const x = Math.max(-1, Math.min(1, pcm[i]!))
-    out[i] = x < 0 ? x * 32768 : x * 32767
-  }
-  return out.buffer
 }
 
 interface Realtime {
@@ -175,6 +138,12 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
     })
   if (o?.audio) r.audio = new Packer(o, (chunk) => send(r, { type: 'audio', pcm: chunk }, [chunk]))
   if (opts.words?.length) setWords(r, opts.words, opts.context ?? 'anywhere')
+  if (chain && opts.trace) {
+    let rows = 0
+    chain.onCue = (speech, t) => {
+      if (rows++ % 3 === 0) emitTo(r, { type: 'trace', primitive: 'cue', t, speech: +speech.toFixed(3) })
+    }
+  }
   if (chain)
     chain.onFocus = (hop, t) => {
       feedSpot(r, hop)
@@ -317,6 +286,12 @@ function tapLearn(r: Realtime, hop: Float32Array): void {
 function onHop(r: Realtime, buf: ArrayBuffer, port: MessagePort): void {
   const f = new Float32Array(buf)
   const hop = f.subarray(0, HOP)
+  if (f[HOP + 1] === RAW_HOP) {
+    r.audio?.push(hop)
+    if (r.history) keepHistory(r, hop)
+    port.postMessage(buf, [buf])
+    return
+  }
   r.farQuietMs = f[HOP]!
   const raw = r.record || r.recent || r.stats ? hop.slice() : null
   const t0 = performance.now()
@@ -489,15 +464,16 @@ function onWindow(input: number, pcm: Float32Array, farQuietMs: number): void {
   event(input, { type: 'voiceprint', json: print.toJSON() })
 }
 
-type Rpc = { id: number; method: string; args: any[] }
+type Rpc = { id: number; method: string; args: any[]; progress?: boolean }
 
-function call({ id, method, args }: Rpc): unknown {
+function call({ id, method, args, progress }: Rpc): unknown {
   switch (method) {
+    case 'process':
+      return calls.process(args[0], args[1], progress ? (p) => post({ type: 'progress', id, p }) : undefined)
     case 'embed':
     case 'windows':
     case 'phonemize':
     case 'compile':
-    case 'process':
     case 'streamOpen':
     case 'streamPush':
     case 'streamEnd':

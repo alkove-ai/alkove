@@ -13,7 +13,7 @@ The call input keeps one voice: the person in front of the microphone. Use it on
 import { createCallInput } from 'alkove'
 
 const input = await createCallInput({ learn: true, farEnd: remoteTrack })
-const sender = pc.addTrack(input.track!)
+const sender = pc.addTrack(input.track)
 input.bind(sender) // the SDK swaps tracks itself if the audio clock stalls
 input.on('voiceprint', (p) => localStorage.setItem('print', JSON.stringify(p)))
 ```

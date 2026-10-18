@@ -7,7 +7,7 @@ declare class AudioWorkletProcessor {
 }
 
 interface Options {
-  processorOptions: { delay16: number }
+  processorOptions: { delay16: number; tapRaw?: boolean }
 }
 
 // resampling and queues only: the models run in a worker reached by a direct MessagePort, never the main thread
@@ -19,7 +19,7 @@ class AlkoveProcessor extends AudioWorkletProcessor {
 
   constructor(options: Options) {
     super()
-    this.core = new WorkletCore(sampleRate, options.processorOptions.delay16, () => Date.now(), (m) => this.port.postMessage(m))
+    this.core = new WorkletCore(sampleRate, options.processorOptions.delay16, () => Date.now(), (m) => this.port.postMessage(m), !!options.processorOptions.tapRaw)
     // the raw path already runs at the processed path's delay
     this.port.postMessage({ type: 'latency', ms: this.core.latencyMs })
     this.port.onmessage = (e: MessageEvent) => {

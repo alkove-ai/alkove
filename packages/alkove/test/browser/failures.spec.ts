@@ -56,6 +56,33 @@ test.describe('failures', () => {
     expect(Math.abs((outAt.at - r.outAt - 2 * hopIn) * 1000 - r.latency)).toBeLessThanOrEqual(12)
   })
 
+  test('agent input with the models in 404: its audio keeps coming, the raw mic in the asked format', async ({ page, origin, browserName }) => {
+    const token = `a${Date.now()}${browserName}`
+    await open(page, origin, { modelBaseUrl: `/flaky/${token}/` })
+    const r: any = await page.evaluate(async () => {
+      const lib = window.lib
+      const ctx = new AudioContext({ sampleRate: 48000 })
+      const player = new lib.Player(ctx)
+      const buf = await player.load('speech.wav')
+      const agent = await lib.sdk.createAgentInput({ stream: player.stream, audioContext: ctx, output: { format: 's16', rate: 24000 } })
+      await lib.until(() => agent.mode === 'raw', 10000, 'raw')
+      const packets: ArrayBuffer[] = []
+      agent.on('audio', (pcm: ArrayBuffer) => packets.push(pcm))
+      player.play(buf, { delay: 0.1 })
+      await lib.until(() => ctx.currentTime > player.end + 0.3, 30000, 'played')
+      const mode = { mode: agent.mode, reason: (agent as any)._mode?.reason }
+      agent.dispose()
+      let peak = 0
+      for (const p of packets) for (const x of new Int16Array(p)) peak = Math.max(peak, Math.abs(x))
+      return { n: packets.length, sizes: [...new Set(packets.map((p) => p.byteLength))], peak, seconds: buf.duration, mode }
+    })
+    expect(r.mode.mode).toBe('raw')
+    // 32 ms packets of 24 kHz s16 for the whole playback
+    expect(r.sizes).toEqual([1536])
+    expect(r.n).toBeGreaterThanOrEqual(Math.floor((r.seconds * 1000) / 32) - 2)
+    expect(r.peak).toBeGreaterThan(3000)
+  })
+
   test('input.latency is the real delay before the models are in too', async ({ page, origin, browserName }) => {
     const token = `l${Date.now()}${browserName}`
     await open(page, origin, { modelBaseUrl: `/flaky/${token}/` })

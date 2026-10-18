@@ -136,7 +136,7 @@ Each word of a phrase is read on its own; what happens between words is left out
 
 - `focus`: `{ t, db }`, the output level of each Focus hop;
 - `spot`: `{ t, speech, <word>: score }` every 30 ms, one column per word;
-- `cue`: `{ t, speech }` every 30 ms, when Cue runs without Focus.
+- `cue`: `{ t, speech }` every 30 ms, Cue's speech probability (on Focus's output when Focus runs).
 
 Plot them to see why a word did not fire or where Focus cut. The real-time inputs take `trace: true` too and emit the rows as `trace` events.
 

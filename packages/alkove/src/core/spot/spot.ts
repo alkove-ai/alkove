@@ -1,4 +1,5 @@
-import { type Lang, MODELS, SPOT } from '../../manifest'
+import { AlkoveError } from '../../errors'
+import { type Lang, modelId, SPOT } from '../../manifest'
 import { Chunker } from '../chunker'
 import type { StreamNet } from '../engine'
 import type { Lex, Warning } from '../lex'
@@ -57,7 +58,7 @@ export class Word {
   toJSON(): WordJSON {
     return {
       alkove: 'word',
-      spot: MODELS.spot.name,
+      spot: modelId('spot'),
       text: this.text,
       lang: this.lang,
       phonemes: this.phonemes.map(({ ipa, lang, p }) => ({ ipa, lang, p: +p.toFixed(4) })),
@@ -71,7 +72,7 @@ export class Word {
   static fromJSON(json: WordJSON | string): Word | null {
     const j: WordJSON = typeof json === 'string' ? JSON.parse(json) : json
     if (j.alkove !== 'word') throw new TypeError('not an Alkove word')
-    if (j.spot !== MODELS.spot.name) return null
+    if (j.spot !== modelId('spot')) return null
     const phonemes = j.phonemes.map((v) => ({ ...v, ids: toIds(v.ipa, v.lang) ?? [] })).filter((v) => v.ids.length)
     return new Word(j.text, j.lang, phonemes, j.thresholds, j.calibrated, j.chain)
   }
@@ -80,7 +81,7 @@ export class Word {
 export const wordOf = (w: Word | WordJSON | string): Word => {
   if (w instanceof Word) return w
   const word = Word.fromJSON(w)
-  if (!word) throw new TypeError(`word.version: compiled for another Spot, compile "${typeof w === 'string' ? JSON.parse(w).text : w.text}" again`)
+  if (!word) throw new AlkoveError('word.outdated', `Compiled for another Spot: compile "${typeof w === 'string' ? JSON.parse(w).text : w.text}" again.`)
   return word
 }
 
@@ -169,6 +170,9 @@ export interface WakeEvent {
   context: 'pause' | 'anywhere'
   start: number
   end: number
+  // a wake listener's: the word's raw audio (16 kHz), and with onlyMyVoice the likeness to the print
+  audio?: Float32Array
+  voice?: number
 }
 
 interface Listening {

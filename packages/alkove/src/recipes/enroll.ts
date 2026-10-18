@@ -1,6 +1,6 @@
 import type { Warning } from '../core/lex'
 import type { Take } from '../core/spot/enroll'
-import { type Word, type WordJSON, wordOf } from '../core/spot/spot'
+import { Word, type WordJSON, wordOf } from '../core/spot/spot'
 import type { Voiceprint } from '../core/timbre'
 import { AlkoveError } from '../errors'
 import { Emitter } from '../events'
@@ -45,7 +45,9 @@ export class Enrollment extends Emitter<{ take: Take; warning: Warning }> {
       if (r.error || !r.word) throw new AlkoveError('engine.failed', r.error ?? 'enrollment failed')
       for (const w of r.warnings ?? []) this.emit('warning', w)
       const voiceprint = r.audio && r.audio.length >= 4000 ? await tools.embed(r.audio, target.source) : null
-      return { word: wordOf(r.word), voiceprint }
+      const w = wordOf(r.word)
+      const word = new Word(w.text, w.lang, w.phonemes, w.thresholds, w.calibrated, w.chain, [...typed.warnings, ...(r.warnings ?? [])])
+      return { word, voiceprint }
     } finally {
       for (const off of offs) off()
       target.stop()

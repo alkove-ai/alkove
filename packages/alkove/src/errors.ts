@@ -1,4 +1,4 @@
-export type ErrorCode = 'mic.denied' | 'mic.not-found' | 'mic.busy' | 'page.insecure' | 'browser.unsupported' | 'models.fetch' | 'models.hash' | 'engine.failed'
+export type ErrorCode = 'mic.denied' | 'mic.not-found' | 'mic.busy' | 'page.insecure' | 'browser.unsupported' | 'models.fetch' | 'models.hash' | 'engine.failed' | 'lang.unsupported' | 'word.outdated'
 
 // only what leaves the app without any sound fails an input; the rest is `mode`, `diag` and retries
 export class AlkoveError extends Error {

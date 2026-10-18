@@ -94,6 +94,7 @@ export class Processor {
         print: printOf(focusOpts.voiceprint)?.embedding ?? null,
         speech,
       })
+      if (opts.trace) this.chain.onCue = (speech, t) => this.trace().cue.push({ t: +t.toFixed(3), speech })
       this.chain.onFocus = (hop, t) => {
         if (this.spot) this.feedSpot(hop)
         if (opts.trace) {

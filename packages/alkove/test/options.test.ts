@@ -3,7 +3,10 @@ import { join } from 'node:path'
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { Alkove, Spot, Timbre } from '../src/index'
+import { Alkove, Spot, Timbre, Voiceprint } from '../src/index'
+import { Chain } from '../src/core/chain'
+import { Cue } from '../src/core/cue'
+import { Focus } from '../src/core/focus'
 import { WasmEngine } from '../src/core/engine'
 import { processPcm } from '../src/process'
 import { loadOrt, maxDiff, modelBytes, ortFiles, wav } from './helpers'
@@ -71,6 +74,30 @@ describe('every option does something', () => {
     const n = wav('speech.wav').length
     expect(r.trace!.focus.length).toBeGreaterThanOrEqual(Math.floor(n / 256))
     expect(r.trace!.focus.at(-1)!.t).toBeGreaterThanOrEqual((n - 256) / 16000)
+    // Cue's rows with Focus on too, one per 30 ms
+    expect(r.trace!.cue.length).toBeGreaterThanOrEqual(Math.floor(n / 480) - 4)
+    expect(Math.max(...r.trace!.cue.map((c) => c.speech))).toBeGreaterThan(0.5)
+  })
+
+  it('setEnabled(false): the raw mic at the chain delay, without level or gate', () => {
+    const raw = mix()
+    const chain = new Chain(new Focus(engine.stream('focus')), new Cue(engine.stream('cue')), { gate: true, normalize: true })
+    chain.setEnabled(false)
+    const out = chain.push(raw, () => {})
+    chain.release()
+    const d = chain.delay
+    let err = 0
+    for (let i = d + 2000; i < out.length; i++) err = Math.max(err, Math.abs(out[i]! - raw[i - d]!))
+    expect(err).toBeLessThan(1e-4)
+  })
+
+  it('outdated words and prints: an AlkoveError for a word, null for a print', async () => {
+    const word = (await Spot.compile('amendement', { lang: 'fr' })).toJSON()
+    const old = { ...word, spot: 'alkove-spot-1-preview' }
+    await expect(Alkove.process({ pcm: new Float32Array(16000), rate: 16000 }, { spot: { words: [old] } })).rejects.toMatchObject({ name: 'AlkoveError', code: 'word.outdated' })
+    const print = (await (await Timbre.create()).embed(wav('speech.wav'))).toJSON()
+    expect(Voiceprint.fromJSON({ ...print, model: 'alkove-timbre-1-preview' })).toBeNull()
+    await expect(Spot.compile('amendement', { lang: 'xx' as never })).rejects.toMatchObject({ code: 'lang.unsupported' })
   })
 })
 

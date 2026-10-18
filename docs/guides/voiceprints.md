@@ -120,7 +120,7 @@ The same print works for `onlyMyVoice` on a wake listener: see [wake words](/doc
 
 ## When prints expire
 
-A print belongs to the Timbre model that made it; its JSON names that model. When an SDK version ships a new Timbre, old prints mean nothing to it: `Voiceprint.fromJSON` returns `null`, and `input.setVoiceprint` ignores the print with a `voiceprint.reset` diag. Learn the print again (about 6 s of the user's voice with `learn: true`). The changelog says when a version changes Timbre.
+A print belongs to the Timbre model that made it; its JSON names that model. When an SDK version ships a new Timbre, old prints mean nothing to it: `Voiceprint.fromJSON` returns `null`, and an input ignores the print with a `voiceprint.reset` diag, whether it came at creation, through `setVoiceprint` or as `onlyMyVoice`. Learn the print again (about 6 s of the user's voice with `learn: true`). The changelog says when a version changes Timbre.
 
 :::note[Biometric data]
 A print that recognizes a person is biometric data in many laws, the GDPR among them. Ask before you learn or keep one, and let the user delete it. See [privacy](/docs/guides/privacy/).

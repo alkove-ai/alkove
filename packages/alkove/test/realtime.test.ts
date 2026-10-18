@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { Delay } from '../src/core/level'
-import { type CoreMessage, HOP, WIRE, WorkletCore } from '../src/realtime/core'
+import { type CoreMessage, HOP, RAW_HOP, WIRE, WorkletCore } from '../src/realtime/core'
 
 const RATE = 48000
 const Q = 128
@@ -115,6 +115,43 @@ describe('worklet core with a fake clock', () => {
     retries = r.messages.filter((m) => m.type === 'retry').length
     expect(overloads).toBeGreaterThanOrEqual(2)
     expect(retries).toBe(overloads - 1)
+  })
+
+  it('agent input in raw mode: 16 kHz hops to the main thread before the worker, to the worker (marked raw) during an overload', () => {
+    let now = 0
+    const messages: CoreMessage[] = []
+    const core = new WorkletCore(RATE, 0, () => now, (m) => messages.push(m), true)
+    const out = new Float32Array(Q)
+    const run = (ms: number) => {
+      for (let k = 0; k < quanta(ms); k++) {
+        now += quantumMs
+        core.process(new Float32Array(Q).fill(0.1), null, out)
+      }
+    }
+    run(1000)
+    const raw = messages.filter((m) => m.type === 'raw')
+    expect(raw.length).toBeGreaterThanOrEqual(61)
+    expect(raw.every((m) => m.type === 'raw' && m.pcm.length === HOP)).toBe(true)
+    const sent: Float32Array[] = []
+    core.connect((h) => sent.push(h.slice(0, WIRE)))
+    run(300)
+    expect(core.mode).toBe('raw')
+    const before = sent.length
+    run(1000)
+    const tapped = sent.slice(before)
+    expect(tapped.length).toBeGreaterThanOrEqual(61)
+    expect(tapped.every((h) => h[HOP + 1] === RAW_HOP)).toBe(true)
+    expect(messages.filter((m) => m.type === 'raw').length).toBe(raw.length)
+  })
+
+  it('engine crashed (stop): raw, and a new connect brings the models back', () => {
+    const r = rig()
+    r.step(quanta(200))
+    r.core.stop()
+    r.step(quanta(200))
+    expect(r.core.mode).toBe('raw')
+    r.core.connect(() => {})
+    expect(r.core.mode).toBe('active')
   })
 
   it('far end: quiet time counted, reset when the app says its voice plays', () => {

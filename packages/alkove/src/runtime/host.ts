@@ -2,7 +2,7 @@ import { AlkoveError } from '../errors'
 import { currentConfig, loadFile, loadModel, lockConfig, type Progress, report, under } from '../loader'
 import { type ModelName, ORT_WASM } from '../manifest'
 
-type Reply = { resolve: (v: any) => void; reject: (e: unknown) => void }
+type Reply = { resolve: (v: any) => void; reject: (e: unknown) => void; progress?: (p: any) => void }
 
 // a worker spoken to by messages; replies matched by id
 export class WorkerLink {
@@ -18,7 +18,8 @@ export class WorkerLink {
         this.replies.delete(m.id)
         if (m.error) r?.reject(Object.assign(new Error(m.error.message), { code: m.error.code }))
         else r?.resolve(m.result)
-      } else for (const fn of this.listeners) fn(m)
+      } else if (m?.type === 'progress') this.replies.get(m.id)?.progress?.(m.p)
+      else for (const fn of this.listeners) fn(m)
     }
     worker.onerror = (e) => {
       for (const r of this.replies.values()) r.reject(new AlkoveError('engine.failed', e.message || 'worker failed'))
@@ -32,16 +33,20 @@ export class WorkerLink {
     return () => void this.listeners.delete(fn)
   }
 
-  request<T>(message: Record<string, unknown>, transfer: Transferable[] = []): Promise<T> {
+  get busy(): boolean {
+    return this.replies.size > 0
+  }
+
+  request<T>(message: Record<string, unknown>, transfer: Transferable[] = [], progress?: (p: any) => void): Promise<T> {
     const id = this.next++
     return new Promise<T>((resolve, reject) => {
-      this.replies.set(id, { resolve, reject })
-      this.worker.postMessage({ ...message, id }, transfer)
+      this.replies.set(id, { resolve, reject, progress })
+      this.worker.postMessage({ ...message, id, progress: !!progress }, transfer)
     })
   }
 
-  call<T>(method: string, args: unknown[], transfer: Transferable[] = []): Promise<T> {
-    return this.request<T>({ type: 'call', method, args }, transfer)
+  call<T>(method: string, args: unknown[], transfer: Transferable[] = [], progress?: (p: any) => void): Promise<T> {
+    return this.request<T>({ type: 'call', method, args }, transfer, progress)
   }
 
   post(message: Record<string, unknown>, transfer: Transferable[] = []): void {
@@ -70,7 +75,7 @@ export function ortModule(onProgress?: (p: Progress) => void): Promise<WebAssemb
   return (wasm ??= (async () => {
     const own = currentConfig().models?.ort
     const base = currentConfig().assetBaseUrl
-    const url = own ?? (base ? under(base, ORT_WASM.file) : new URL(`./${ORT_WASM.file}`, import.meta.url).href)
+    const url = own ?? (base ? under(base, ORT_WASM.file) : new URL('./alkove-ort.wasm', import.meta.url).href)
     const bytes = await loadFile(ORT_WASM, onProgress, url)
     return WebAssembly.compile(bytes as Uint8Array<ArrayBuffer>)
   })().catch((e) => {
@@ -94,6 +99,8 @@ export class Host {
     return (this.links[role] ??= (async () => {
       const [module, url] = await Promise.all([ortModule(), scriptUrl('worker')])
       const link = new WorkerLink(new Worker(url, { type: 'module', name: `alkove-${role}` }))
+      const mine = this.links[role]
+      link.listen((m) => m.type === 'crash' && this.links[role] === mine && this.drop(role, link))
       await new Promise<void>((resolve, reject) => {
         const off = link.listen((m) => {
           if (m.type === 'booted') {
@@ -108,6 +115,21 @@ export class Host {
       delete this.links[role]
       throw e
     }))
+  }
+
+  private drop(role: 'realtime' | 'background', link: WorkerLink): void {
+    delete this.links[role]
+    this.sent[role].clear()
+    link.worker.terminate()
+  }
+
+  // no input left: the workers and their sessions go (the background one only when no call is waiting); the next use starts them again
+  async idle(): Promise<void> {
+    for (const role of ['realtime', 'background'] as const) {
+      const p = this.links[role]
+      const link = p && (await p.catch(() => null))
+      if (link && this.links[role] === p && (role === 'realtime' || !link.busy)) this.drop(role, link)
+    }
   }
 
   async models(role: 'realtime' | 'background', names: ModelName[], onProgress?: (p: Progress) => void): Promise<WorkerLink> {

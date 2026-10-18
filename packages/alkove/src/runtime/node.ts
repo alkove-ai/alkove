@@ -14,7 +14,7 @@ export class NodeBackend {
 
   async ready(names: ModelName[]): Promise<this> {
     if (!this.engine) {
-      const wasm = await loadFile(ORT_WASM, undefined, new URL(`./${ORT_WASM.file}`, import.meta.url).href)
+      const wasm = await loadFile(ORT_WASM, undefined, new URL('./alkove-ort.wasm', import.meta.url).href)
       const ort = await Ort.create(factory, await WebAssembly.compile(wasm as Uint8Array<ArrayBuffer>))
       this.engine = new WasmEngine(ort, (name) => this.bytes.get(name)!)
     }

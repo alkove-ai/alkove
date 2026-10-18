@@ -96,8 +96,9 @@ test.describe('enrolling a word', () => {
       await lib.until(() => ctx.currentTime > player.end + 1, 30000, 'played')
       call.dispose()
       const diags: string[] = []
-      lib.sdk.Alkove.onDiag((d: any) => diags.push(d.code))
       const wake = await lib.sdk.createWakeListener({ stream: player.stream, audioContext: ctx, words: [done.word] })
+      wake.on('diag', (d: any) => diags.push(d.code))
+      await lib.sleep(50)
       wake.dispose()
       return { takes, word: done.word.toJSON(), print: done.voiceprint?.toJSON() ?? null, wakes, diags }
     })

@@ -77,7 +77,7 @@ On that port you receive `{ type: 'audio', pcm }` and `{ type: 'utterance', pcm,
 
 ## While the models are not running
 
-`audio`, `utterance` and the speech events come from the worker that runs the models. While the input is `raw` (models loading or failed, a device too slow), they stop until the models run again; only the track, with `withTrack`, keeps carrying the microphone. Watch `mode` and tell the user:
+While the input is `raw` (models loading or failed, a device too slow, the engine restarting), `audio` keeps coming in the same format, with the raw microphone. `utterance` and the speech events need Cue: they stop until the models run again. Watch `mode` and tell the user:
 
 ```ts
 input.on('mode', ({ mode, reason }) => { if (mode === 'raw' && reason !== 'loading') showWarning(reason) })
@@ -141,6 +141,6 @@ The user says the word `takes` times (3 by default). Spot reads the takes behind
 
 ## Closing
 
-`input.dispose()` stops the microphone it opened and frees the input's sessions. Spot handles have their own `dispose()`.
+`input.dispose()` stops the microphone it opened and frees the input's sessions; the workers close once no input is left. Spot handles have their own `dispose()`.
 
 Next: [Wake words](/docs/guides/wake-words/), or [`InputEvents`](/docs/reference/interfaces/inputevents/) for every event and its payload.

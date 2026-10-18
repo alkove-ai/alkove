@@ -15,7 +15,7 @@ A call input keeps one voice: the closest one, or the voice of a print. It is ma
 import { createCallInput } from 'alkove'
 
 const input = await createCallInput()
-const sender = pc.addTrack(input.track!)
+const sender = pc.addTrack(input.track)
 input.bind(sender)
 ```
 
@@ -116,14 +116,14 @@ input.setStrength(0.7) // 70 % Focus, 30 % raw, faded over 10 ms
 await input.setEnabled(false) // mode raw, reason off
 ```
 
-`strength` (0 to 1, default 1) mixes Focus with the raw microphone. `setEnabled(false)` fades Focus out at the same delay; Focus keeps running, so `setEnabled(true)` is instant. The level and the gate still apply while it is off. `setEnabled` resolves to `true` when the models run.
+`strength` (0 to 1, default 1) mixes Focus with the raw microphone. `setEnabled(false)` fades to the untouched microphone at the same delay: no Focus, no level, no gate. The models keep running, so `setEnabled(true)` is instant. `setEnabled` resolves to `true` when the models run.
 
 ## Stats, recordings and traces
 
 - `stats: true`, then `await input.stats()`: `{ speechSeconds, seconds, noiseRemovedDb }`, the noise removed being measured where Cue hears no speech.
 - `await input.record(10)`: the next 10 seconds as a stereo WAV `Blob` at 16 kHz, the microphone on the left and the output on the right. It throws `engine.failed` before the models run.
 - `keepRecent: 20`, then `await input.recent()`: the last 20 seconds in the same format, for a "report a problem" button.
-- `trace: true`: `trace` events with Focus's level and Spot's scores, to plot.
+- `trace: true`: `trace` events with Focus's level, Cue's speech probability and Spot's scores, to plot.
 
 ## Words on the call
 
@@ -150,6 +150,6 @@ A page has one engine: two workers sharing one compiled WebAssembly module. Seve
 
 Chrome freezes a hidden page after about a minute without sound. Call inputs play a 30 Hz tone at −54 dBFS, which phone speakers cannot play, to stay awake; set `keepAliveWhenHidden: false` to turn it off.
 
-`input.dispose()` stops the microphone it opened, closes the context it created and frees its sessions in the workers, which stay for the next input. It is safe to call twice. Each `on()` returns its own unsubscribe function.
+`input.dispose()` stops the microphone it opened, closes the context it created and frees its sessions. When no input is left, the workers close too (the background one once no call is waiting); the next input or call starts them again. It is safe to call twice. Each `on()` returns its own unsubscribe function.
 
 Next: [`CallInput` in the reference](/docs/reference/interfaces/callinput/), or the [voice agent guide](/docs/guides/voice-agent/).

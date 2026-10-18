@@ -98,7 +98,7 @@ const { word, voiceprint } = await enrollment.done
 
 `done` resolves with the word, now `calibrated`, and a voiceprint made from the takes' audio (or `null` when they are too short). Use that print for `onlyMyVoice`. `enrollment.cancel()` stops the microphone and rejects `done` with an `AbortError`.
 
-The enrollment warnings come as `warning` events, along with the text warnings above:
+The enrollment warnings come as `warning` events, along with the text warnings above, and stay on the enrolled word's `warnings`:
 
 | Code | Meaning |
 |---|---|
@@ -131,7 +131,7 @@ localStorage.setItem('word', JSON.stringify(word))
 const wake = await createWakeListener({ words: [localStorage.getItem('word')!] })
 ```
 
-The JSON names the Spot model it was compiled for. Thresholds only hold for that model: when a new SDK version ships another Spot, passing an old word throws a `TypeError` starting with `word.version`. Keep the text and language next to it, and compile or enroll the word again.
+The JSON names the Spot model it was compiled for, weights included. Thresholds only hold for that model: when a new SDK version ships another Spot, passing an old word throws an `AlkoveError` with code `word.outdated`. Keep the text and language next to it, and compile or enroll the word again.
 
 ## Words on a call or agent input
 
@@ -146,7 +146,7 @@ spot.on('wake', (e) => console.log(e.word))
 spot.dispose() // stop listening for these words
 ```
 
-Opening a second input on the same microphone runs everything twice; the SDK warns with a `mic.twice` diag. Behind Focus with a voiceprint, only that voice is left in the audio Spot reads, so `onlyMyVoice` adds nothing there.
+Opening a second input on the same microphone runs everything twice; the SDK warns with a `mic.twice` diag. Behind Focus with a voiceprint, only that voice is left in the audio Spot reads: that is what `input.spot(words, { onlyMyVoice: true })` relies on. On an input without a print it warns with a `spot.no-print` diag.
 
 To enroll a word for such an input, use `input.enrollWord(text, { lang, takes })`: same events and result as `Spot.enroll`, with the takes read behind Focus. Its thresholds suit Focus's output, not the raw microphone: a wake listener given such a word warns with a `word.chain` diag, through `Alkove.onDiag`.
 

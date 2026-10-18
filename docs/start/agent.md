@@ -69,7 +69,7 @@ See [Wake words](/docs/guides/wake-words/) for contexts and thresholds.
 
 ## Sound in every case
 
-While the models load, if they fail, or if the device is too slow, `audio` and `utterance` keep coming with the raw microphone at the same delay, and `mode` says why (`raw` with reason `loading`, `failed`, `overload` or `unsupported`). The SDK tries again by itself. `input.latency` gives the delay in milliseconds, about 50 ms.
+While the models load, if they fail, or if the device is too slow, `audio` keeps coming with the raw microphone, and `mode` says why (`raw` with reason `loading`, `failed`, `overload` or `unsupported`). `utterance` and the speech events need Cue: they resume with the models. The SDK tries again by itself. `input.latency` gives the delay in milliseconds, about 50 ms.
 
 Creating the input rejects only when there is no sound at all (`mic.denied`, `mic.not-found`, `mic.busy`, `page.insecure`, `browser.unsupported`). See [Errors and diagnostics](/docs/guides/errors/).
 

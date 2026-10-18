@@ -70,8 +70,11 @@ export const SPOT = {
   frame: 0.03,
 }
 
+// what a print or a word is bound to: a model republished under the same name with other weights does not match
+export const modelId = (m: ModelName) => `${MODELS[m].name}@${MODELS[m].sha256.slice(0, 12)}`
+
 export const TIMBRE = {
-  model: 'alkove-timbre-1-preview',
+  model: modelId('timbre'),
   window: 24000,
   min: 280,
   dim: 192,

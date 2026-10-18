@@ -35,6 +35,8 @@ const alias = {
   name: 'alias',
   setup(b) {
     b.onResolve({ filter: /^alkove:ort-glue$/ }, () => ({ path: glue }))
+    // the glue's own wasm URL is never fetched (the module comes compiled): left in, bundlers would look for that file
+    b.onLoad({ filter: /\.mjs$/ }, (a) => (a.path === glue ? { contents: readFileSync(glue, 'utf8').replace(/new URL\("[\w.-]+\.wasm",\s*import\.meta\.url\)/g, 'new URL("data:,")'), loader: 'js' } : undefined))
   },
 }
 const common = { bundle: true, format: 'esm', minify: true, legalComments: 'none', target: 'es2022', logLevel: 'warning' }

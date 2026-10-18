@@ -17,7 +17,7 @@ import { Host } from './runtime/host'
 const isNode = () => typeof process !== 'undefined' && !!process.versions?.node && typeof window === 'undefined'
 
 interface Backend {
-  call<T>(name: CallName, args: unknown[], transfer?: Transferable[]): Promise<T>
+  call<T>(name: CallName, args: unknown[], transfer?: Transferable[], onProgress?: (p: { done: number; total: number }) => void): Promise<T>
 }
 
 let node: Promise<import('./runtime/node').NodeBackend> | null = null
@@ -27,10 +27,12 @@ async function backend(models: ModelName[], onProgress?: (p: Progress) => void):
   if (isNode()) {
     const nb = await (node ??= import('./runtime/node').then((m) => new m.NodeBackend()))
     await nb.ready(models)
-    return { call: async <T>(name: CallName, args: unknown[]) => (nb.calls[name] as (...a: unknown[]) => T)(...args) }
+    return { call: async <T>(name: CallName, args: unknown[], _t?: Transferable[], progress?: (p: { done: number; total: number }) => void) => (nb.calls[name] as (...a: unknown[]) => T)(...args, progress) }
   }
-  const link = await Host.get().models('background', models, onProgress)
-  return { call: <T>(name: CallName, args: unknown[], transfer: Transferable[] = []) => link.call<T>(name, args, transfer) }
+  const host = Host.get()
+  await host.models('background', models, onProgress)
+  // asked again at each call: the worker is closed once no input is left, and comes back on the next call
+  return { call: async <T>(name: CallName, args: unknown[], transfer: Transferable[] = [], progress?: (p: { done: number; total: number }) => void) => (await host.models('background', models)).call<T>(name, args, transfer, progress) }
 }
 
 export type Usage = 'call' | 'agent' | 'wake'
@@ -90,7 +92,12 @@ export const Alkove = {
     const host = Host.get()
     const rt = names.filter((n) => n !== 'timbre' && n !== 'lex')
     const bg = names.filter((n) => n === 'timbre' || n === 'lex')
-    await Promise.all([host.models('realtime', rt, opts.onProgress), bg.length ? host.models('background', bg) : null])
+    const parts = [{ loaded: 0, total: 0 }, { loaded: 0, total: 0 }]
+    const part = (i: number) => (p: Progress) => {
+      parts[i] = p
+      opts.onProgress?.({ loaded: parts[0]!.loaded + parts[1]!.loaded, total: parts[0]!.total + parts[1]!.total })
+    }
+    await Promise.all([host.models('realtime', rt, part(0)), bg.length ? host.models('background', bg, part(1)) : null])
   },
 
   // true when everything is already here: works offline
@@ -104,8 +111,7 @@ export const Alkove = {
     const pcm = await decode(input)
     opts.signal?.throwIfAborted()
     const b = await backend(modelsOf(opts))
-    const r = await b.call<Omit<ProcessResult, 'toWav'>>('process', [pcm, wireOf(opts)])
-    opts.onProgress?.({ done: pcm.length, total: pcm.length })
+    const r = await b.call<Omit<ProcessResult, 'toWav'>>('process', [pcm, wireOf(opts)], [], opts.onProgress)
     return {
       ...r,
       toWav(which = 'audio') {
@@ -212,7 +218,7 @@ export class Lex {
   phonemize(text: string, lang: Lang): Promise<Omit<Pronunciation, 'ids'>[]>
   phonemize(texts: string[], lang: Lang): Promise<Omit<Pronunciation, 'ids'>[][]>
   async phonemize(text: string | string[], lang: Lang): Promise<unknown> {
-    if (!LexCore.langs.includes(lang)) throw new AlkoveError('browser.unsupported', `lang.unsupported: ${lang}`)
+    if (!LexCore.langs.includes(lang)) throw new AlkoveError('lang.unsupported', `No ${lang}: ${LexCore.langs.join(', ')} only.`)
     const all = await this.b.call<Pronunciation[][]>('phonemize', [Array.isArray(text) ? text : [text], lang])
     const out = all.map((ps) => ps.map(({ ipa, p }) => ({ ipa, p })))
     return Array.isArray(text) ? out : out[0]
@@ -222,6 +228,7 @@ export class Lex {
 export const Spot = {
   // a typed word (Lex), or phonemes between slashes (no Lex)
   async compile(text: string, opts: CompileOptions = {}): Promise<Word> {
+    for (const l of [opts.lang ?? []].flat()) if (!LexCore.langs.includes(l)) throw new AlkoveError('lang.unsupported', `No ${l}: ${LexCore.langs.join(', ')} only.`)
     const typed = /^\s*\/.+\/\s*$/.test(text)
     const b = await backend(typed ? [] : ['lex'])
     return wordOf(await b.call<WordJSON>('compile', [text, { lang: opts.lang, chain: opts.chain }]))

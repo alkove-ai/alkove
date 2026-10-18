@@ -39,6 +39,9 @@ export class Chain {
   private tracker: SpeechTracker
   private rawDelay = new Delay(FOCUS.lag)
   private gateDelay: Delay | null
+  private bypassDelay: Delay | null
+  private bypass = new Float32Array(HOP)
+  private on = 1
   private gate = new Gate()
   private level = new Level()
   private focusOut = new Float32Array(HOP)
@@ -59,6 +62,7 @@ export class Chain {
   private t = 0
   private opts: Required<Omit<ChainOptions, 'print' | 'speech'>>
   onFocus: ((hop: Float32Array, t: number) => void) | null = null
+  onCue: ((speech: number, t: number) => void) | null = null
 
   constructor(
     private focus: Focus,
@@ -69,6 +73,7 @@ export class Chain {
     this.strength = this.s = this.opts.strength
     this.tracker = new SpeechTracker({ ...SPEECH_DEFAULTS, ...opts.speech })
     this.gateDelay = this.opts.gate ? new Delay(GATE_LOOKAHEAD) : null
+    this.bypassDelay = this.opts.gate ? new Delay(GATE_LOOKAHEAD) : null
     this.delay = FOCUS.lag + (this.opts.gate ? GATE_LOOKAHEAD : 0)
     if (opts.print) focus.setPrint(opts.print)
   }
@@ -153,12 +158,13 @@ export class Chain {
       this.asleep = true
       emit({ type: 'idle', asleep: true, at })
     }
-    const target = this.enabled ? this.strength : 0
     const k = 1 - Math.exp(-1 / (FADE_TAU * RATE))
     for (let i = 0; i < HOP; i++) {
-      this.s += (target - this.s) * k
+      this.s += (this.strength - this.s) * k
       this.mix[i] = this.s * this.focusOut[i]! + (1 - this.s) * this.raw[i]!
     }
+    this.bypass.set(this.raw)
+    this.bypassDelay?.apply(this.bypass)
     if (this.opts.normalize) {
       this.level.frame(this.mix, this.tracker.active)
       this.level.apply(this.mix)
@@ -166,6 +172,14 @@ export class Chain {
     if (this.gateDelay) {
       this.gateDelay.apply(this.mix)
       this.gate.apply(this.mix, this.tracker.active)
+    }
+    const on = this.enabled ? 1 : 0
+    if (on === 0 || this.on < 1) {
+      for (let i = 0; i < HOP; i++) {
+        this.on += (on - this.on) * k
+        this.mix[i] = this.on * this.mix[i]! + (1 - this.on) * this.bypass[i]!
+      }
+      if (on === 1 && this.on > 0.9999) this.on = 1
     }
     this.sinceSpeech = this.tracker.active ? 0 : this.sinceSpeech + HOP
     this.sinceReset += HOP
@@ -206,6 +220,7 @@ export class Chain {
       const v = this.cue.step(c)
       if (this.cueSteps++ >= CUE.lagSteps && v !== null) p = v
     }
+    if (this.onCue && k >= CUE.lagSteps) this.onCue(p, ((k - CUE.lagSteps) * CUE.chunk - FOCUS.lag) / RATE)
     const e = this.tracker.push(p, k - CUE.lagSteps)
     if (!e) return
     const shift = FOCUS.lag / RATE
