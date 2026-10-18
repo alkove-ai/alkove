@@ -206,7 +206,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
 
   protected activeMode(): Mode {
     if (!this.enabled) return 'raw'
-    if (this.kind === 'wake') return 'spot'
+    if (this.kind === 'wake') return this.reference() ? 'spot+print' : 'spot'
     return this.printed ? 'focus+print' : 'focus'
   }
 
@@ -236,13 +236,12 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     this.setMode('raw', 'loading')
     try {
       const host = Host.get()
-      const wantsPrint = this.kind !== 'wake' && (this.opts.learn || !!this.opts.voiceprint)
       const rt = await host.models('realtime', this.models())
       let bgPort: MessagePort | undefined
-      if (wantsPrint) {
+      if (this.wantsBackground()) {
         const bg = await host.models('background', ['timbre'])
         const channel = new MessageChannel()
-        bg.post({ type: 'rt-port', input: this.id, port: channel.port2 }, [channel.port2])
+        bg.post({ type: 'rt-port', input: this.id, port: channel.port2, ref: this.reference()?.toJSON() ?? null }, [channel.port2])
         bgPort = channel.port1
         this.bg = bg
         this.offs.push(bg.listen((m) => m.input === this.id && m.type === 'event' && this.onEvent(m.event)))
@@ -268,6 +267,15 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       this.retryTimer = setTimeout(() => void this.startModels(), this.retryMs)
       this.retryMs = Math.min(2 * this.retryMs, RETRY_MAX_MS)
     }
+  }
+
+  // the background worker: Timbre for learning the print, or for checking the voice of a wake
+  protected wantsBackground(): boolean {
+    return !!this.opts.learn
+  }
+
+  protected reference(): Voiceprint | null {
+    return null
   }
 
   private onRealtime(m: { type: string; input?: number; [k: string]: any }): void {
@@ -599,8 +607,8 @@ class CallInput extends AlkoveInput {
     return this
   }
 
-  // words read in Focus's output, in the same worker: no second microphone, no second Focus
-  spot(words: (Word | WordJSON | string)[], opts: { context?: Context } = {}): SpotHandle {
+  // words read in Focus's output, in the same worker: no second microphone, no second Focus; with a print Focus already keeps only that voice (onlyMyVoice)
+  spot(words: (Word | WordJSON | string)[], opts: { context?: Context; onlyMyVoice?: boolean } = {}): SpotHandle {
     const handle = new SpotHandle(this, words.map((w) => wordOf(w).toJSON()), opts.context ?? 'anywhere')
     this.spots.add(handle)
     return handle
@@ -706,6 +714,8 @@ export function createAgentInput(opts: AgentOptions = {}): Promise<AgentInput> {
 export interface WakeOptions extends CommonOptions {
   words: (Word | WordJSON | string)[]
   context?: Context
+  // only this voice wakes: Timbre on the word + 0.5 s once Spot heard it (+0.5 s of latency)
+  onlyMyVoice?: Voiceprint | VoiceprintJSON | string | null
 }
 
 class WakeListener extends AlkoveInput {
@@ -729,8 +739,16 @@ class WakeListener extends AlkoveInput {
     this.node.connect(mute).connect(this.ctx.destination)
   }
 
+  protected wantsBackground(): boolean {
+    return !!this.reference()
+  }
+
+  protected reference(): Voiceprint | null {
+    return printOf(this.opts.onlyMyVoice)
+  }
+
   protected realtimeOptions(): RealtimeOptions {
-    return { pipeline: 'wake', words: this.words, context: this.opts.context ?? 'pause', trace: this.opts.trace }
+    return { pipeline: 'wake', words: this.words, context: this.opts.context ?? 'pause', trace: this.opts.trace, verify: !!this.reference() }
   }
 
   async start(): Promise<this> {
