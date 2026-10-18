@@ -13,11 +13,14 @@ export class Resampler {
   private histLen = TAPS
   private t = TAPS / 2
 
+  // aligned: output k sits exactly on input position k × ratio (files), else half a window late with less latency (real time)
   constructor(
     readonly inRate: number,
     readonly outRate: number,
+    aligned = false,
   ) {
     this.identity = inRate === outRate
+    if (aligned) this.t = TAPS
     if (this.identity) return
     this.ratio = inRate / outRate
     const half = this.half
@@ -74,15 +77,12 @@ export class Resampler {
   // a whole signal at once, its edges padded so nothing is cut
   static all(pcm: Float32Array, inRate: number, outRate: number): Float32Array {
     if (inRate === outRate) return pcm
-    const r = new Resampler(inRate, outRate)
+    const r = new Resampler(inRate, outRate, true)
     const n = Math.round((pcm.length * outRate) / inRate)
     const out = new Float32Array(n)
     let o = 0
-    const lead = Math.round(r.half / r.ratio)
-    let skip = lead
     const put = (x: number) => {
-      if (skip > 0) skip--
-      else if (o < n) out[o++] = x
+      if (o < n) out[o++] = x
     }
     r.push(pcm, put)
     r.push(new Float32Array(Math.ceil(TAPS * r.ratio) + 16), put)

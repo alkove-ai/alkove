@@ -140,20 +140,24 @@ async function* stream(source: StreamSource, opts: ProcessOptions & { rate?: num
   const b = await backend(modelsOf(opts))
   const id = await b.call<number>('streamOpen', [wireOf(opts)])
   const rate = opts.rate ?? RATE
-  const resampler = new Resampler(rate, RATE)
-  const lead = rate === RATE ? 0 : Math.round(Resampler.HALF / (rate / RATE))
-  let skip = lead
+  const resampler = new Resampler(rate, RATE, true)
+  let given = 0
+  let taken = 0
   const iter: AsyncIterable<Float32Array> = Symbol.asyncIterator in source ? (source as AsyncIterable<Float32Array>) : readable(source as ReadableStream<Float32Array>)
   try {
     for await (const chunk of iter) {
       opts.signal?.throwIfAborted()
       const out: number[] = []
-      resampler.push(chunk, (x) => (skip > 0 ? skip-- : out.push(x)))
+      given += chunk.length
+      resampler.push(chunk, (x) => out.push(x))
+      taken += out.length
       if (out.length) yield await b.call<ProcessPart>('streamPush', [id, Float32Array.from(out)])
     }
+    // the last half window, up to the length the input had
     const tail: number[] = []
-    if (lead) resampler.push(new Float32Array(Resampler.HALF * 2 + 8), (x) => (skip > 0 ? skip-- : tail.push(x)))
-    if (tail.length) yield await b.call<ProcessPart>('streamPush', [id, Float32Array.from(tail.slice(0, lead))])
+    const want = Math.round((given * RATE) / rate) - taken
+    if (want > 0) resampler.push(new Float32Array(Resampler.HALF * 2 + 8), (x) => tail.length < want && tail.push(x))
+    if (tail.length) yield await b.call<ProcessPart>('streamPush', [id, Float32Array.from(tail)])
   } finally {
     yield await b.call<ProcessPart>('streamEnd', [id])
   }

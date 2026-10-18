@@ -20,6 +20,8 @@ class AlkoveProcessor extends AudioWorkletProcessor {
   constructor(options: Options) {
     super()
     this.core = new WorkletCore(sampleRate, options.processorOptions.delay16, () => Date.now(), (m) => this.port.postMessage(m))
+    // the raw path already runs at the processed path's delay
+    this.port.postMessage({ type: 'latency', ms: this.core.latencyMs })
     this.port.onmessage = (e: MessageEvent) => {
       const m = e.data
       if (m.type === 'connect') {

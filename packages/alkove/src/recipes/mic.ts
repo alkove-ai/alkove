@@ -59,6 +59,7 @@ export async function openMic(deviceId?: string, signal?: AbortSignal): Promise<
       : ask)
     return stream
   } catch (e) {
+    if (signal?.aborted) throw signal.reason
     const name = (e as Error)?.name
     if (name === 'NotAllowedError' || name === 'SecurityError') throw new AlkoveError('mic.denied', 'Microphone permission denied.', e)
     if (name === 'NotFoundError' || name === 'OverconstrainedError') throw new AlkoveError('mic.not-found', 'No microphone.', e)

@@ -169,6 +169,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     if (this.ownStream && o.followDefault !== false && !o.deviceId) this.followDefault()
     this.offs.push(onDiag((d) => this.diag(d)))
     void this.startModels()
+    this.release()
   }
 
   private async build(): Promise<void> {
@@ -206,13 +207,32 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       this.setMode('raw', 'overload')
     } else if (m.type === 'retry') this.setMode(this.activeMode())
     else if (m.type === 'latency') this._latency = Math.round(m.ms)
-    else if (m.type === 'timing') this.diag({ code: 'queue', level: 'info', ...m })
+    else if (m.type === 'timing') {
+      this._latency = m.latencyMs
+      this.diag({ code: 'queue', level: 'info', ...m })
+    }
   }
 
   protected activeMode(): Mode {
     if (!this.enabled) return 'raw'
     if (this.kind === 'wake') return this.reference() ? 'spot+print' : 'spot'
     return this.printed ? 'focus+print' : 'focus'
+  }
+
+  // events raised while the input is created wait for the app's first on(): it can only call it once the promise resolved
+  private held: [keyof InputEvents, unknown][] | null = []
+
+  protected emit<K extends keyof InputEvents>(type: K, value: InputEvents[K]): void {
+    if (this.held) this.held.push([type, value])
+    else super.emit(type, value)
+  }
+
+  protected release(): void {
+    setTimeout(() => {
+      const q = this.held ?? []
+      this.held = null
+      for (const [t, v] of q) super.emit(t, v as never)
+    }, 0)
   }
 
   protected setMode(mode: Mode, reason?: RawReason): void {

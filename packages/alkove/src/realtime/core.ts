@@ -24,7 +24,7 @@ const FAR_LEVEL = 0.003
 export type CoreMessage =
   | { type: 'overload'; queueMs: number; sent: number; received: number }
   | { type: 'retry' }
-  | { type: 'timing'; queueMs: [number, number]; debtMs: number; droppedMs: number }
+  | { type: 'timing'; queueMs: [number, number]; debtMs: number; droppedMs: number; latencyMs: number }
 
 class Queue {
   buf: Float32Array
@@ -95,6 +95,7 @@ export class WorkletCore {
   private farActive = 0
   farQuietMs = Infinity
   private frames = 0
+  private silence = new Float32Array(0)
   // the 16 kHz sample the next hop starts at: hops pause in raw mode, the worker's clock must not
   onActivate: ((at16: number) => void) | null = null
 
@@ -171,10 +172,8 @@ export class WorkletCore {
     const n = output.length
     this.frames += n
     this.listenFar(far, n)
-    if (!input || !input.length) {
-      output.fill(0)
-      return
-    }
+    // Firefox gives no channel at all while nothing plays: silence, so the clock and the retries go on
+    if (!input || !input.length) input = this.silence.length === n ? this.silence : (this.silence = new Float32Array(n))
     // raw path: the mic delayed by the processed path's latency
     const raw = this.raw
     const L = raw.length
@@ -257,7 +256,7 @@ export class WorkletCore {
     }
     if (this.quanta % (2 * second) === 0) {
       const ms = (v: number) => Math.round((v / this.rate) * 1000)
-      this.emit({ type: 'timing', queueMs: [ms(this.stats.min), ms(this.stats.max)], debtMs: ms(this.debt), droppedMs: ms(this.stats.dropped) })
+      this.emit({ type: 'timing', queueMs: [ms(this.stats.min), ms(this.stats.max)], debtMs: ms(this.debt), droppedMs: ms(this.stats.dropped), latencyMs: Math.round(this.latencyMs) })
       this.stats = { min: Infinity, max: 0, dropped: 0 }
     }
   }
