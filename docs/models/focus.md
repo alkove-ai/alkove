@@ -1,0 +1,113 @@
+---
+title: Focus
+description: alkove-focus-1-preview, real-time voice isolation that keeps the closest voice, or only the person of a voiceprint.
+sidebar:
+  order: 1
+---
+
+```ts
+import { createCallInput } from 'alkove'
+
+const input = await createCallInput({ voiceprint: localStorage.getItem('print'), learn: true })
+pc.addTrack(input.track)
+input.on('voiceprint', (p) => localStorage.setItem('print', JSON.stringify(p.toJSON())))
+```
+
+**alkove-focus-1-preview** isolates one voice in real time, from 16 kHz audio. It keeps the voice closest to the microphone and removes noise, music and other voices. Given a voiceprint from [Timbre](/docs/models/timbre/), it keeps only that person, even when someone else speaks louder or closer.
+
+| | |
+|---|---|
+| Size | 0.93 MB (int8 weights) |
+| Input | 16 kHz mono, 256 samples (16 ms) per step, plus an optional 192-value print |
+| Output | the isolated voice, 16 kHz, one step (16 ms) late |
+| License | Apache-2.0 |
+
+## Two modes, one model
+
+- **No print**: Focus keeps the closest voice. Nothing to set up. A voice farther from the microphone is treated as interference.
+- **With a print**: Focus keeps the person of the print and removes everyone else, a TV, a colleague or a neighbor, whatever their level.
+
+The input's `mode` tells you which one runs: `'focus'` or `'focus+print'` (or `'raw'` while the models load or after a failure).
+
+```ts
+input.on('mode', ({ mode, reason }) => console.log(mode, reason))
+```
+
+## Using Focus from the SDK
+
+Focus is always on in [`createCallInput()`](/docs/start/call/) and [`createAgentInput()`](/docs/start/agent/). The options that change what it does:
+
+| Option | Effect |
+|---|---|
+| `voiceprint` | The print of the person to keep: a `Voiceprint`, its JSON, or the JSON as a string. |
+| `learn: true` | Learns the user's print while they talk (about 6 s of their voice), then keeps only them. Emits `learn` with the progress and `voiceprint` when the print changes. |
+| `farEnd` | What the other side plays (a remote track, your TTS): no learning while it plays. |
+| `strength` | From 0 (the raw microphone) to 1 (Focus only, the default): a mix of both, delay-aligned. |
+
+A new print takes effect at the next silence, so a sentence is never cut in the middle. See [Voiceprints](/docs/guides/voiceprints/) for making, storing and learning prints.
+
+For a file, `Alkove.process()` runs the same model, faster than real time, with the same output as the live path:
+
+```ts
+import { Alkove } from 'alkove'
+
+const r = await Alkove.process(file, { focus: { voiceprint: print } })
+const wav = r.toWav() // the isolated voice
+const both = r.toWav('both') // raw on the left, Focus on the right
+```
+
+`focus: true` keeps the closest voice. Focus always comes with Cue in `process()`, so `r.speech` lists the speech segments of the cleaned audio. See [Files and streams](/docs/start/files/).
+
+## Latency
+
+Focus adds 16 ms (one step) on top of its 16 ms step. A live input reports its total delay in `input.latency` (milliseconds): Focus, the audio queue and, on a call, the 100 ms look-ahead of the gate that opens when the user starts speaking.
+
+## Performance
+
+| | |
+|---|---|
+| Galaxy Z Fold8, Chrome, WebAssembly, 1 thread | about 107 ms per second of audio (about 11 % of one core) |
+| Apple silicon Mac, onnxruntime, 1 thread | about 81 ms per second of audio |
+
+Between sentences, a live input lets Focus sleep: when its output and the microphone stay quiet, the engine stops running until the microphone rises again. It saves battery and heat on phones.
+
+## Benchmarks
+
+Measured with the published file. The model card gives the full tables, with open models run the same way on the same audio.
+
+| Test | alkove-focus | Reference |
+|---|---|---|
+| Another voice in the room, Common Voice test sets, 7 languages: SI-SDR of the target, with a print | 7.1 dB (no print: 4.5) | raw microphone 3.4 dB |
+| Same scenes: level of the other voice speaking alone, with a print | -22.5 dB (no print: -7.8) | raw 0 dB |
+| Same with DEMAND noise at 10 dB: SI-SDR, with a print | 5.0 dB | raw 2.4 dB |
+| AMI meetings, headset microphone (Whisper large-v3 turbo): word error rate, with a print | 16.1 % (no print: 16.7 %) | raw headset 20.8 % |
+| AMI: words of other voices that get through, per minute, with a print | 0.5 | raw headset 17.0 |
+| VoiceBank+DEMAND, noise only, no print: STOI, SI-SDR, DNSMOS P.835 | 0.895, 12.1 dB, 3.04 | noisy input: 0.921, 8.4 dB, 2.70 |
+| DNS Challenge 3 blind, real recordings: DNSMOS P.808, overall | 3.36, 2.70 | noisy input: 2.96, 2.33 |
+
+What the card also says, plainly: on the synthetic "another voice" scenes, VoxLock, a model 33 times larger, does better. On noise alone, Focus removes about as much noise as the best denoiser but changes the voice more: if you only need denoising, DeepFilterNet 3 or GTCRN do it better. Focus is made for keeping one person and removing the others.
+
+## Limitations
+
+- 16 kHz only, one target voice.
+- Made for a microphone close to the speaker (phone, headset, laptop in front of you). With a distant room microphone (several meters), where every voice is far, Focus removes much of the target's speech too: do not use it there.
+- Without a print, the voice kept is the closest one: a farther speaker is treated as interference.
+- With a print, when another voice starts on its own, its first ~150 ms can pass, 25 to 35 dB under it.
+- Very quiet voices (around -45 dBFS) are kept less well without a print than with one.
+- Built for speech; it is not meant to process music.
+
+Out of scope: distant microphones (conference rooms, smart speakers across the room), keeping several speakers at once, music or high-fidelity listening, and isolating someone's voice in a recording without their consent.
+
+## Running it without the SDK
+
+The model is a plain ONNX file (opset 17), so you can run it with onnxruntime or onnxruntime-web 1.30 or later. One call per 256 samples:
+
+| Name | Type | |
+|---|---|---|
+| `audio` (in) | float32 `[1, 256]` | 16 kHz mono, -1 to 1 |
+| `print` (in) | float32 `[1, 192]` | Timbre's `embedding`, or zeros to keep the closest voice |
+| `state` (in) | float32 `[126848]` | zeros at the start, then the previous `next_state` |
+| `audio_out` (out) | float32 `[1, 256]` | the isolated voice, 256 samples late |
+| `next_state` (out) | float32 `[126848]` | passed back on the next call |
+
+Reset `state` to zeros when you change the print. The SDK does all of this for you, plus resampling, the audio queue, sleep between sentences and the fallback to the raw microphone.
