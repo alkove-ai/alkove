@@ -6,15 +6,15 @@ export type Source = 'raw' | 'focus'
 export interface Center {
   embedding: Float32Array
   id: Float32Array
-  // seconds of voice it was made from, when known: a short print needs other thresholds
-  seconds?: number
+  // seconds of voice it was made from: a short print needs other thresholds
+  seconds: number
 }
 
 export interface VoiceprintJSON {
   alkove: 'voiceprint'
   model: string
   source: Source
-  centers: { embedding: number[]; id: number[]; seconds?: number }[]
+  centers: { embedding: number[]; id: number[]; seconds: number }[]
   windows?: string
 }
 
@@ -38,13 +38,13 @@ const mean = (vs: ArrayLike<number>[]) => {
 }
 
 // mean of the windows without the 10 % least like it
-export function trimmedMean(windows: Center[]): Center {
+export function trimmedMean(windows: Center[], seconds: number): Center {
   const first = mean(windows.map((w) => w.id))
-  if (windows.length < 10) return { embedding: mean(windows.map((w) => w.embedding)), id: first }
+  if (windows.length < 10) return { embedding: mean(windows.map((w) => w.embedding)), id: first, seconds }
   const scores = windows.map((w) => dot(w.id, first))
   const cut = [...scores].sort((a, b) => a - b)[Math.floor(windows.length / 10)]!
   const kept = windows.filter((_, i) => scores[i]! >= cut)
-  return { embedding: mean(kept.map((w) => w.embedding)), id: mean(kept.map((w) => w.id)) }
+  return { embedding: mean(kept.map((w) => w.embedding)), id: mean(kept.map((w) => w.id)), seconds }
 }
 
 // one or more centers (near / far, phone / headset); a voice is as close as its closest center
@@ -67,12 +67,12 @@ export class Voiceprint {
   }
 
   // the best pair of centers, and how much voice this side's center was made from
-  closest(other: Voiceprint | Center): { score: number; seconds: number | undefined } {
+  closest(other: Voiceprint | Center): { score: number; mine: number; theirs: number } {
     const theirs = other instanceof Voiceprint ? other.centers : [other]
-    let best = { score: -1, seconds: undefined as number | undefined }
+    let best = { score: -1, mine: 0, theirs: 0 }
     for (const a of this.centers) for (const b of theirs) {
       const score = dot(a.id, b.id)
-      if (score > best.score) best = { score, seconds: a.seconds }
+      if (score > best.score) best = { score, mine: a.seconds, theirs: b.seconds }
     }
     return best
   }
@@ -87,7 +87,7 @@ export class Voiceprint {
       alkove: 'voiceprint',
       model: this.model,
       source: this.source,
-      centers: this.centers.map((c) => ({ embedding: round(c.embedding), id: round(c.id), ...(c.seconds ? { seconds: +c.seconds.toFixed(1) } : {}) })),
+      centers: this.centers.map((c) => ({ embedding: round(c.embedding), id: round(c.id), seconds: +c.seconds.toFixed(1) })),
       ...(this.windows.length ? { windows: packWindows(this.windows) } : {}),
     }
   }
@@ -97,7 +97,7 @@ export class Voiceprint {
     const j: VoiceprintJSON = typeof json === 'string' ? JSON.parse(json) : json
     if (j.alkove !== 'voiceprint') throw new TypeError('not an Alkove voiceprint')
     if (j.model !== TIMBRE.model) return null
-    const centers = j.centers.map((c) => ({ embedding: Float32Array.from(c.embedding), id: Float32Array.from(c.id), ...(c.seconds ? { seconds: c.seconds } : {}) }))
+    const centers = j.centers.map((c) => ({ embedding: Float32Array.from(c.embedding), id: Float32Array.from(c.id), seconds: c.seconds }))
     return new Voiceprint(centers, j.source, j.model, j.windows ? unpackWindows(j.windows) : [])
   }
 
@@ -142,7 +142,7 @@ function unpackWindows(text: string): Center[] {
       for (let i = 0; i < v.length; i++) v[i] = view.getInt8(o++) * scale
       pair.push(v)
     }
-    out.push({ embedding: pair[0]!, id: pair[1]! })
+    out.push({ embedding: pair[0]!, id: pair[1]!, seconds: TIMBRE.window / RATE })
   }
   return out
 }
@@ -150,8 +150,8 @@ function unpackWindows(text: string): Center[] {
 export type Level = 'lenient' | 'balanced' | 'strict'
 
 // cosine of `id`, a ~12 s print against `seconds` of voice (Common Voice tests): 1 % false rejects, EER, 1 % false accepts; a shorter print rejects more
-// the cosine over which `seconds` of voice match a print made from `printSeconds` (unknown: a ~12 s print)
-export function threshold(level: Level, seconds: number, _printSeconds?: number): number {
+// the cosine over which `seconds` of voice match a print made from `printSeconds` of voice
+export function threshold(level: Level, seconds: number, _printSeconds: number): number {
   const pts = LEVELS[level]
   const s = Math.min(Math.max(seconds, pts[0]![0]), pts[pts.length - 1]![0])
   const i = Math.max(1, pts.findIndex(([x]) => x >= s))
@@ -171,7 +171,7 @@ export class Timbre {
 
   window(pcm: Float32Array): Center {
     const out = this.net.run({ audio: { data: pcm, dims: [1, pcm.length] } })
-    return { embedding: out.embedding!.data as Float32Array, id: out.id!.data as Float32Array }
+    return { embedding: out.embedding!.data as Float32Array, id: out.id!.data as Float32Array, seconds: pcm.length / RATE }
   }
 
   windows(pcm: Float32Array): Center[] {
@@ -184,16 +184,16 @@ export class Timbre {
   }
 
   embed(pcm: Float32Array, source: Source = 'raw'): Voiceprint {
-    return new Voiceprint([{ ...trimmedMean(this.windows(pcm)), seconds: pcm.length / RATE }], source)
+    return new Voiceprint([trimmedMean(this.windows(pcm), pcm.length / RATE)], source)
   }
 
-  // a: the known print, b: the voice heard (`seconds` long)
-  static verify(a: Voiceprint, b: Voiceprint, { level = 'balanced', seconds = 1.5 }: { level?: Level; seconds?: number } = {}): { same: boolean; score: number } {
-    const { score, seconds: printSeconds } = a.closest(b)
-    return { same: score >= threshold(level, seconds, printSeconds), score }
+  // a: the known print, b: the voice heard; each knows how much voice it holds
+  static verify(a: Voiceprint, b: Voiceprint, { level = 'balanced' }: { level?: Level } = {}): { same: boolean; score: number } {
+    const { score, mine, theirs } = a.closest(b)
+    return { same: score >= threshold(level, theirs, mine), score }
   }
 
-  static identify(voice: Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level; seconds?: number } = {}): { who: string; score: number } | null {
+  static identify(voice: Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level } = {}): { who: string; score: number } | null {
     let best: { who: string; score: number } | null = null
     for (const [who, p] of Object.entries(known)) {
       const { same, score } = Timbre.verify(p, voice, opts)

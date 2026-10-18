@@ -184,14 +184,13 @@ export class Timbre {
     return Voiceprint.fromJSON(await this.b.call<VoiceprintJSON>('embed', [pcm, opts.source ?? 'raw']))!
   }
 
-  verify(a: Voiceprint, b: Voiceprint, opts: { level?: Level; seconds?: number } = {}): { same: boolean; score: number } {
+  verify(a: Voiceprint, b: Voiceprint, opts: { level?: Level } = {}): { same: boolean; score: number } {
     return TimbreCore.verify(a, b, opts)
   }
 
-  // the thresholds follow the length of the voice heard, known when it is audio
-  async identify(voice: Float32Array | Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level; seconds?: number } = {}): Promise<{ who: string; score: number } | null> {
+  async identify(voice: Float32Array | Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level } = {}): Promise<{ who: string; score: number } | null> {
     const v = voice instanceof Voiceprint ? voice : await this.embed(voice)
-    return TimbreCore.identify(v, known, { seconds: voice instanceof Voiceprint ? undefined : voice.length / RATE, ...opts })
+    return TimbreCore.identify(v, known, opts)
   }
 }
 

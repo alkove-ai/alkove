@@ -29,11 +29,16 @@ export class VoiceprintLearner {
     readonly source: Source = 'focus',
     start?: Voiceprint | null,
   ) {
-    if (start) this.ws = start.windows.length ? [...start.windows] : Array.from({ length: LEARN.ready }, () => start.centers[0]!)
+    // a print without its windows (made by Timbre.embed) counts as `ready` windows sharing its voice
+    if (start) this.ws = start.windows.length ? [...start.windows] : Array.from({ length: LEARN.ready }, () => ({ ...start.centers[0]!, seconds: start.centers[0]!.seconds / LEARN.ready }))
   }
 
   get progress(): number {
     return Math.min(1, this.ws.length / LEARN.ready)
+  }
+
+  private get seconds(): number {
+    return this.ws.reduce((n, w) => n + w.seconds, 0)
   }
 
   get ready(): boolean {
@@ -41,13 +46,13 @@ export class VoiceprintLearner {
   }
 
   get voiceprint(): Voiceprint | null {
-    return this.ready ? new Voiceprint([{ ...trimmedMean(this.ws), seconds: this.ws.length * WINDOW_SECONDS }], this.source, TIMBRE.model, this.ws.slice(-64)) : null
+    return this.ready ? new Voiceprint([trimmedMean(this.ws, this.seconds)], this.source, TIMBRE.model, this.ws.slice(-64)) : null
   }
 
   // one window of my speech: its Timbre outputs, from a 1.5 s window the caller chose
   learn(w: Center): { accepted: boolean; score: number; restarted: boolean } {
-    const score = this.ws.length ? dot(w.id, trimmedMean(this.ws).id) : 1
-    if (score < (this.ready ? threshold('balanced', WINDOW_SECONDS, this.ws.length * WINDOW_SECONDS) : LEARN.match)) {
+    const score = this.ws.length ? dot(w.id, trimmedMean(this.ws, this.seconds).id) : 1
+    if (score < (this.ready ? threshold('balanced', w.seconds, this.seconds) : LEARN.match)) {
       const restarted = !this.ready && ++this.rejects >= LEARN.restart
       if (restarted) {
         this.ws = []

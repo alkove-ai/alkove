@@ -16,7 +16,7 @@ export function makeCalls(engine: () => Engine) {
     getTimbre,
     getLex,
     embed: (pcm: Float32Array, source?: 'raw' | 'focus') => getTimbre().embed(pcm, source).toJSON(),
-    windows: (pcm: Float32Array) => getTimbre().windows(pcm).map((w) => ({ embedding: w.embedding, id: w.id })),
+    windows: (pcm: Float32Array) => getTimbre().windows(pcm).map((w) => ({ embedding: w.embedding, id: w.id, seconds: w.seconds })),
     phonemize: (texts: string[], lang: Parameters<Lex['phonemize']>[1]) => texts.map((t) => getLex().phonemize(t, lang)),
     compile: (text: string, opts: Parameters<typeof compileWord>[1]) => compileWord(text, opts, getLex).toJSON(),
     process: (pcm: Float32Array, opts: Omit<ProcessOptions, 'onProgress' | 'signal'>) => {

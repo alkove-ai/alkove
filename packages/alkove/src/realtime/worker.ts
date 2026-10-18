@@ -572,7 +572,7 @@ self.onmessage = async (e: MessageEvent) => {
           if (ev.data.type === 'window') onWindow(m.input, ev.data.pcm, ev.data.farQuietMs)
           else if (ev.data.type === 'verify') {
             const pcm = ev.data.pcm as Float32Array
-            const voice = pcm.length >= TIMBRE.min && l.ref ? TimbreCore.verify(l.ref, new Voiceprint([getTimbre().window(pcm)]), { seconds: pcm.length / RATE }) : { same: true, score: 1 }
+            const voice = pcm.length >= TIMBRE.min && l.ref ? TimbreCore.verify(l.ref, new Voiceprint([getTimbre().window(pcm)])) : { same: true, score: 1 }
             l.port.postMessage({ type: 'verified', key: ev.data.key, ...voice })
           }
         }
