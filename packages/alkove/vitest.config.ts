@@ -7,5 +7,5 @@ const stock = dirname(createRequire(import.meta.url).resolve('onnxruntime-web'))
 
 export default defineConfig({
   resolve: { alias: { 'alkove:ort-glue': process.env.ALKOVE_ORT_MJS ?? join(stock, 'ort-wasm-simd-threaded.mjs') } },
-  test: { testTimeout: 60_000 },
+  test: { testTimeout: 60_000, exclude: ['test/browser/**', 'node_modules/**'] },
 })

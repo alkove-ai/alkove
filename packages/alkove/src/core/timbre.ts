@@ -177,7 +177,7 @@ export class Timbre {
     return { same: score >= c0 + ((c1 - c0) * (s - s0)) / (s1 - s0), score }
   }
 
-  static identify(voice: Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level } = {}): { who: string; score: number } | null {
+  static identify(voice: Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level; seconds?: number } = {}): { who: string; score: number } | null {
     let best: { who: string; score: number } | null = null
     for (const [who, p] of Object.entries(known)) {
       const { same, score } = Timbre.verify(p, voice, opts)

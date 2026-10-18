@@ -188,9 +188,10 @@ export class Timbre {
     return TimbreCore.verify(a, b, opts)
   }
 
-  async identify(voice: Float32Array | Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level } = {}): Promise<{ who: string; score: number } | null> {
+  // the thresholds follow the length of the voice heard, known when it is audio
+  async identify(voice: Float32Array | Voiceprint, known: Record<string, Voiceprint>, opts: { level?: Level; seconds?: number } = {}): Promise<{ who: string; score: number } | null> {
     const v = voice instanceof Voiceprint ? voice : await this.embed(voice)
-    return TimbreCore.identify(v, known, opts)
+    return TimbreCore.identify(v, known, { seconds: voice instanceof Voiceprint ? undefined : voice.length / RATE, ...opts })
   }
 }
 
