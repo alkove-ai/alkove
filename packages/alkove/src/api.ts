@@ -1,9 +1,7 @@
 import { LEARN, VoiceprintLearner as Learner } from './core/learner'
 import { Lex as LexCore, type Pronunciation } from './core/lex'
-import type { Take } from './core/spot/enroll'
 import { type CompileOptions, type Word, type WordJSON, wordOf } from './core/spot/spot'
-import type { Warning } from './core/lex'
-import { Emitter } from './events'
+import { Enrollment, type EnrollTarget } from './recipes/enroll'
 import { type CommonOptions, createEnrollInput } from './recipes/input'
 import { type Center, type Level, Timbre as TimbreCore, Voiceprint, type VoiceprintJSON } from './core/timbre'
 import { Resampler } from './dsp/resample'
@@ -227,45 +225,15 @@ export const Spot = {
 
   // the user says the word `takes` times: thresholds set from these takes and from what is heard between them
   enroll(text: string, opts: CompileOptions & CommonOptions & { takes?: number } = {}): Enrollment {
-    return new Enrollment(text, opts)
-  },
-}
-
-export class Enrollment extends Emitter<{ take: Take; warning: Warning }> {
-  readonly done: Promise<{ word: Word; voiceprint: Voiceprint | null }>
-  private input: Awaited<ReturnType<typeof createEnrollInput>> | null = null
-  private cancelled = false
-  private abort: (() => void) | null = null
-
-  constructor(text: string, opts: CompileOptions & CommonOptions & { takes?: number }) {
-    super()
-    this.done = this.run(text, opts)
-    this.done.catch(() => {})
-  }
-
-  private async run(text: string, opts: CompileOptions & CommonOptions & { takes?: number }): Promise<{ word: Word; voiceprint: Voiceprint | null }> {
-    const typed = await Spot.compile(text, opts)
-    for (const w of typed.warnings) this.emit('warning', w)
-    if (this.cancelled) throw new DOMException('cancelled', 'AbortError')
-    const input = (this.input = await createEnrollInput(opts, typed.toJSON(), opts.takes ?? 3))
-    input.on('take', (t) => this.emit('take', t))
-    const r = await new Promise<{ word?: WordJSON; warnings?: Warning[]; audio?: Float32Array; error?: string }>((resolve, reject) => {
-      input.on('enrolled', resolve)
-      this.abort = () => reject(new DOMException('cancelled', 'AbortError'))
+    return new Enrollment({
+      compile: () => Spot.compile(text, opts),
+      open: async (word) => {
+        const input = await createEnrollInput(opts, word, opts.takes ?? 3)
+        return { on: input.on.bind(input) as EnrollTarget['on'], stop: () => input.dispose(), source: 'raw' }
+      },
+      embed: async (pcm, source) => (await Timbre.create()).embed(pcm, { source }),
     })
-    input.dispose()
-    if (r.error || !r.word) throw new AlkoveError('engine.failed', r.error ?? 'enrollment failed')
-    for (const w of r.warnings ?? []) this.emit('warning', w)
-    const word = wordOf(r.word)
-    const voiceprint = r.audio && r.audio.length >= 4000 ? await (await Timbre.create()).embed(r.audio, { source: 'raw' }) : null
-    return { word, voiceprint }
-  }
-
-  cancel(): void {
-    this.cancelled = true
-    this.input?.dispose()
-    this.abort?.()
-  }
+  },
 }
 
 // an enrollment screen (« read this sentence »): the same rules as the inputs' learning

@@ -7,10 +7,11 @@ import { Voiceprint, type VoiceprintJSON } from '../core/timbre'
 import { AlkoveError, type Diag } from '../errors'
 import { Emitter } from '../events'
 import { onDiag, report } from '../loader'
-import { FOCUS, RATE } from '../manifest'
+import { FOCUS, type Lang, RATE } from '../manifest'
 import { printOf } from '../process'
 import type { OutputOptions, RealtimeOptions } from '../realtime/worker'
 import { Host, scriptUrl, type WorkerLink } from '../runtime/host'
+import { Enrollment, type EnrollTarget } from './enroll'
 import { openMic, processed, supported } from './mic'
 
 export type Mode = 'raw' | 'focus' | 'focus+print' | 'spot' | 'spot+print'
@@ -612,6 +613,19 @@ class CallInput extends AlkoveInput {
     const handle = new SpotHandle(this, words.map((w) => wordOf(w).toJSON()), opts.context ?? 'anywhere')
     this.spots.add(handle)
     return handle
+  }
+
+  // a word enrolled on this call, read behind Focus like call.spot() reads it
+  enrollWord(text: string, opts: { lang?: Lang | Lang[]; takes?: number } = {}): Enrollment {
+    return new Enrollment({
+      compile: async () => (await import('../api')).Spot.compile(text, { lang: opts.lang, chain: 'focus' }),
+      open: async (word) => {
+        const rt = await Host.get().models('realtime', ['spot'])
+        rt.post({ type: 'set', input: this.id, enroll: { word, takes: opts.takes ?? 3 } })
+        return { on: this.on.bind(this) as EnrollTarget['on'], stop: () => rt.post({ type: 'set', input: this.id, enroll: null }), source: 'focus' }
+      },
+      embed: async (pcm, source) => (await (await import('../api')).Timbre.create()).embed(pcm, { source }),
+    })
   }
 
   setWords(words: WordJSON[], context: Context): void {

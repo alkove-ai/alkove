@@ -159,10 +159,7 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
     written: 0,
     held: [],
   }
-  if (opts.enroll) {
-    const w = wordOf(opts.enroll.word)
-    r.enroll = { net: new Spot(e.stream('spot')), enroller: new Enroller(w.text, w.lang, w.phonemes, 'raw', { ...ENROLL, takes: opts.enroll.takes }), audio: [], sent: false }
-  }
+  if (opts.enroll) startEnroll(r, opts.enroll)
   if (bg && opts.verify)
     bg.addEventListener('message', (ev: MessageEvent) => {
       if (ev.data.type !== 'verified') return
@@ -178,6 +175,11 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
     chain.onFocus = (hop, t) => {
       feedSpot(r, hop)
       if (r.learn) tapLearn(r, hop)
+      if (r.enroll) {
+        r.tape!.set(hop, r.written % TAPE)
+        r.written += HOP
+        feedEnroll(r, hop)
+      }
       if (opts.trace && (t / HOP) % TRACE_EVERY === 0) {
         let s = 0
         for (const x of hop) s += x * x
@@ -242,11 +244,25 @@ function feedSpot(r: Realtime, pcm: Float32Array): void {
 // the last seconds of the mic, to cut the takes out of for the voiceprint
 const TAPE = 8 * RATE
 
+function startEnroll(r: Realtime, spec: { word: WordJSON; takes: number } | null): void {
+  r.enroll?.net.release()
+  r.enroll = null
+  if (!spec) return
+  const w = wordOf(spec.word)
+  const chain = r.chain ? 'focus' : 'raw'
+  r.enroll = { net: new Spot(engine!.stream('spot')), enroller: new Enroller(w.text, w.lang, w.phonemes, chain, { ...ENROLL, takes: spec.takes }), audio: [], sent: false }
+  if (!r.tape) {
+    r.tape = new Float32Array(TAPE)
+    r.written = 0
+  }
+}
+
 function feedEnroll(r: Realtime, hop: Float32Array): void {
   const en = r.enroll!
+  const shift = r.chain ? FOCUS.lag / RATE : 0
   en.net.push(hop, (f) =>
     en.enroller.frame(f, (take) => {
-      emitTo(r, { type: 'take', ...take })
+      emitTo(r, { type: 'take', ...take, start: Math.max(0, take.start - shift), end: Math.max(0, take.end - shift) })
       if (take.ok) en.audio.push(cut(r, take.start, take.end))
     }),
   )
@@ -566,6 +582,7 @@ self.onmessage = async (e: MessageEvent) => {
         if ('enabled' in m) r.chain?.setEnabled(m.enabled)
         if ('print' in m) r.chain?.setPrint(m.print)
         if ('words' in m) setWords(r, m.words, m.context ?? 'anywhere')
+        if ('enroll' in m) startEnroll(r, m.enroll)
         break
       }
       case 'dispose':
