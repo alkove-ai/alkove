@@ -63,9 +63,9 @@ What one second of audio costs on a phone (Galaxy Z Fold8, Chrome, WebAssembly, 
 
 | Model | Time per second of audio | Share of one core |
 |---|---|---|
-| Focus | about 107 ms | about 11 % |
-| Cue | 11 ms | about 1 % |
-| Spot | about 22 ms | about 2 % |
+| Focus | about 54 ms | about 5 % |
+| Cue | 2.4 ms | under 1 % |
+| Spot | about 9 ms | about 1 % |
 
 A wake listener runs Spot alone on the raw microphone, the whole time it is open.
 
@@ -105,4 +105,4 @@ const { worklet, simd, secure } = Alkove.supported()
 
 ## What is tested
 
-The SDK's browser tests run on the engines of Chromium, Firefox and WebKit (desktop builds, through Playwright): `blocked` then `running` after `resume()` in a click is checked in WebKit, and Firefox's silent input (no channel at all while nothing plays) is handled as silence. The phone figures above come from Chrome on Android. Try your app on the phones your users have, Safari on iOS included, before you ship.
+The SDK's browser tests run on the engines of Chromium, Firefox and WebKit (desktop builds, through Playwright): `blocked` then `running` after `resume()` in a click is checked in WebKit, and Firefox's silent input (no channel at all while nothing plays) is handled as silence. The phone figures above come from Chrome on Android, where the models give the same outputs, to the bit, as on a desktop. Try your app on the phones your users have, Safari on iOS included, before you ship.

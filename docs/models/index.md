@@ -54,13 +54,13 @@ Measured on a Galaxy Z Fold8, in Chrome, WebAssembly, one thread:
 
 | Model | Cost |
 |---|---|
-| Focus | about 107 ms per second of audio (about 11 % of one core) |
-| Cue | 11 ms per second of audio |
-| Spot | about 22 ms per second of audio |
-| Timbre | 4.7 ms per 1.5 s window |
-| Lex | 6.2 ms per beam step (one step per phoneme, plus one) |
+| Focus | about 54 ms per second of audio (about 5 % of one core) |
+| Cue | 2.4 ms per second of audio |
+| Spot | about 9 ms per second of audio |
+| Timbre | 2.5 ms per 1.5 s window |
+| Lex | about 5 ms per word: 1.8 ms to read it, then 0.3 ms per phoneme |
 
-A call input (Focus and Cue) uses about an eighth of one core on that phone. Timbre and Lex only run now and then (a voiceprint update, a word compiled), never per audio frame.
+A call input (Focus and Cue) uses about 6 % of one core on that phone, and the outputs are the same, to the bit, as on a desktop. Timbre and Lex only run now and then (a voiceprint update, a word compiled), never per audio frame.
 
 ## Versions
 

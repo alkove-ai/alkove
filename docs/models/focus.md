@@ -66,6 +66,7 @@ Focus adds 16 ms (one step) on top of its 16 ms step. A live input reports its t
 
 | | |
 |---|---|
+| WebAssembly, 1 thread, Galaxy Z Fold8 (Chrome 155) | about 54 ms per second of audio (about 5 % of one core) |
 | WebAssembly, 1 thread, Apple M1 Max (Node 22) | about 70 ms per second of audio (about 7 % of one core) |
 | WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | about 60 ms per second of audio |
 

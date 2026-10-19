@@ -83,6 +83,7 @@ When it compiles a word, the SDK warns about text that will not be read the way 
 
 | | |
 |---|---|
+| WebAssembly, 1 thread, Galaxy Z Fold8 (Chrome 155) | 1.8 ms to read the word, then 0.3 ms per phoneme: about 5 ms per word |
 | WebAssembly, 1 thread, Apple M1 Max (Node 22) | 2.1 ms to read the word, then 0.4 ms per phoneme: about 5.5 ms per word |
 
 Lex runs in the background worker, never on the audio path.
