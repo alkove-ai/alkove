@@ -88,6 +88,15 @@ impl From<alkove_engine::Error> for Error {
     }
 }
 
+// a sample rate the resampler follows: NaN, 0 or a negative rate would loop or index out of its buffer
+pub fn rate(r: f64) -> Result<f64, Error> {
+    if (1000.0..=768_000.0).contains(&r) {
+        Ok(r)
+    } else {
+        Err(Error::Range("audio.rate: expected 1000 to 768000 Hz".into()))
+    }
+}
+
 // a streaming model's input and output, of the sizes the core feeds and reads
 fn stream_io(net: &Session, input: &str, in_len: usize, output: &str, out_len: usize) -> Result<(), Error> {
     let len = |ios: &[alkove_engine::Io], name: &str| ios.iter().find(|io| io.name == name).map(|io| io.shape.iter().product::<usize>());

@@ -143,7 +143,7 @@ impl Value {
 }
 
 fn take<'a>(b: &'a [u8], at: &mut usize, n: usize) -> Result<&'a [u8], Error> {
-    let s = b.get(*at..*at + n).ok_or(Error::Value("ends early"))?;
+    let s = at.checked_add(n).and_then(|end| b.get(*at..end)).ok_or(Error::Value("ends early"))?;
     *at += n;
     Ok(s)
 }

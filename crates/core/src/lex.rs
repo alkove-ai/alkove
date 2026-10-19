@@ -113,7 +113,11 @@ fn set(s: &mut Session, name: &str, x: &[f32]) -> Result<(), Error> {
 
 impl Lex {
     pub fn new(model: &Arc<Model>) -> Result<Lex, Error> {
-        Ok(Lex { encoder: plan(model, "encoder")?, decoder: plan(model, "decoder")? })
+        let decoder = plan(model, "decoder")?;
+        if decoder.plan().outputs().iter().find(|io| io.name == "logp").map(|io| io.shape.iter().product::<usize>()) != Some(BEAMS * VOCAB) {
+            return Err(Error::Model("lex: logp of another size"));
+        }
+        Ok(Lex { encoder: plan(model, "encoder")?, decoder })
     }
 
     pub fn word(&mut self, word: &str, lang: &str) -> Result<Vec<Pronunciation>, Error> {

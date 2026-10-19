@@ -100,7 +100,7 @@ pub struct Chain {
     quiet: usize,
     mic_level: f64,
     floor: f64,
-    t: usize,
+    t: u64,
 }
 
 impl Chain {
@@ -230,7 +230,7 @@ impl Chain {
         }
         // with a print the output is also quiet while another voice talks: asleep only when the mic too is at its noise floor
         let voiced = self.woken();
-        self.quiet = if peak < QUIET && !voiced { self.quiet + HOP } else { 0 };
+        self.quiet = if peak < QUIET && !voiced { self.quiet.saturating_add(HOP) } else { 0 };
         if self.opts.sleep && !self.asleep && self.quiet >= SLEEP_AFTER {
             self.asleep = true;
             events.push(ChainEvent::Idle { asleep: true, at });
@@ -262,9 +262,9 @@ impl Chain {
                 self.on = 1.0;
             }
         }
-        self.since_speech = if self.tracker.active { 0 } else { self.since_speech + HOP };
+        self.since_speech = if self.tracker.active { 0 } else { self.since_speech.saturating_add(HOP) };
         self.since_reset += HOP;
-        self.t += HOP;
+        self.t += HOP as u64;
     }
 
     fn listen(&mut self, hop: &[f32]) {

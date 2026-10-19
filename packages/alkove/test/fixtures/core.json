@@ -16,7 +16,7 @@
  "spot: process, raw, after a pause": "1a8438815dd04bca323ae22af2b36b9a97f24e85166defbff49ca5ed4b7f62c6",
  "spot: process, behind Focus, both, traced": "4c9c11be8bcc50e8f026d7fdfdc4f7f014b0d579b34aa7078abcdeb13f204ca0",
  "spot: process, behind Focus with Cue, pause, normalize": "745dd850643fcaa9f02a2dc85f0f7cb7a66c1be6af57daf4af7845eaab52bcc7",
- "spot: listening frame by frame": "02ee62f88f8a860f82ed1528b684b772bca6573955f92beff6b3a9df644908e6",
+ "spot: listening frame by frame": "714fa04c64886fa4940a7b659b58c37d2679d39f857ba2c1c72d69e2a6179041",
  "spot: enrolling": "8189b651c9410d91c915b02aee333370465f0a81ad81d0550d5db817af2b09be",
  "worker: a call that learns the print, traced, kept, with stats: rt": "eccab6303ad7c46e6e11c52c23fce4fa94247bc6cf2ad13471ecf37e577a5a8f",
  "worker: a call that learns the print, traced, kept, with stats: events": "68317ad350089c267e34cf5d3079f37bdbadf953a328991c241530ca78b120bd",

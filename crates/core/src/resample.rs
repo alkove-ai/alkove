@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
-use crate::js;
 use crate::math::{cos, sin};
+use crate::{js, Error};
 
 const TAPS: usize = 24;
 const PHASES: usize = 128;
@@ -22,11 +22,12 @@ impl Resampler {
     pub const HALF: usize = TAPS / 2;
 
     // aligned: output k sits exactly on input position k × ratio (files), else half a window late with less latency (real time)
-    pub fn new(in_rate: f64, out_rate: f64, aligned: bool) -> Resampler {
+    pub fn new(in_rate: f64, out_rate: f64, aligned: bool) -> Result<Resampler, Error> {
+        let (in_rate, out_rate) = (crate::rate(in_rate)?, crate::rate(out_rate)?);
         let identity = in_rate == out_rate;
         let mut r = Resampler { identity, in_rate, ratio: 1.0, table: Vec::new(), work: Vec::new(), hist_len: TAPS, t: if aligned { TAPS as f64 } else { Self::HALF as f64 } };
         if identity {
-            return r;
+            return Ok(r);
         }
         r.ratio = in_rate / out_rate;
         let half = Self::HALF as f64;
@@ -50,7 +51,7 @@ impl Resampler {
             }
         }
         r.table = table;
-        r
+        Ok(r)
     }
 
     pub fn ratio(&self) -> f64 {
@@ -96,17 +97,33 @@ impl Resampler {
     }
 
     // a whole signal at once, its edges padded so nothing is cut
-    pub fn all(pcm: &[f32], in_rate: f64, out_rate: f64) -> Vec<f32> {
-        if in_rate == out_rate {
-            return pcm.to_vec();
+    pub fn all(pcm: &[f32], in_rate: f64, out_rate: f64) -> Result<Vec<f32>, Error> {
+        let mut r = Resampler::new(in_rate, out_rate, true)?;
+        if r.identity {
+            return Ok(pcm.to_vec());
         }
-        let mut r = Resampler::new(in_rate, out_rate, true);
         let n = js::round(pcm.len() as f64 * out_rate / in_rate) as usize;
         let mut out = Vec::with_capacity(n + TAPS);
         r.push(pcm, &mut out);
         let pad = (TAPS as f64 * r.ratio).ceil() as usize + 16;
         r.push(&vec![0.0; pad], &mut out);
         out.resize(n, 0.0);
-        out
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rates_it_cannot_follow_refused() {
+        for bad in [0.0, -16000.0, f64::NAN, f64::INFINITY, 999.0, 1e9] {
+            assert!(Resampler::new(bad, 16000.0, false).is_err(), "{bad}");
+            assert!(Resampler::new(16000.0, bad, true).is_err(), "{bad}");
+            assert!(Resampler::all(&[0.0; 10], 16000.0, bad).is_err(), "{bad}");
+        }
+        assert!(Resampler::new(44100.0, 16000.0, true).is_ok());
+        assert_eq!(Resampler::all(&[0.5; 10], 16000.0, 16000.0).unwrap(), [0.5; 10]);
     }
 }

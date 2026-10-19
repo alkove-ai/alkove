@@ -331,7 +331,7 @@ pub unsafe extern "C" fn alk_listener_free(l: *mut Listener) {
 #[no_mangle]
 pub unsafe extern "C" fn alk_listener_words(l: *mut Listener) -> i32 {
     answer(input().and_then(|v| words(&v)).map(|(w, c)| {
-        (*l).spotter = alkove_core::spot::Spotter::new(w, c);
+        (*l).spotter.set(w, c);
         Value::Null
     }))
 }
@@ -598,8 +598,8 @@ pub unsafe extern "C" fn alk_pipeline_set(p: *mut PipelineHandle) -> i32 {
 
 // Safety: `p` is live.
 #[no_mangle]
-pub unsafe extern "C" fn alk_pipeline_record(p: *mut PipelineHandle, seconds: f64) {
-    (*p).p.record(seconds);
+pub unsafe extern "C" fn alk_pipeline_record(p: *mut PipelineHandle, seconds: f64) -> i32 {
+    answer((*p).p.record(seconds).map(|()| Value::Null))
 }
 
 // Safety: `p` is live; out the last seconds as a stereo WAV (raw, processed), or null

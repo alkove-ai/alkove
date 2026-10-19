@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use alkove_core::spot::{context_of, EnrollOptions, Enroller as CoreEnroller, Listener as CoreListener, Spot, Spotter, Word, ENROLL};
+use alkove_core::spot::{context_of, EnrollOptions, Enroller as CoreEnroller, Listener as CoreListener, Spot, Word, ENROLL};
 use alkove_core::{fp, lex, ChainEvent, ChainOptions, Models, Part, ProcessOptions, SpeechEvent, SpeechParams, Value};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -442,7 +442,7 @@ impl Listener {
 
     fn set_words(&mut self, options: &Bound<'_, PyDict>) -> PyResult<()> {
         let (ws, context) = words(options)?;
-        self.inner.spotter = Spotter::new(ws, context);
+        self.inner.spotter.set(ws, context);
         Ok(())
     }
 
@@ -623,8 +623,8 @@ struct Resampler {
 impl Resampler {
     #[new]
     #[pyo3(signature = (in_rate, out_rate, aligned=false))]
-    fn new(in_rate: f64, out_rate: f64, aligned: bool) -> Self {
-        Resampler { inner: alkove_core::Resampler::new(in_rate, out_rate, aligned) }
+    fn new(in_rate: f64, out_rate: f64, aligned: bool) -> PyResult<Self> {
+        Ok(Resampler { inner: alkove_core::Resampler::new(in_rate, out_rate, aligned).map_err(error)? })
     }
 
     fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<Bound<'py, PyByteArray>> {
@@ -639,7 +639,7 @@ impl Resampler {
 #[pyfunction]
 fn resample<'py>(py: Python<'py>, pcm: &[u8], in_rate: f64, out_rate: f64) -> PyResult<Bound<'py, PyByteArray>> {
     let pcm = floats(pcm)?;
-    let out = py.detach(|| fp::exact(|| alkove_core::Resampler::all(&pcm, in_rate, out_rate)));
+    let out = py.detach(|| fp::exact(|| alkove_core::Resampler::all(&pcm, in_rate, out_rate))).map_err(error)?;
     Ok(bytes(py, &out))
 }
 

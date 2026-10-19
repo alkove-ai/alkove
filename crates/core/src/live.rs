@@ -22,8 +22,8 @@ impl Live {
     pub fn new(focus: &Arc<Model>, cue: &Arc<Model>, rate: f64, opts: ChainOptions) -> Result<Live, Error> {
         Ok(Live {
             chain: Chain::new(focus, cue, opts)?,
-            down: Resampler::new(rate, RATE, false),
-            up: Resampler::new(RATE, rate, false),
+            down: Resampler::new(rate, RATE, false)?,
+            up: Resampler::new(RATE, rate, false)?,
             hops: Chunker::new(FOCUS.chunk),
             hop: vec![0.0; FOCUS.chunk],
             in16: Vec::new(),

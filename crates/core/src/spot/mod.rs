@@ -121,6 +121,9 @@ impl Word {
                 phonemes.push(Variant { ipa, ids, lang: vlang, p: p.get("p").and_then(Value::num).ok_or_else(bad)? });
             }
         }
+        if phonemes.is_empty() {
+            return Err(bad());
+        }
         let t = v.get("thresholds").ok_or_else(bad)?;
         let thresholds = Thresholds { anywhere: t.get("anywhere").and_then(Value::num).ok_or_else(bad)?, pause: t.get("pause").and_then(Value::num).ok_or_else(bad)? };
         let calibrated = v.get("calibrated").and_then(Value::bool).ok_or_else(bad)?;
@@ -246,6 +249,12 @@ impl Spotter {
         s
     }
 
+    // other words from the next frame, on the same clock and pause
+    pub fn set(&mut self, words: Vec<Word>, context: Context) {
+        self.context = context;
+        self.set_words(words);
+    }
+
     pub fn set_words(&mut self, words: Vec<Word>) {
         self.list = words
             .into_iter()
@@ -359,5 +368,31 @@ pub fn context_of(s: &str) -> Context {
         "pause" => Context::Pause,
         "both" => Context::Both,
         _ => Context::Anywhere,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn word(phonemes: Vec<Value>) -> Value {
+        obj([
+            ("alkove", "word".into()),
+            ("spot", SPOT_ID.into()),
+            ("text", "hey".into()),
+            ("lang", Value::Arr(vec!["en".into()])),
+            ("phonemes", Value::Arr(phonemes)),
+            ("thresholds", obj([("anywhere", 1.0.into()), ("pause", 1.0.into())])),
+            ("calibrated", false.into()),
+            ("chain", "raw".into()),
+        ])
+    }
+
+    #[test]
+    fn a_word_needs_a_phoneme_this_spot_reads() {
+        let variant = |ipa: &str| obj([("ipa", ipa.into()), ("lang", "en".into()), ("p", 1.0.into())]);
+        assert!(Word::from_value(&word(vec![variant("heɪ")])).is_ok_and(|w| w.is_some()));
+        assert!(Word::from_value(&word(vec![])).is_err());
+        assert!(Word::from_value(&word(vec![variant("☃")])).is_err());
     }
 }

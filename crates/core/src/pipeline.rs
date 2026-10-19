@@ -167,9 +167,9 @@ struct Packer {
 }
 
 impl Packer {
-    fn new(o: &Output) -> Packer {
+    fn new(o: &Output) -> Result<Packer, Error> {
         let n = js::round(o.rate * o.chunk_ms / 1000.0) as usize;
-        Packer { resampler: Resampler::new(RATE, o.rate, false), buf: vec![0.0; n.max(1)], fill: 0, format: o.format, scratch: Vec::new() }
+        Ok(Packer { resampler: Resampler::new(RATE, o.rate, false)?, buf: vec![0.0; n.max(1)], fill: 0, format: o.format, scratch: Vec::new() })
     }
 
     fn push(&mut self, pcm: &[f32], outs: &mut Vec<Out>) {
@@ -195,7 +195,7 @@ struct LearnTap {
 
 struct Held {
     wake: Vec<(String, Value)>,
-    ready: usize,
+    ready: u64,
     key: u32,
     cut: bool,
 }
@@ -203,7 +203,7 @@ struct Held {
 struct History {
     buf: Vec<f32>,
     pos: usize,
-    total: usize,
+    total: u64,
 }
 
 struct Utterance {
@@ -211,11 +211,14 @@ struct Utterance {
     start: f64,
 }
 
+// the enroller's clock starts with it: `tape` and `stream` are where the tape and Spot's input were then, in seconds
 struct Enrolling {
     spot: Spot,
     enroller: Enroller,
     audio: Vec<Vec<f32>>,
     sent: bool,
+    tape: f64,
+    stream: f64,
 }
 
 struct Stats {
@@ -245,7 +248,9 @@ pub struct Pipeline {
     spot_model: Option<Arc<Model>>,
     enroll: Option<Enrolling>,
     tape: Option<Vec<f32>>,
-    written: usize,
+    written: u64,
+    // samples given to Spot so far: a listener or an enroller started later counts from there
+    fed: u64,
     learn: Option<LearnTap>,
     held: Vec<Held>,
     keys: u32,
@@ -260,10 +265,19 @@ pub struct Pipeline {
     trace: bool,
     cue_rows: usize,
     far_quiet_ms: f64,
-    hops: usize,
+    hops: u64,
     out: Vec<f32>,
     events: Vec<ChainEvent>,
     outs: Vec<Out>,
+}
+
+// a length of audio to keep: Infinity or NaN would size a buffer past memory
+fn seconds(what: &str, s: f64) -> Result<f64, Error> {
+    if (0.0..=600.0).contains(&s) {
+        Ok(s)
+    } else {
+        Err(Error::Range(format!("{what}: expected 0 to 600 seconds")))
+    }
 }
 
 fn event(fields: Vec<(&str, Value)>) -> Out {
@@ -286,7 +300,13 @@ impl Pipeline {
             _ => None,
         };
         let o = opts.output;
-        let keep = js::round(opts.keep_recent * RATE) as usize;
+        if let Some(o) = &o {
+            crate::rate(o.rate)?;
+            if !(0.0..=1000.0).contains(&o.chunk_ms) {
+                return Err(Error::Range("output.chunkMs: expected 0 to 1000 ms".into()));
+            }
+        }
+        let keep = js::round(seconds("keepRecent", opts.keep_recent)? * RATE) as usize;
         let mut p = Pipeline {
             learn: (opts.learn && chain.is_some()).then(|| LearnTap { buf: vec![0.0; WINDOW], fill: 0, fresh: 0, silent: 0 }),
             tape: chain.is_none().then(|| vec![0.0; TAPE]),
@@ -295,11 +315,12 @@ impl Pipeline {
             spot_model: spot.cloned(),
             enroll: None,
             written: 0,
+            fed: 0,
             held: Vec::new(),
             keys: 0,
             history: o.filter(|o| o.utterance).map(|_| History { buf: vec![0.0; HISTORY], pos: 0, total: 0 }),
             utterance: None,
-            packer: o.filter(|o| o.audio).map(|o| Packer::new(&o)),
+            packer: o.filter(|o| o.audio).map(|o| Packer::new(&o)).transpose()?,
             output: o,
             stats: opts.stats.then_some(Stats { speech: 0, hops: 0, raw_quiet: 0.0, out_quiet: 0.0 }),
             recent: (keep > 0).then(|| Recent { raw: vec![0.0; keep], out: vec![0.0; keep], pos: 0, full: false }),
@@ -335,7 +356,7 @@ impl Pipeline {
         self.outs.drain(..)
     }
 
-    pub fn hops(&self) -> usize {
+    pub fn hops(&self) -> u64 {
         self.hops
     }
 
@@ -346,7 +367,7 @@ impl Pipeline {
 
     // the chain's clock in seconds, else the hops'
     pub fn time(&self) -> f64 {
-        self.chain.as_ref().map_or((self.hops * HOP) as f64 / RATE, Chain::time)
+        self.chain.as_ref().map_or((self.hops * HOP as u64) as f64 / RATE, Chain::time)
     }
 
     // Spot, once the input listens for words or enrolls one
@@ -358,13 +379,13 @@ impl Pipeline {
         let names = words.iter().map(|w| w.text.clone()).collect();
         match &mut self.spot {
             Some((l, n, _)) => {
-                l.spotter = crate::spot::Spotter::new(words, context);
+                l.spotter.set(words, context);
                 *n = names;
             }
             None => {
                 let m = self.spot_model.clone().ok_or(Error::Missing("spot"))?;
-                let shift = if self.chain.is_some() { FOCUS.lag as f64 / RATE } else { 0.0 };
-                self.spot = Some((Listener::new(&m, words, context)?, names, shift));
+                let lag = if self.chain.is_some() { FOCUS.lag as f64 / RATE } else { 0.0 };
+                self.spot = Some((Listener::new(&m, words, context)?, names, lag - self.fed as f64 / RATE));
             }
         }
         Ok(())
@@ -376,18 +397,20 @@ impl Pipeline {
         let m = self.spot_model.clone().ok_or(Error::Missing("spot"))?;
         let chain = if self.chain.is_some() { "focus" } else { "raw" };
         let enroller = Enroller::new(&w.text, &w.lang, w.phonemes, chain, EnrollOptions { takes, ..ENROLL });
-        self.enroll = Some(Enrolling { spot: Spot::new(&m)?, enroller, audio: Vec::new(), sent: false });
         if self.tape.is_none() {
             self.tape = Some(vec![0.0; TAPE]);
             self.written = 0;
         }
+        let (tape, stream) = (self.written as f64 / RATE, self.fed as f64 / RATE);
+        self.enroll = Some(Enrolling { spot: Spot::new(&m)?, enroller, audio: Vec::new(), sent: false, tape, stream });
         Ok(())
     }
 
     // `seconds` of raw and processed mic from the next hop; the WAV comes as `Out::Record`
-    pub fn record(&mut self, seconds: f64) {
-        let n = js::round(seconds * RATE) as usize;
+    pub fn record(&mut self, seconds: f64) -> Result<(), Error> {
+        let n = js::round(self::seconds("record", seconds)? * RATE) as usize;
         self.record = Some(Recording { left: vec![0.0; n], right: vec![0.0; n], at: 0 });
+        Ok(())
     }
 
     pub fn recent(&self) -> Option<Vec<u8>> {
@@ -399,7 +422,7 @@ impl Pipeline {
     pub fn stats(&self) -> Value {
         let Some(s) = &self.stats else { return Value::Null };
         let removed = if s.out_quiet > 0.0 { js::to_fixed(10.0 * log10(s.raw_quiet / s.out_quiet), 1).into() } else { Value::Null };
-        obj([("speechSeconds", ((s.speech * HOP) as f64 / RATE).into()), ("seconds", ((s.hops * HOP) as f64 / RATE).into()), ("noiseRemovedDb", removed)])
+        obj([("speechSeconds", (s.speech as f64 * HOP as f64 / RATE).into()), ("seconds", (s.hops as f64 * HOP as f64 / RATE).into()), ("noiseRemovedDb", removed)])
     }
 
     // a hop of the raw mic while the worklet is in raw mode: the app's audio only
@@ -447,6 +470,7 @@ impl Pipeline {
             self.tape_hop(hop);
             self.feed_spot(hop);
             self.feed_enroll(hop);
+            self.fed += HOP as u64;
             if !self.held.is_empty() {
                 self.release();
             }
@@ -474,6 +498,7 @@ impl Pipeline {
             self.tape_hop(hop);
             self.feed_enroll(hop);
         }
+        self.fed += HOP as u64;
         if self.trace && (t / HOP as f64) % TRACE_EVERY as f64 == 0.0 {
             let db = js::to_fixed(10.0 * log10(energy(hop) / HOP as f64 + 1e-12), 1);
             self.outs.push(event(vec![("type", "trace".into()), ("primitive", "focus".into()), ("t", (t / RATE - FOCUS.lag as f64 / RATE).into()), ("db", db.into())]));
@@ -482,9 +507,9 @@ impl Pipeline {
 
     fn tape_hop(&mut self, hop: &[f32]) {
         if let Some(tape) = &mut self.tape {
-            let at = self.written % TAPE;
+            let at = (self.written % TAPE as u64) as usize;
             tape[at..at + HOP].copy_from_slice(hop);
-            self.written += HOP;
+            self.written += HOP as u64;
         }
     }
 
@@ -528,7 +553,7 @@ impl Pipeline {
 
     fn on_wake(&mut self, mut w: Vec<(String, Value)>) {
         let get = |w: &[(String, Value)], k: &str| w.iter().find(|(x, _)| x == k).and_then(|(_, v)| v.num()).unwrap_or(0.0);
-        if self.tape.is_none() {
+        if self.tape.is_none() || self.chain.is_some() {
             self.outs.push(Out::Event(Value::Obj(w)));
             return;
         }
@@ -540,7 +565,7 @@ impl Pipeline {
             return;
         }
         self.keys += 1;
-        self.held.push(Held { wake: w, ready: js::round(end * RATE) as usize + VERIFY_AFTER, key: self.keys, cut: false });
+        self.held.push(Held { wake: w, ready: js::round(end * RATE) as u64 + VERIFY_AFTER as u64, key: self.keys, cut: false });
     }
 
     fn release(&mut self) {
@@ -580,7 +605,8 @@ impl Pipeline {
 
     fn feed_enroll(&mut self, hop: &[f32]) {
         let Some(en) = &mut self.enroll else { return };
-        let shift = if self.chain.is_some() { FOCUS.lag as f64 / RATE } else { 0.0 };
+        let shift = if self.chain.is_some() { FOCUS.lag as f64 / RATE } else { 0.0 } - en.stream;
+        let tape = en.tape;
         let mut takes = Vec::new();
         let enroller = &mut en.enroller;
         en.spot.push(hop, |_, logp, speech| enroller.frame(logp, speech, |t| takes.push(t.clone())));
@@ -600,7 +626,7 @@ impl Pipeline {
             v.insert(0, ("type".into(), "take".into()));
             self.outs.push(Out::Event(Value::Obj(v)));
             if take.ok {
-                let audio = self.cut(take.start, take.end);
+                let audio = self.cut(tape + take.start, tape + take.end);
                 self.enroll.as_mut().expect("enrolling").audio.push(audio);
             }
         }
@@ -626,7 +652,7 @@ impl Pipeline {
 
     fn tap_learn(&mut self, hop: &[f32]) {
         let speaking = self.chain.as_ref().is_some_and(Chain::speaking);
-        let t = ((self.hops + 1) * HOP) as f64;
+        let t = ((self.hops + 1) * HOP as u64) as f64;
         let far = self.far_quiet_ms;
         let l = self.learn.as_mut().expect("learning");
         if !speaking {
@@ -658,7 +684,7 @@ impl Pipeline {
             h.buf[h.pos] = x;
             h.pos = (h.pos + 1) % h.buf.len();
         }
-        h.total += out.len();
+        h.total += out.len() as u64;
         if let Some(u) = &mut self.utterance {
             u.parts.push(out.to_vec());
         }
@@ -687,7 +713,7 @@ impl Pipeline {
                 let all = u.parts.concat();
                 let keep = (all.len() as i64 - (total - self.out_index(end)).max(0)).max(0) as usize;
                 let o = self.output.expect("utterances come with an output");
-                let pcm = encode(&Resampler::all(&all[..keep], RATE, o.rate), o.format);
+                let pcm = encode(&Resampler::all(&all[..keep], RATE, o.rate).expect("rate checked"), o.format);
                 self.outs.push(Out::Utterance { pcm, start: u.start, end });
             }
             _ => {}

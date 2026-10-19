@@ -35,7 +35,7 @@ pub extern "C" fn alk_h_out() -> *const f32 {
 
 #[no_mangle]
 pub extern "C" fn alk_h_resampler(in_rate: f64, out_rate: f64, aligned: u32) -> *mut Resampler {
-    Box::into_raw(Box::new(Resampler::new(in_rate, out_rate, aligned != 0)))
+    Resampler::new(in_rate, out_rate, aligned != 0).map_or(std::ptr::null_mut(), |r| Box::into_raw(Box::new(r)))
 }
 
 // Safety: `r` is live, `p` holds `len` floats; the samples it completes go to `alk_h_out`
@@ -58,7 +58,7 @@ pub unsafe extern "C" fn alk_h_resampler_free(r: *mut Resampler) {
 // Safety: `p` holds `len` floats.
 #[no_mangle]
 pub unsafe extern "C" fn alk_h_resample_all(p: *const f32, len: usize, in_rate: f64, out_rate: f64) -> usize {
-    let v = Resampler::all(std::slice::from_raw_parts(p, len), in_rate, out_rate);
+    let v = Resampler::all(std::slice::from_raw_parts(p, len), in_rate, out_rate).unwrap_or_default();
     OUT.with(|o| {
         *o.borrow_mut() = v;
         o.borrow().len()

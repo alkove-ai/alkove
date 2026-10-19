@@ -73,7 +73,7 @@ export interface AlkExports {
   alk_pipeline_pending(p: number): number
   alk_pipeline_verified(p: number, key: number, same: number, score: number): void
   alk_pipeline_set(p: number): number
-  alk_pipeline_record(p: number, seconds: number): void
+  alk_pipeline_record(p: number, seconds: number): number
   alk_pipeline_recent(p: number): number
   alk_pipeline_stats(p: number): number
   alk_pipeline_get(p: number, what: number): number

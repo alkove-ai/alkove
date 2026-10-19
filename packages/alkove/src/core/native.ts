@@ -431,7 +431,7 @@ export class NativePipeline {
   }
 
   record(seconds: number): void {
-    this.alk.x.alk_pipeline_record(live(this.ptr), seconds)
+    receive(this.alk, this.alk.x.alk_pipeline_record(live(this.ptr), seconds))
   }
 
   recent(): Uint8Array | null {

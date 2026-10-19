@@ -153,3 +153,16 @@ def test_speech_tracker_decides_as_the_processor(models):
 def test_to_int16_as_the_web_writes_wav():
     x = np.array([-1.5, -1, -0.5, -1e-9, 0, 1e-9, 0.5, 1, 1.5])
     assert alkove.to_int16(x).tolist() == [-32768, -32768, -16384, 0, 0, 0, 16383, 32767, 32767]
+
+
+def test_rates_the_resampler_cannot_follow_raise(models):
+    # 0, a negative rate or NaN once looped forever or aborted the interpreter
+    for bad in (0, -16000, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="audio.rate"):
+            alkove.Resampler(bad, 16000)
+        with pytest.raises(ValueError, match="audio.rate"):
+            alkove.resample(np.zeros(10, np.float32), 16000, bad)
+        with pytest.raises(ValueError, match="audio.rate"):
+            alkove.Live(models, bad)
+        with pytest.raises(ValueError, match="audio.rate"):
+            alkove.Processor(models, focus=True, rate=bad)

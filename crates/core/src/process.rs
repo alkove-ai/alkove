@@ -100,15 +100,15 @@ pub struct Processor {
     shift: f64,
     skip: usize,
     delay: usize,
-    pushed: usize,
-    given: usize,
+    pushed: u64,
+    given: u64,
     open: Option<f64>,
     part: Part,
     events: Vec<ChainEvent>,
     closed: bool,
     input: Option<Resampler>,
-    fed: usize,
-    fed16: usize,
+    fed: u64,
+    fed16: u64,
     listener: Option<Listener>,
 }
 
@@ -139,7 +139,7 @@ impl Processor {
             tracker = Some(SpeechTracker::cue(opts.speech));
         }
         let delay = chain.as_ref().map_or(0, |c| c.delay());
-        let input = (opts.rate != RATE).then(|| Resampler::new(opts.rate, RATE, true));
+        let input = if opts.rate != RATE { Some(Resampler::new(opts.rate, RATE, true)?) } else { None };
         let listener = match &opts.spot {
             Some((words, context)) if !words.is_empty() => Some(Listener::new(&model(&models.spot, "spot")?, words.clone(), *context)?),
             _ => None,
@@ -244,10 +244,10 @@ impl Processor {
         self.skip -= cut;
         let mut audio = &out[cut..];
         if last {
-            audio = &audio[..audio.len().min(self.pushed.saturating_sub(self.given))];
+            audio = &audio[..self.pushed.saturating_sub(self.given).min(audio.len() as u64) as usize];
         }
         let part = Part { start: self.given as f64 / RATE, audio: audio.to_vec(), ..std::mem::take(&mut self.part) };
-        self.given += audio.len();
+        self.given += audio.len() as u64;
         part
     }
 
@@ -259,13 +259,13 @@ impl Processor {
         let Some(r) = &mut self.input else { return Ok(self.push16(pcm)) };
         let mut pcm16 = Vec::new();
         r.push(pcm, &mut pcm16);
-        self.fed += pcm.len();
-        self.fed16 += pcm16.len();
+        self.fed += pcm.len() as u64;
+        self.fed16 += pcm16.len() as u64;
         Ok(self.push16(&pcm16))
     }
 
     fn push16(&mut self, pcm: &[f32]) -> Part {
-        self.pushed += pcm.len();
+        self.pushed += pcm.len() as u64;
         let out = self.run(pcm);
         self.take(&out, false)
     }
