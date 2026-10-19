@@ -8,7 +8,7 @@ import { Resampler } from './dsp/resample'
 import { decodeWav, encodeWav } from './dsp/wav'
 import { AlkoveError } from './errors'
 import { configure, isCached, onDiag, type Progress } from './loader'
-import { ENGINE_WASM, filesOf, type Lang, type ModelName, MODELS, RATE } from './manifest'
+import { ENGINE_WASM, type Lang, type ModelName, MODELS, RATE } from './manifest'
 import type { ProcessOptions, ProcessPart, ProcessResult } from './process'
 import { micPermission, supported } from './recipes/mic'
 import type { CallName } from './runtime/calls'
@@ -102,7 +102,7 @@ export const Alkove = {
 
   // true when everything is already here: works offline
   async cached(usage: Usage, opts: UsageOptions = {}): Promise<boolean> {
-    const files = [ENGINE_WASM, ...modelsFor(usage, opts).flatMap((n) => filesOf(n).map((f) => MODELS[f]))]
+    const files = [ENGINE_WASM, ...modelsFor(usage, opts).map((n) => MODELS[n])]
     return (await Promise.all(files.map(isCached))).every(Boolean)
   },
 

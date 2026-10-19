@@ -6,17 +6,19 @@ export interface AlkExports {
   alk_model(bytes: number, len: number): number
   alk_model_free(m: number): void
   alk_error(out: number, cap: number): number
-  alk_session(m: number): number
+  alk_plans(m: number): number
+  alk_plan_name(m: number, i: number, out: number, cap: number): number
+  alk_session(m: number, plan: number): number
   alk_session_free(s: number): void
   alk_input(s: number, name: number, len: number): number
   alk_output(s: number, name: number, len: number): number
   alk_run(s: number): void
   alk_state_clear(s: number): void
-  alk_variable(m: number): number
+  alk_variable(m: number, plan: number): number
   alk_set_len(s: number, len: number): number
-  alk_io_count(m: number, kind: number): number
-  alk_io_name(m: number, kind: number, i: number, out: number, cap: number): number
-  alk_io_shape(m: number, kind: number, i: number, dims: number, cap: number): number
+  alk_io_count(m: number, plan: number, kind: number): number
+  alk_io_name(m: number, plan: number, kind: number, i: number, out: number, cap: number): number
+  alk_io_shape(m: number, plan: number, kind: number, i: number, dims: number, cap: number): number
 }
 
 export type TypedData = Float32Array | Int32Array
@@ -30,6 +32,15 @@ export interface Io {
   name: string
   dims: number[]
   size: number
+}
+
+// one way through a model's weights (Lex: its encoder, its decoder), with its own inputs, outputs and state
+export interface Plan {
+  index: number
+  name: string
+  inputs: Io[]
+  outputs: Io[]
+  variable: string | null
 }
 
 export class EngineError extends Error {}
@@ -76,9 +87,7 @@ export class Alk {
 
 export class Model {
   readonly ptr: number
-  readonly inputs: Io[]
-  readonly outputs: Io[]
-  readonly variable: string | null
+  readonly plans: Plan[]
 
   constructor(
     readonly alk: Alk,
@@ -87,28 +96,30 @@ export class Model {
     const x = alk.x
     this.ptr = alk.with(bytes, (p, n) => x.alk_model(p, n))
     if (!this.ptr) alk.fail('model')
-    const ios = (kind: number): Io[] => {
-      const out: Io[] = []
-      const buf = x.alk_alloc(256)
-      try {
-        for (let i = 0; i < x.alk_io_count(this.ptr, kind); i++) {
-          const name = new TextDecoder().decode(new Uint8Array(alk.heap, buf, x.alk_io_name(this.ptr, kind, i, buf, 256)))
-          const rank = x.alk_io_shape(this.ptr, kind, i, buf, 64)
-          const dims = Array.from(new Uint32Array(alk.heap, buf, rank))
-          out.push({ name, dims, size: dims.reduce((a, b) => a * b, 1) })
-        }
-      } finally {
-        x.alk_free(buf, 256)
-      }
-      return out
+    const buf = x.alk_alloc(256)
+    const text = (n: number) => new TextDecoder().decode(new Uint8Array(alk.heap, buf, n))
+    try {
+      this.plans = Array.from({ length: x.alk_plans(this.ptr) }, (_, plan) => {
+        const ios = (kind: number): Io[] =>
+          Array.from({ length: x.alk_io_count(this.ptr, plan, kind) }, (_, i) => {
+            const name = text(x.alk_io_name(this.ptr, plan, kind, i, buf, 256))
+            const rank = x.alk_io_shape(this.ptr, plan, kind, i, buf, 64)
+            const dims = Array.from(new Uint32Array(alk.heap, buf, rank))
+            return { name, dims, size: dims.reduce((a, b) => a * b, 1) }
+          })
+        const inputs = ios(0)
+        return { index: plan, name: text(x.alk_plan_name(this.ptr, plan, buf, 256)), inputs, outputs: ios(1), variable: inputs[x.alk_variable(this.ptr, plan)]?.name ?? null }
+      })
+    } finally {
+      x.alk_free(buf, 256)
     }
-    this.inputs = ios(0)
-    this.outputs = ios(1)
-    this.variable = this.inputs[x.alk_variable(this.ptr)]?.name ?? null
   }
 
-  session(): Session {
-    return new Session(this)
+  // by name, or the first plan
+  session(plan?: string): Session {
+    const p = plan === undefined ? this.plans[0] : this.plans.find((q) => q.name === plan)
+    if (!p) throw new EngineError(`no plan named ${plan}`)
+    return new Session(this, p)
   }
 
   release(): void {
@@ -121,14 +132,17 @@ export class Session {
   private readonly ptr: number
   private readonly at = new Map<string, Io & { p: number }>()
 
-  constructor(readonly model: Model) {
+  constructor(
+    readonly model: Model,
+    readonly plan: Plan,
+  ) {
     const { alk } = model
     const x = alk.x
-    this.ptr = x.alk_session(model.ptr)
+    this.ptr = x.alk_session(model.ptr, plan.index)
     const name = new TextEncoder()
     for (const [ios, find] of [
-      [model.inputs, x.alk_input],
-      [model.outputs, x.alk_output],
+      [plan.inputs, x.alk_input],
+      [plan.outputs, x.alk_output],
     ] as const)
       for (const io of ios) this.at.set(io.name, { ...io, p: alk.with(name.encode(io.name), (p, n) => find(this.ptr, p, n)) })
   }
@@ -154,9 +168,10 @@ export class Session {
   }
 
   // one call on any inputs: Timbre's windows of any length, Lex's int32 codes (held as floats, exact below 2^24)
-  call(feeds: Record<string, Tensor>, wanted: string[] = this.model.outputs.map((o) => o.name)): Record<string, Tensor> {
-    const { alk, variable } = this.model
-    for (const io of this.model.inputs) {
+  call(feeds: Record<string, Tensor>, wanted: string[] = this.plan.outputs.map((o) => o.name)): Record<string, Tensor> {
+    const { alk } = this.model
+    const { variable } = this.plan
+    for (const io of this.plan.inputs) {
       const feed = feeds[io.name]
       if (!feed) throw new EngineError(`missing input ${io.name}`)
       if (io.name === variable) {

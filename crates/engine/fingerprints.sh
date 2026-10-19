@@ -5,9 +5,10 @@ cd "$(dirname "$0")/../.."
 cargo build -q --release
 cargo build -q --release --example bench
 cargo build -q --release --example bench --target x86_64-apple-darwin
-RUSTFLAGS="-C target-feature=+simd128,+bulk-memory" cargo build -q --release -p alkove-engine-wasm --target wasm32-unknown-unknown
+# its own target dir: the SDK's build (scripts/build.mjs) checks the hash of the wasm it made
+RUSTFLAGS="-C target-feature=+simd128,+bulk-memory" cargo build -q --release -p alkove-engine-wasm --target wasm32-unknown-unknown --target-dir target/fingerprints
 for f in "$@"; do
-  ./target/release/examples/bench "$f" 20 | head -1
-  arch -x86_64 ./target/x86_64-apple-darwin/release/examples/bench "$f" 20 | head -1
-  node crates/engine-wasm/fingerprint.mjs target/wasm32-unknown-unknown/release/alkove_engine_wasm.wasm "$f" 20
+  ./target/release/examples/bench "$f" 20 | grep fingerprint
+  arch -x86_64 ./target/x86_64-apple-darwin/release/examples/bench "$f" 20 | grep fingerprint
+  node crates/engine-wasm/fingerprint.mjs target/fingerprints/wasm32-unknown-unknown/release/alkove_engine_wasm.wasm "$f" 20
 done

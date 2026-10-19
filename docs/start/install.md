@@ -52,7 +52,7 @@ What each use downloads (brotli):
 |---|---|
 | call or agent | Focus 0.9 MB + Cue 0.9 MB, + Timbre 0.7 MB with a voiceprint |
 | wake word | Spot 2.5 MB, + Lex 1.5 MB for a typed word |
-| engine, for every use | 56 KB |
+| engine, for every use | 57 KB |
 
 ## Configure before the first input
 
@@ -65,7 +65,7 @@ Alkove.configure({
 })
 ```
 
-You can also pass the bytes or the URL of each model in `models` (keys `focus`, `cue`, `spot`, `timbre`, `lex` and `lexDecoder` for Lex's two files, and `engine` for the engine). Bytes are still checked by sha256. A relative base like `/alkove/` is read against the page. Calling `configure()` after the first input has no effect on models already loaded, and raises a `diag` `config.late`. All fields: [`Config`](/docs/reference/interfaces/config/).
+You can also pass the bytes or the URL of each model in `models` (keys `focus`, `cue`, `spot`, `timbre`, `lex`, and `engine` for the engine). Bytes are still checked by sha256. A relative base like `/alkove/` is read against the page. Calling `configure()` after the first input has no effect on models already loaded, and raises a `diag` `config.late`. All fields: [`Config`](/docs/reference/interfaces/config/).
 
 ## Load ahead of time
 

@@ -24,7 +24,7 @@ const join = (...parts: Float32Array[]) => {
 
 describe('enrolling a word', () => {
   it('three takes set a threshold under them and over the rest, which then finds the word', () => {
-    const lex = () => new Lex(engine.net('lex'), engine.net('lexDecoder'))
+    const lex = () => new Lex(engine.net('lex', 'encoder'), engine.net('lex', 'decoder'))
     const typed = compileWord('amendement', { lang: 'fr' }, lex)
     const speech = wav('speech.wav')
     const quiet = new Float32Array(16000)

@@ -25,7 +25,7 @@ impl<'a> Reader<'a> {
     }
 
     pub fn u32(&mut self) -> Result<u32, Error> {
-        let b = self.words.get(self.pos..self.pos + 4).ok_or(Error::Format("plan ends early"))?;
+        let b = self.words.get(self.pos..self.pos + 4).ok_or(Error::Format("file ends early"))?;
         self.pos += 4;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
@@ -43,14 +43,14 @@ impl<'a> Reader<'a> {
     }
 
     pub fn take(&mut self, n: usize) -> Result<&'a [u8], Error> {
-        let b = self.words.get(self.pos..self.pos + n).ok_or(Error::Format("plan ends early"))?;
+        let b = self.words.get(self.pos..self.pos + n).ok_or(Error::Format("file ends early"))?;
         self.pos += n;
         Ok(b)
     }
 
     pub fn str(&mut self) -> Result<String, Error> {
         let n = self.usize()?;
-        let b = self.words.get(self.pos..self.pos + n).ok_or(Error::Format("plan ends early"))?;
+        let b = self.words.get(self.pos..self.pos + n).ok_or(Error::Format("file ends early"))?;
         self.pos += (n + 3) & !3;
         String::from_utf8(b.to_vec()).map_err(|_| Error::Format("name not utf-8"))
     }
@@ -61,7 +61,7 @@ impl<'a> Reader<'a> {
 }
 
 pub struct Header<'a> {
-    pub plan: &'a [u8],
+    pub body: &'a [u8],
     pub blobs: &'a [u8],
 }
 
@@ -73,11 +73,11 @@ pub fn split(bytes: &[u8]) -> Result<Header<'_>, Error> {
     if word(4) as u32 != VERSION {
         return Err(Error::Version(word(4) as u32));
     }
-    let (plan, blob) = (word(8), word(12));
-    if plan % 4 != 0 || plan.checked_add(16).map_or(true, |e| e > blob) || blob > bytes.len() {
+    let (body, blob) = (word(8), word(12));
+    if body % 4 != 0 || body.checked_add(16).map_or(true, |e| e > blob) || blob > bytes.len() {
         return Err(Error::Format("bad section bounds"));
     }
-    Ok(Header { plan: &bytes[16..16 + plan], blobs: &bytes[blob..] })
+    Ok(Header { body: &bytes[16..16 + body], blobs: &bytes[blob..] })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

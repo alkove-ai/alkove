@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use alkove_engine::{Model, Session};
+use alkove_engine::{Model, Plan, Session};
 
 thread_local! {
     static ERROR: RefCell<String> = const { RefCell::new(String::new()) };
@@ -12,6 +12,16 @@ thread_local! {
 
 unsafe fn name<'a>(p: *const u8, len: usize) -> &'a str {
     std::str::from_utf8(std::slice::from_raw_parts(p, len)).unwrap_or("")
+}
+
+// a plan past the model's count reads as an empty one: no inputs, no state, no steps
+unsafe fn plan_at<'a>(m: *const Model, i: usize) -> Option<&'a Plan> {
+    (*m).plans().get(i)
+}
+
+unsafe fn copy_name(n: &str, out: *mut u8, cap: usize) -> usize {
+    std::ptr::copy_nonoverlapping(n.as_ptr(), out, n.len().min(cap));
+    n.len()
 }
 
 #[no_mangle]
@@ -57,11 +67,26 @@ pub unsafe extern "C" fn alk_model_free(m: *const Model) {
     drop(Arc::from_raw(m));
 }
 
-// Safety: `m` comes from `alk_model` and is still alive.
+// Safety: `m` is a live model.
 #[no_mangle]
-pub unsafe extern "C" fn alk_session(m: *const Model) -> *mut Session {
+pub unsafe extern "C" fn alk_plans(m: *const Model) -> usize {
+    (*m).plans().len()
+}
+
+// Safety: writes at most `cap` bytes to `out`; returns the name's length, 0 past the last plan.
+#[no_mangle]
+pub unsafe extern "C" fn alk_plan_name(m: *const Model, i: usize, out: *mut u8, cap: usize) -> usize {
+    plan_at(m, i).map_or(0, |p| copy_name(&p.name, out, cap))
+}
+
+// Safety: `m` comes from `alk_model` and is still alive; null past the last plan.
+#[no_mangle]
+pub unsafe extern "C" fn alk_session(m: *const Model, plan: usize) -> *mut Session {
+    if plan >= (*m).plans().len() {
+        return std::ptr::null_mut();
+    }
     Arc::increment_strong_count(m);
-    Box::into_raw(Box::new(Session::new(Arc::from_raw(m))))
+    Session::of(Arc::from_raw(m), plan).map_or(std::ptr::null_mut(), |s| Box::into_raw(Box::new(s)))
 }
 
 // Safety: `s` comes from `alk_session`, freed once.
@@ -102,40 +127,40 @@ pub unsafe extern "C" fn alk_state_clear(s: *mut Session) {
 
 // Safety: `m` is a live model; returns the index of the input `alk_set_len` measures, or -1.
 #[no_mangle]
-pub unsafe extern "C" fn alk_variable(m: *const Model) -> i32 {
-    (*m).frames().map_or(-1, |f| f.input as i32)
+pub unsafe extern "C" fn alk_variable(m: *const Model, plan: usize) -> i32 {
+    plan_at(m, plan).and_then(|p| p.frames()).map_or(-1, |f| f.input as i32)
 }
 
 // Safety: `m` is a live model.
 #[no_mangle]
-pub unsafe extern "C" fn alk_state_len(m: *const Model) -> usize {
-    (*m).state_len()
+pub unsafe extern "C" fn alk_state_len(m: *const Model, plan: usize) -> usize {
+    plan_at(m, plan).map_or(0, |p| p.state_len())
 }
 
 // Safety: `out` holds `alk_state_len` floats.
 #[no_mangle]
 pub unsafe extern "C" fn alk_state_get(s: *mut Session, out: *mut f32) {
-    let n = (*s).model().state_len();
+    let n = (*s).plan().state_len();
     (*s).state(std::slice::from_raw_parts_mut(out, n));
 }
 
 // Safety: `x` holds `alk_state_len` floats.
 #[no_mangle]
 pub unsafe extern "C" fn alk_state_set(s: *mut Session, x: *const f32) {
-    let n = (*s).model().state_len();
+    let n = (*s).plan().state_len();
     (*s).set_state(std::slice::from_raw_parts(x, n));
 }
 
 // Safety: `m` is a live model.
 #[no_mangle]
-pub unsafe extern "C" fn alk_steps(m: *const Model) -> usize {
-    (*m).steps()
+pub unsafe extern "C" fn alk_steps(m: *const Model, plan: usize) -> usize {
+    plan_at(m, plan).map_or(0, |p| p.steps())
 }
 
 // Safety: `s` is a live session; an `i` past `alk_steps` does nothing.
 #[no_mangle]
 pub unsafe extern "C" fn alk_step(s: *mut Session, i: usize) {
-    if i < (*s).model().steps() {
+    if i < (*s).plan().steps() {
         (*s).step(i);
     }
 }
@@ -148,37 +173,34 @@ pub unsafe extern "C" fn alk_arena(s: *mut Session) -> *mut f32 {
 
 // Safety: `m` is a live model.
 #[no_mangle]
-pub unsafe extern "C" fn alk_arena_len(m: *const Model) -> usize {
-    (*m).arena_len()
+pub unsafe extern "C" fn alk_arena_len(m: *const Model, plan: usize) -> usize {
+    plan_at(m, plan).map_or(0, |p| p.arena_len())
 }
 
-fn ios(m: &Model, kind: u32) -> &[alkove_engine::Io] {
-    if kind == 0 {
-        m.inputs()
-    } else {
-        m.outputs()
+unsafe fn ios<'a>(m: *const Model, plan: usize, kind: u32) -> &'a [alkove_engine::Io] {
+    match plan_at(m, plan) {
+        Some(p) if kind == 0 => p.inputs(),
+        Some(p) => p.outputs(),
+        None => &[],
     }
 }
 
 // Safety: `m` is a live model; `kind` 0 for inputs, 1 for outputs.
 #[no_mangle]
-pub unsafe extern "C" fn alk_io_count(m: *const Model, kind: u32) -> usize {
-    ios(&*m, kind).len()
+pub unsafe extern "C" fn alk_io_count(m: *const Model, plan: usize, kind: u32) -> usize {
+    ios(m, plan, kind).len()
 }
 
 // Safety: writes at most `cap` bytes to `out`; returns the name's length.
 #[no_mangle]
-pub unsafe extern "C" fn alk_io_name(m: *const Model, kind: u32, i: usize, out: *mut u8, cap: usize) -> usize {
-    let Some(io) = ios(&*m, kind).get(i) else { return 0 };
-    let n = &io.name;
-    std::ptr::copy_nonoverlapping(n.as_ptr(), out, n.len().min(cap));
-    n.len()
+pub unsafe extern "C" fn alk_io_name(m: *const Model, plan: usize, kind: u32, i: usize, out: *mut u8, cap: usize) -> usize {
+    ios(m, plan, kind).get(i).map_or(0, |io| copy_name(&io.name, out, cap))
 }
 
 // Safety: writes at most `cap` dimensions to `dims`; returns the rank.
 #[no_mangle]
-pub unsafe extern "C" fn alk_io_shape(m: *const Model, kind: u32, i: usize, dims: *mut u32, cap: usize) -> usize {
-    let Some(io) = ios(&*m, kind).get(i) else { return 0 };
+pub unsafe extern "C" fn alk_io_shape(m: *const Model, plan: usize, kind: u32, i: usize, dims: *mut u32, cap: usize) -> usize {
+    let Some(io) = ios(m, plan, kind).get(i) else { return 0 };
     let s = &io.shape;
     for (j, &d) in s.iter().take(cap).enumerate() {
         *dims.add(j) = d as u32;

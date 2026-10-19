@@ -6,6 +6,9 @@ use alkove_engine::{Model, Session};
 
 const NONE: u32 = u32::MAX;
 
+// name, arena, input x, output y, instructions: one plan of a file, over the file's weights
+type PlanSpec<'a> = (&'a str, usize, (usize, usize), (usize, usize), &'a [(u32, Vec<u32>)]);
+
 struct Plan {
     words: Vec<u32>,
     weights: Vec<Vec<f32>>,
@@ -19,6 +22,10 @@ impl Plan {
     }
 
     fn bytes(&self, arena: usize, input: (usize, usize), output: (usize, usize)) -> Vec<u8> {
+        self.file(&[("main", arena, input, output, &self.ops)])
+    }
+
+    fn file(&self, plans: &[PlanSpec]) -> Vec<u8> {
         let name = |s: &str| {
             let mut b = s.as_bytes().to_vec();
             let n = b.len() as u32;
@@ -27,14 +34,6 @@ impl Plan {
         };
         let mut w = self.words.clone();
         w.extend(name("t"));
-        w.push(arena as u32);
-        w.push(2);
-        for (kind, n, (off, len)) in [(0, "x", input), (1, "y", output)] {
-            w.push(kind);
-            w.extend(name(n));
-            w.extend([off as u32, 1, len as u32]);
-        }
-        w.extend([0, 0]);
         let mut blob = Vec::new();
         w.push(self.weights.len() as u32);
         for v in &self.weights {
@@ -42,10 +41,22 @@ impl Plan {
             blob.extend(v.iter().flat_map(|x| x.to_le_bytes()));
             blob.resize(blob.len().div_ceil(16) * 16, 0);
         }
-        w.push(self.ops.len() as u32);
-        for (code, words) in &self.ops {
-            w.extend([*code, words.len() as u32]);
-            w.extend(words);
+        w.push(plans.len() as u32);
+        for (plan, arena, input, output, ops) in plans {
+            w.extend(name(plan));
+            w.push(*arena as u32);
+            w.push(2);
+            for (kind, n, (off, len)) in [(0, "x", input), (1, "y", output)] {
+                w.push(kind);
+                w.extend(name(n));
+                w.extend([*off as u32, 1, *len as u32]);
+            }
+            w.extend([0, 0]);
+            w.push(ops.len() as u32);
+            for (code, words) in ops.iter() {
+                w.extend([*code, words.len() as u32]);
+                w.extend(words);
+            }
         }
         let body: Vec<u8> = w.iter().flat_map(|x| x.to_le_bytes()).collect();
         let start = (16 + body.len()).div_ceil(16) * 16;
@@ -165,4 +176,26 @@ fn crafted_sizes_refused() {
     let mut header = b"ALK\0".to_vec();
     header.extend([1u32, 0xffff_fff8, 16].iter().flat_map(|x| x.to_le_bytes()));
     assert!(Model::load(&header).is_err());
+}
+
+#[test]
+fn plans_share_the_weights() {
+    let mut p = Plan { words: Vec::new(), weights: Vec::new(), ops: Vec::new() };
+    let w = p.weight(vec![2.0, 3.0]);
+    // y = x times w, as a 1 x 2 by 2 x 1 matrix, then as a 1 x 1 by 1 x 2
+    let dot = [(2, vec![0, 2, 2, 1, 1, 2, 1, w, NONE, 0, 0, NONE, NONE, NONE, 0, 0])];
+    let outer = [(2, vec![0, 1, 1, 2, 1, 1, 2, w, NONE, 0, 0, NONE, NONE, NONE, 0, 0])];
+    let model = Arc::new(Model::load(&p.file(&[("dot", 4, (0, 2), (2, 1), &dot), ("outer", 4, (0, 1), (1, 2), &outer)])).expect("load"));
+    assert_eq!(model.plans().iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["dot", "outer"]);
+    let mut s = Session::of(model.clone(), 0).unwrap();
+    s.input_mut("x").unwrap().copy_from_slice(&[1.0, 10.0]);
+    s.run();
+    assert_eq!(s.output("y").unwrap(), [32.0]);
+    let mut s = Session::of(model.clone(), 1).unwrap();
+    s.input_mut("x").unwrap().copy_from_slice(&[5.0]);
+    s.run();
+    assert_eq!(s.output("y").unwrap(), [10.0, 15.0]);
+    assert!(Session::of(model, 2).is_none());
+    assert!(Model::load(&p.file(&[("a", 4, (0, 2), (2, 1), &dot), ("a", 4, (0, 2), (2, 1), &dot)])).is_err());
+    assert!(Model::load(&p.file(&[])).is_err());
 }

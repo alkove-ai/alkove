@@ -1,10 +1,5 @@
 export type ModelName = 'focus' | 'cue' | 'spot' | 'timbre' | 'lex'
 
-// Lex is two files: its encoder runs once per word, its decoder once per phoneme
-export type FileName = ModelName | 'lexDecoder'
-
-export const filesOf = (m: ModelName): FileName[] => (m === 'lex' ? ['lex', 'lexDecoder'] : [m])
-
 export interface ModelFile {
   name: string
   file: string
@@ -20,42 +15,36 @@ export const RATE = 16000
 
 export const HF_ORG = 'alkove-ai'
 
-export const MODELS: Record<FileName, ModelFile> = {
+export const MODELS: Record<ModelName, ModelFile> = {
   focus: {
     name: 'alkove-focus-1-preview',
     file: 'alkove-focus-1-preview.alk',
     bytes: 1111696,
-    sha256: '55318cf0a463d523e249a8d4fe3b83e205b83bdb3f275468bcd0707f52d8b97c',
+    sha256: 'a63cda32e023b8d76089f4c3df0cc2c69ba36017b8f6cdea1da1094ef8022b6a',
   },
   cue: {
     name: 'alkove-cue-1-preview',
     file: 'alkove-cue-1-preview.alk',
-    bytes: 1066500,
-    sha256: 'e054958b133befc2bff36ad4ceae98a8b25d19c3fefdcc50df8139634132fe4f',
+    bytes: 1066516,
+    sha256: '977cd614996498f468536effbc2fb05138331751ca21572cf07b24184b4e7911',
   },
   spot: {
     name: 'alkove-spot-1-preview',
     file: 'alkove-spot-1-preview.alk',
     bytes: 2774380,
-    sha256: 'd7cbb73a4a027144040ebabba7ec361201e9b7ec2cbdb7a6c8e0e3b15e97de66',
+    sha256: 'fef6b59f0c31c5c742db17d758621f778b23cff5a04834e0c6ec47b313d2ce3d',
   },
   timbre: {
     name: 'alkove-timbre-1-preview',
     file: 'alkove-timbre-1-preview.alk',
-    bytes: 739616,
-    sha256: '696dd4d8657e252665574a900e738e678f7b7dbf15fb45a53965492915c91c74',
+    bytes: 739632,
+    sha256: 'd498a7dd8b20528d783052b1e1d49e54ab7ee4e47aa12712d04f3d43edc68bd8',
   },
   lex: {
     name: 'alkove-lex-1-preview',
-    file: 'alkove-lex-1-preview.encoder.alk',
-    bytes: 1013712,
-    sha256: '47f3646ffbcc30c21271bec6670679ded0a9d74114952b6a9e60aedcd677951e',
-  },
-  lexDecoder: {
-    name: 'alkove-lex-1-preview',
-    file: 'alkove-lex-1-preview.decoder.alk',
-    bytes: 804372,
-    sha256: 'e79076b03e566fe4e52f0fd870ae5d4140a074dd3fd20d891d8e00c6a1a6fb3d',
+    file: 'alkove-lex-1-preview.alk',
+    bytes: 1818020,
+    sha256: '1e64ca9f5c2281cadae0f9c4a944cd1b1b433f0c0c29760c36340c97f7308957',
   },
 }
 

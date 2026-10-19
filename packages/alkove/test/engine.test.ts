@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { type Alk, EngineError, type Model } from '../src/engine/alk'
-import { FOCUS, type FileName, LEX, TIMBRE } from '../src/manifest'
+import { FOCUS, LEX, type ModelName, TIMBRE } from '../src/manifest'
 import { loadEngine, maxDiff, modelBytes, noise } from './helpers'
 
 let alk: Alk
-const models = new Map<FileName, Model>()
-const model = (name: FileName) => models.get(name) ?? models.set(name, alk.model(modelBytes(name))).get(name)!
+const models = new Map<ModelName, Model>()
+const model = (name: ModelName) => models.get(name) ?? models.set(name, alk.model(modelBytes(name))).get(name)!
 
 beforeAll(async () => {
   alk = await loadEngine()
@@ -64,8 +64,10 @@ describe('engine', () => {
   })
 
   it('lex: the encoder once, then the decoder phoneme by phoneme, its keys and values following each beam', () => {
-    const enc = model('lex').session()
-    const dec = model('lexDecoder').session()
+    expect(model('lex').plans.map((p) => p.name)).toEqual(['encoder', 'decoder'])
+    expect(() => model('lex').session('nothing')).toThrow(EngineError)
+    const enc = model('lex').session('encoder')
+    const dec = model('lex').session('decoder')
     const word = new Int32Array(LEX.word)
     ;[...'camille'].forEach((c, i) => (word[i] = c.codePointAt(0)!))
     const { cross, pad } = enc.call({ word: { data: word, dims: [1, LEX.word] }, lang: { data: Int32Array.of(0), dims: [1] } })

@@ -17,7 +17,7 @@ await lex.phonemize('Camille', 'fr')
 
 | | |
 |---|---|
-| Size | 1.8 MB in two files (int8 weights) |
+| Size | 1.8 MB (int8 weights) |
 | Languages | French, English, Spanish, Portuguese, Italian, Catalan, Romanian |
 | Input | a word of up to 33 characters, and its language |
 | Output | up to 3 pronunciations, in Spot's 58 phonemes, each with its probability |
@@ -100,7 +100,7 @@ Out of scope: phonetizing whole sentences for speech synthesis (it works word by
 
 ## Running it without the SDK
 
-The model is two `.alk` files for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [their format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. The encoder reads the word once. Then the decoder gives, one call per position, the probabilities of the next phoneme for each of 3 beams, and keeps each beam's keys and values in its state. You run a beam search around it. Whole numbers are held as floats.
+The model is an `.alk` file for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [its format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. It holds two plans over the same weights. The `encoder` plan reads the word once. Then the `decoder` plan gives, one call per position, the probabilities of the next phoneme for each of 3 beams, and keeps each beam's keys and values in its state. You run a beam search around it. Whole numbers are held as floats.
 
 | Encoder | Type | |
 |---|---|---|

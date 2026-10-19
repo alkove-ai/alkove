@@ -65,8 +65,8 @@ test.describe('network guarantee', () => {
     })
     expect(r.error).toBe('AlkoveError models.fetch')
     expect(r.diags).toContain('models.default-host')
-    const lex = [MODELS.lex, MODELS.lexDecoder]
-    expect(foreign.sort()).toEqual(lex.filter((f) => f.revision).map((f) => `https://huggingface.co/alkove-ai/${f.name}/resolve/${f.revision}/${f.file}`))
+    const lex = MODELS.lex
+    expect(foreign).toEqual(lex.revision ? [`https://huggingface.co/alkove-ai/${lex.name}/resolve/${lex.revision}/${lex.file}`] : [])
     // seen and expected: the fixture's check is for requests nobody asked for
     foreign.length = 0
   })

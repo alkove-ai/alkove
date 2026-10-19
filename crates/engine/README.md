@@ -36,6 +36,8 @@ The other calls on a session:
 - the state persists from one `run` to the next; `clear_state` sets it back to zero and keeps the inputs, and `state` / `set_state` read and write it as one vector;
 - a model whose input length varies (Timbre) takes `set_len` before `run`.
 
+A model run in several steps holds one plan per step, over the same weights. Lex reads a word with its `encoder` plan, then runs its `decoder` plan once per phoneme. `Session::new` opens the first plan, `Session::of(model, i)` the `i`-th of `model.plans()`.
+
 ## Build
 
 ```sh
@@ -55,20 +57,21 @@ The web SDK (`packages/alkove`) builds the wasm itself (`pnpm build`). It needs 
 | `alk_alloc(len)`, `alk_free(p, len)` | memory for bytes passed in |
 | `alk_model(bytes, len)` | a model, or null (then `alk_error(out, cap)` writes why) |
 | `alk_model_free(m)` | |
-| `alk_session(m)`, `alk_session_free(s)` | a session: one arena, at zero |
-| `alk_io_count(m, kind)` | number of inputs (`kind` 0) or outputs (1) |
-| `alk_io_name(m, kind, i, out, cap)` | name of the `i`-th one |
-| `alk_io_shape(m, kind, i, dims, cap)` | its shape |
+| `alk_plans(m)`, `alk_plan_name(m, p, out, cap)` | number of plans, name of plan `p` |
+| `alk_session(m, p)`, `alk_session_free(s)` | a session on plan `p`: one arena, at zero (null past the last plan) |
+| `alk_io_count(m, p, kind)` | number of inputs (`kind` 0) or outputs (1) of plan `p` |
+| `alk_io_name(m, p, kind, i, out, cap)` | name of the `i`-th one |
+| `alk_io_shape(m, p, kind, i, dims, cap)` | its shape |
 | `alk_input(s, name, len)`, `alk_output(s, name, len)` | where an input or an output lives, for the session's life |
 | `alk_run(s)` | one call |
-| `alk_variable(m)` | index of the input whose length varies, or −1 |
+| `alk_variable(m, p)` | index of the input whose length varies, or −1 |
 | `alk_set_len(s, len)` | that input's length for the next runs; −1 when out of range |
-| `alk_state_len(m)` | length of the state vector |
+| `alk_state_len(m, p)` | length of the state vector |
 | `alk_state_get(s, out)`, `alk_state_set(s, x)` | read or write the state vector |
 | `alk_state_clear(s)` | the state back to zero, the inputs kept |
 | `alk_reset(s)` | the whole arena back to zero |
-| `alk_steps(m)`, `alk_step(s, i)` | the instructions one at a time, for debugging |
-| `alk_arena(s)`, `alk_arena_len(m)` | the arena itself |
+| `alk_steps(m, p)`, `alk_step(s, i)` | the instructions one at a time, for debugging |
+| `alk_arena(s)`, `alk_arena_len(m, p)` | the arena itself |
 
 Pointers into the arena stay valid until the session is freed. A wasm memory that grows detaches JavaScript views, so take a fresh view after loading another model.
 
@@ -80,7 +83,7 @@ cargo test --release
 ```
 
 - **`cargo test`** builds small plans in memory and compares them, to the bit, with plain loops summing in the same order: linear, grouped, dilated, depthwise and transposed convolutions, sizes that do not fall on multiples of 4. It also checks the four-lane functions against the scalar ones, and that crafted files are refused. CI runs it on Linux x86-64, macOS arm64 and wasm32 (with and without SIMD).
-- **`fingerprints.sh`** hashes the outputs of 200 runs of a model on fixed inputs, natively, on x86-64 through Rosetta, and in Node. The three hashes must be equal.
+- **`fingerprints.sh`** hashes the outputs of 200 runs of each plan on fixed inputs, natively, on x86-64 through Rosetta, and in Node. The three hashes must be equal.
 
 ## Files
 

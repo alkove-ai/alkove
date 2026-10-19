@@ -515,7 +515,7 @@ pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], frame
             let window = c.weight(r.u32()?, len)?;
             let fft = c.weight(r.u32()?, size(&[3, nfft])? / 2)?;
             let mel_w = r.u32()?;
-            let mut spans = Vec::with_capacity(mels);
+            let mut spans = Vec::new();
             let mut total = 0;
             for _ in 0..mels {
                 let (start, count) = (r.usize()?, r.usize()?);

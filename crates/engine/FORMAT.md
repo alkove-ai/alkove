@@ -1,6 +1,8 @@
 # The `.alk` format, version 1
 
-An `.alk` file is a plan fixed offline: one arena of `f32`, the weights, and a list of instructions that read and write the arena at fixed places. Running a model means writing its inputs into the arena, running the instructions in order, and reading its outputs. There is no graph to schedule, no shape to infer and no memory to allocate at run time.
+An `.alk` file is a model fixed offline: its weights, and one or more **plans**. A plan is one arena of `f32` and a list of instructions that read and write the arena at fixed places. Running a plan means writing its inputs into the arena, running the instructions in order, and reading its outputs. There is no graph to schedule, no shape to infer and no memory to allocate at run time.
+
+Most models have one plan. A model run in several steps has one plan per step, over the same weights: Lex reads a word with its `encoder` plan, then runs its `decoder` plan once per phoneme.
 
 This document is enough to read the weights of a published model, to check a file, or to write another engine that gives the same results. The reference reader is `src/format.rs` and `src/ops.rs`; the reference semantics, `src/kernels.rs` and `src/math.rs`.
 
@@ -9,7 +11,7 @@ Version 1 is frozen: a file that needs anything else carries another version num
 ## Conventions
 
 - Every number is little-endian. A **word** is 4 bytes: `u32`, `i32` or `f32`.
-- Sizes, offsets and strides in the plan are counted in `f32` elements of the arena (or of a weight), never in bytes, except in the weight section where noted.
+- Sizes, offsets and strides are counted in `f32` elements of the arena (or of a weight), never in bytes, except in the weight descriptors where noted.
 - A `usize` word is a `u32` below 2³¹. A reader refuses any larger value, and any size computed from several (a product, a sum) that reaches 2³¹: this keeps every offset representable on 32-bit targets.
 - `NONE` is the word `0xFFFFFFFF`: no weight, no residual, no initial state.
 - A **string** is a `usize` length in bytes, then the UTF-8 bytes, padded with zeros to a multiple of 4.
@@ -20,16 +22,24 @@ Version 1 is frozen: a file that needs anything else carries another version num
 |---|---|
 | 0–3 | magic `ALK\0` (`41 4C 4B 00`) |
 | 4–7 | version, `u32`: `1` |
-| 8–11 | `P`, the plan's length in bytes, a multiple of 4 |
-| 12–15 | `B`, the offset of the weight data from the start of the file, with `16 + P ≤ B ≤` file length |
-| 16 … 16 + P | the plan |
+| 8–11 | `M`, the model section's length in bytes, a multiple of 4 |
+| 12–15 | `B`, the offset of the weight data from the start of the file, with `16 + M ≤ B ≤` file length |
+| 16 … 16 + M | the model section |
 | B … end | the weight data (the **blobs**) |
 
-## The plan
+## The model section
 
 In order, with nothing between the parts and nothing after the last one:
 
 1. `name`, a string: the model's name.
+2. Weights: a count, then one weight descriptor each (below). Weight `i` is the `i`-th, counted from 0. Every plan reads the same weights.
+3. Plans: a count, at least 1, then each plan (below). Two plans never have the same name. A model of one plan names it `main`.
+
+## A plan
+
+In order:
+
+1. `name`, a string: the plan's name.
 2. `arena`, `usize`: the arena's length in `f32`.
 3. Inputs and outputs: a count, then for each:
    - `kind`, `u32`: `0` input, `1` output;
@@ -38,7 +48,7 @@ In order, with nothing between the parts and nothing after the last one:
    - `rank`, `usize`, then `rank` dimensions, each a `usize`.
 
    It lies at `arena[off .. off + product(dims)]`, row-major.
-4. State pieces: a count, then for each `off`, `len`, `flat` (`usize`). The model's state vector has `max(flat + len)` elements; piece `p` is `state[flat .. flat + len]`, kept at `arena[off .. off + len]` between runs.
+4. State pieces: a count, then for each `off`, `len`, `flat` (`usize`). The plan's state vector has `max(flat + len)` elements; piece `p` is `state[flat .. flat + len]`, kept at `arena[off .. off + len]` between runs.
 5. Variable length: a `u32`, `0` when every size is fixed. Otherwise six words follow:
 
    | Word | Type | Meaning |
@@ -50,9 +60,8 @@ In order, with nothing between the parts and nothing after the last one:
    | `div` | `u32` | not 0 |
    | `plus` | `i32` | |
 
-   For an input of `len` elements, the model's **frame count** is `T = max(0, floor((len + add) / div) + plus)`, with floor division. Until a length is given, `len = max`.
-6. Weights: a count, then one weight descriptor each (below). Weight `i` is the `i`-th, counted from 0.
-7. Instructions: a count, then for each: `code` (`u32`), `n` (`usize`), then `n` words, the instruction's fields (below). An instruction whose fields do not fill exactly its `n` words is refused.
+   For an input of `len` elements, the plan's **frame count** is `T = max(0, floor((len + add) / div) + plus)`, with floor division. Until a length is given, `len = max`.
+6. Instructions: a count, then for each: `code` (`u32`), `n` (`usize`), then `n` words, the instruction's fields (below). An instruction whose fields do not fill exactly its `n` words is refused.
 
 ### Sizes that follow the frame count
 
@@ -91,7 +100,7 @@ For 4-bit blocks, the result is a `k × n` matrix stored row-major, `len = k × 
 
 ## Running
 
-- A session's arena starts at zero.
+- A session runs one plan, on its own arena; sessions of the same model share its weights. Its arena starts at zero.
 - **One call:**
   1. Write the inputs; for a variable input, give its length, which sets `T`.
   2. Run every instruction in order.
@@ -394,8 +403,9 @@ For row `r`, the values are `x.off + r × x.s0 + i × x.s1` for `i < n`. The res
 The reference reader refuses, before running anything:
 
 - **Header:** a bad magic, version or section bounds.
-- **Plan structure:**
-  - a plan that ends early or has words left over;
+- **Structure:**
+  - a model section that ends early or has words left over;
+  - no plan, or two plans of the same name;
   - an unknown instruction, operation or activation code;
   - an instruction that does not fill exactly its words.
 - **Sizes:** any size or offset of 2³¹ or more, alone or computed.

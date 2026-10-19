@@ -30,8 +30,8 @@ let t = performance.now()
 for (let i = 0; i < 20; i++) timbre.run({ audio: { data: window, dims: [1, TIMBRE.window] } })
 console.log(`timbre: ${((performance.now() - t) / 20).toFixed(1)} ms per 1.5 s window`)
 
-const encoder = engine.net('lex')
-const decoder = engine.net('lexDecoder')
+const encoder = engine.net('lex', 'encoder')
+const decoder = engine.net('lex', 'decoder')
 const word = { word: { data: new Int32Array(LEX.word).fill(97), dims: [1, LEX.word] }, lang: { data: Int32Array.of(0), dims: [1] } }
 t = performance.now()
 for (let i = 0; i < 20; i++) encoder.run(word)

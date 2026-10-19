@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { Alk } from '../src/engine/alk'
-import { type FileName, MODELS } from '../src/manifest'
+import { MODELS, type ModelName } from '../src/manifest'
 
 const root = join(import.meta.dirname, '..')
 
@@ -11,7 +11,7 @@ export const engineWasm = () => readFileSync(join(root, '../../target/wasm32-unk
 
 export const loadEngine = async (): Promise<Alk> => Alk.create(await WebAssembly.compile(engineWasm()))
 
-export const modelBytes = (name: FileName) => new Uint8Array(readFileSync(join(root, '.cache/models', MODELS[name].file)))
+export const modelBytes = (name: ModelName) => new Uint8Array(readFileSync(join(root, '.cache/models', MODELS[name].file)))
 
 export function noise(n: number, seed = 1, scale = 0.1): Float32Array {
   let s = seed

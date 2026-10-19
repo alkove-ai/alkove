@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { configure, loadModel } from './loader'
-import { ENGINE_WASM, filesOf, type ModelName, MODELS } from './manifest'
+import { ENGINE_WASM, type ModelName, MODELS } from './manifest'
 
 const USAGE = `alkove models <dir> [focus cue spot timbre lex]
 
@@ -20,12 +20,11 @@ async function main(argv: string[]): Promise<void> {
     process.exitCode = command ? 1 : 0
     return
   }
-  const all: ModelName[] = ['focus', 'cue', 'spot', 'timbre', 'lex']
-  const wanted = (names.length ? names : all) as ModelName[]
-  for (const n of wanted) if (!all.includes(n)) throw new Error(`unknown model ${n}`)
+  const wanted = (names.length ? names : Object.keys(MODELS)) as ModelName[]
+  for (const n of wanted) if (!(n in MODELS)) throw new Error(`unknown model ${n}`)
   await mkdir(dir, { recursive: true })
   configure({})
-  for (const n of wanted.flatMap(filesOf)) {
+  for (const n of wanted) {
     const bytes = await loadModel(n)
     await writeFile(join(dir, MODELS[n].file), bytes)
     console.log(`${MODELS[n].file}  ${(bytes.length / 1e6).toFixed(2)} MB  sha256 ok`)

@@ -9,7 +9,7 @@ export function makeCalls(engine: () => Engine) {
   let timbre: Timbre | null = null
   let lex: Lex | null = null
   const getTimbre = () => (timbre ??= new Timbre(engine().net('timbre')))
-  const getLex = () => (lex ??= new Lex(engine().net('lex'), engine().net('lexDecoder')))
+  const getLex = () => (lex ??= new Lex(engine().net('lex', 'encoder'), engine().net('lex', 'decoder')))
   const streams = new Map<number, Processor>()
   let next = 0
   return {

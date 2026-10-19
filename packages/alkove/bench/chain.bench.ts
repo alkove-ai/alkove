@@ -8,7 +8,7 @@ const engine = new WasmEngine(await loadEngine(), modelBytes)
 const mix = wav('mix.wav')
 const minute = new Float32Array(60 * 16000)
 for (let i = 0; i < minute.length; i++) minute[i] = mix[i % mix.length]!
-const word = compileWord('amendement', { lang: 'fr' }, () => new Lex(engine.net('lex'), engine.net('lexDecoder')))
+const word = compileWord('amendement', { lang: 'fr' }, () => new Lex(engine.net('lex', 'encoder'), engine.net('lex', 'decoder')))
 const cases = {
   'focus + cue (call)': { focus: true, cue: true, normalize: true },
   'focus + cue + spot': { focus: true, cue: true, spot: { words: [word] } },

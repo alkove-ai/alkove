@@ -2,7 +2,7 @@
  "model": "alkove-spot-1-preview",
  "file": "alkove-spot-1-preview.alk",
  "bytes": 2774380,
- "sha256": "d7cbb73a4a027144040ebabba7ec361201e9b7ec2cbdb7a6c8e0e3b15e97de66",
+ "sha256": "fef6b59f0c31c5c742db17d758621f778b23cff5a04834e0c6ec47b313d2ce3d",
  "benchmarks": [
   {
    "id": "typed-words",

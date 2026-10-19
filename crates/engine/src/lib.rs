@@ -66,7 +66,8 @@ struct Piece {
     flat: usize,
 }
 
-pub struct Model {
+// one way through the model's weights: its own arena, inputs, outputs, state and instructions
+pub struct Plan {
     pub name: String,
     arena: usize,
     inputs: Vec<Io>,
@@ -74,14 +75,46 @@ pub struct Model {
     state: Vec<Piece>,
     state_len: usize,
     frames: Option<Frames>,
-    weights: Vec<Vec<f32>>,
     ops: Vec<ops::Op>,
+}
+
+pub struct Model {
+    pub name: String,
+    weights: Vec<Vec<f32>>,
+    plans: Vec<Plan>,
 }
 
 impl Model {
     pub fn load(bytes: &[u8]) -> Result<Model, Error> {
         let h = format::split(bytes)?;
-        let r = &mut Reader::new(h.plan);
+        let r = &mut Reader::new(h.body);
+        let name = r.str()?;
+        let weights = (0..r.usize()?).map(|_| format::weight(r, h.blobs)).collect::<Result<Vec<_>, _>>()?;
+        let mut plans: Vec<Plan> = Vec::new();
+        for _ in 0..r.usize()? {
+            let p = Plan::read(r, &weights)?;
+            if plans.iter().any(|q| q.name == p.name) {
+                return Err(Error::Format("two plans of the same name"));
+            }
+            plans.push(p);
+        }
+        if plans.is_empty() {
+            return Err(Error::Format("no plan"));
+        }
+        if !r.done() {
+            return Err(Error::Format("trailing bytes after the plans"));
+        }
+        let weights = pack(weights, &mut plans);
+        Ok(Model { name, weights, plans })
+    }
+
+    pub fn plans(&self) -> &[Plan] {
+        &self.plans
+    }
+}
+
+impl Plan {
+    fn read(r: &mut Reader, weights: &[Vec<f32>]) -> Result<Plan, Error> {
         let name = r.str()?;
         let arena = r.usize()?;
         let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
@@ -123,23 +156,18 @@ impl Model {
             }
         };
         let most = frames.map_or(0, |f| f.of(f.max_len));
-        let weights = (0..r.usize()?).map(|_| format::weight(r, h.blobs)).collect::<Result<Vec<_>, _>>()?;
-        let n = r.usize()?;
-        let mut list = Vec::with_capacity(n);
-        for i in 0..n {
+        // no capacity from the file: a crafted count would ask for it all at once
+        let mut ops = Vec::new();
+        for i in 0..r.usize()? {
             let code = r.u32()?;
             let len = r.usize()?;
             let words = r.take(format::size(&[4, len])?)?;
-            list.push(ops::decode(code, words, arena, &weights, most).map_err(|e| match e {
+            ops.push(ops::decode(code, words, arena, weights, most).map_err(|e| match e {
                 Error::Format(m) => Error::Op(i, m),
                 e => e,
             })?);
         }
-        if !r.done() {
-            return Err(Error::Format("trailing plan"));
-        }
-        let weights = pack(weights, &mut list);
-        Ok(Model { name, arena, inputs, outputs, state, state_len, frames, weights, ops: list })
+        Ok(Plan { name, arena, inputs, outputs, state, state_len, frames, ops })
     }
 
     pub fn inputs(&self) -> &[Io] {
@@ -176,9 +204,9 @@ impl Model {
 }
 
 // the matrices the matrix kernel reads, repacked once each; the weights nothing reads as loaded any more, freed
-fn pack(mut weights: Vec<Vec<f32>>, ops: &mut [ops::Op]) -> Vec<Vec<f32>> {
+fn pack(mut weights: Vec<Vec<f32>>, plans: &mut [Plan]) -> Vec<Vec<f32>> {
     let mut packed = HashMap::new();
-    for op in ops.iter_mut() {
+    for op in plans.iter_mut().flat_map(|p| p.ops.iter_mut()) {
         let ids: Vec<usize> = op
             .gemm_weights()
             .into_iter()
@@ -193,7 +221,7 @@ fn pack(mut weights: Vec<Vec<f32>>, ops: &mut [ops::Op]) -> Vec<Vec<f32>> {
         op.set_packed(&ids);
     }
     let mut keep = Vec::new();
-    for op in ops.iter() {
+    for op in plans.iter().flat_map(|p| p.ops.iter()) {
         op.raw_weights(&mut keep);
     }
     let keep: HashSet<usize> = keep.into_iter().chain(packed.into_values()).collect();
@@ -207,20 +235,31 @@ fn pack(mut weights: Vec<Vec<f32>>, ops: &mut [ops::Op]) -> Vec<Vec<f32>> {
 
 pub struct Session {
     model: Arc<Model>,
+    plan: usize,
     arena: Vec<f32>,
     frames: usize,
 }
 
 impl Session {
+    // on the model's first plan
     pub fn new(model: Arc<Model>) -> Session {
-        let arena = vec![0.0; model.arena];
-        let frames = model.frames.map_or(0, |f| f.of(f.max_len));
-        Session { model, arena, frames }
+        Session::of(model, 0).expect("a model has a plan")
     }
 
-    // how much of the variable input the next run reads; the model's maximum until set
+    pub fn of(model: Arc<Model>, plan: usize) -> Option<Session> {
+        let p = model.plans.get(plan)?;
+        let arena = vec![0.0; p.arena];
+        let frames = p.frames.map_or(0, |f| f.of(f.max_len));
+        Some(Session { model, plan, arena, frames })
+    }
+
+    pub fn plan(&self) -> &Plan {
+        &self.model.plans[self.plan]
+    }
+
+    // how much of the variable input the next run reads; the plan's maximum until set
     pub fn set_len(&mut self, len: usize) -> Result<(), Error> {
-        match self.model.frames {
+        match self.plan().frames {
             Some(f) if (f.min_len..=f.max_len).contains(&len) => {
                 self.frames = f.of(len);
                 Ok(())
@@ -235,17 +274,17 @@ impl Session {
     }
 
     pub fn input_mut(&mut self, name: &str) -> Option<&mut [f32]> {
-        let io = self.model.inputs.iter().find(|io| io.name == name)?;
-        Some(&mut self.arena[io.off..io.off + io.len])
+        let (off, len) = self.plan().inputs.iter().find(|io| io.name == name).map(|io| (io.off, io.len))?;
+        Some(&mut self.arena[off..off + len])
     }
 
     pub fn output(&self, name: &str) -> Option<&[f32]> {
-        let io = self.model.outputs.iter().find(|io| io.name == name)?;
+        let io = self.plan().outputs.iter().find(|io| io.name == name)?;
         Some(&self.arena[io.off..io.off + io.len])
     }
 
     pub fn run(&mut self) {
-        for i in 0..self.model.ops.len() {
+        for i in 0..self.plan().ops.len() {
             self.step(i);
         }
     }
@@ -253,7 +292,7 @@ impl Session {
     pub fn step(&mut self, i: usize) {
         let m = &*self.model;
         // Safety: every instruction was checked against this arena's size at load.
-        unsafe { kernels::exec(self.arena.as_mut_ptr(), &m.ops[i], &m.weights, self.frames) }
+        unsafe { kernels::exec(self.arena.as_mut_ptr(), &m.plans[self.plan].ops[i], &m.weights, self.frames) }
     }
 
     pub fn reset(&mut self) {
@@ -262,19 +301,19 @@ impl Session {
 
     // the state back to zeros, the inputs kept (Focus's print)
     pub fn clear_state(&mut self) {
-        for p in &self.model.state {
+        for p in &self.model.plans[self.plan].state {
             self.arena[p.off..p.off + p.len].fill(0.0);
         }
     }
 
     pub fn state(&self, out: &mut [f32]) {
-        for p in &self.model.state {
+        for p in &self.plan().state {
             out[p.flat..p.flat + p.len].copy_from_slice(&self.arena[p.off..p.off + p.len]);
         }
     }
 
     pub fn set_state(&mut self, s: &[f32]) {
-        for p in &self.model.state {
+        for p in &self.model.plans[self.plan].state {
             self.arena[p.off..p.off + p.len].copy_from_slice(&s[p.flat..p.flat + p.len]);
         }
     }
