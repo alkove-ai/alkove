@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { WasmEngine } from '../src/core/engine'
-import { dot, Timbre } from '../src/core/timbre'
+import { dot, Voiceprint, type VoiceprintJSON } from '../src/core/timbre'
 import type { WordJSON } from '../src/core/spot/spot'
 import { processPcm } from '../src/process'
 import { f32, loadEngine, maxDiff, modelBytes, wav } from './helpers'
@@ -59,9 +59,9 @@ describe('primitives against the engine natively (lab)', () => {
 
   it('timbre', () => {
     const ref = f32('enroll.timbre.f32')
-    const w = new Timbre(engine.net('timbre')).window(wav('enroll.wav').subarray(0, 24000))
-    expect(maxDiff(w.embedding, ref.subarray(0, 192))).toBe(0)
-    expect(maxDiff(w.id, ref.subarray(192))).toBe(0)
+    const [w] = engine.timbre().windows(wav('enroll.wav').subarray(0, 24000))
+    expect(maxDiff(w!.embedding, ref.subarray(0, 192))).toBe(0)
+    expect(maxDiff(w!.id, ref.subarray(192))).toBe(0)
   })
 })
 
@@ -73,12 +73,12 @@ describe('what the primitives say', () => {
   })
 
   it('timbre knows the same voice from another clip', () => {
-    const timbre = new Timbre(engine.net('timbre'))
-    const me = timbre.embed(wav('enroll.wav'))
+    const embed = (pcm: Float32Array) => Voiceprint.fromJSON(engine.timbre().embed(pcm, 'raw') as unknown as VoiceprintJSON)!
+    const me = embed(wav('enroll.wav'))
     const speech = wav('speech.wav').subarray(8000, 8000 + 64000)
     const other = wav('mix.wav')
-    expect(me.similarity(timbre.embed(speech))).toBeGreaterThan(0.4)
-    expect(dot(me.centers[0]!.id, timbre.embed(speech).centers[0]!.id)).toBeGreaterThan(me.similarity(timbre.embed(other)))
+    expect(me.similarity(embed(speech))).toBeGreaterThan(0.4)
+    expect(dot(me.centers[0]!.id, embed(speech).centers[0]!.id)).toBeGreaterThan(me.similarity(embed(other)))
   })
 
   it('process: speech found, the word spotted', () => {

@@ -54,6 +54,8 @@ fn to_py<'py>(py: Python<'py>, v: &Value) -> PyResult<Bound<'py, PyAny>> {
             }
             d.into_any()
         }
+        Value::Bytes(b) => pyo3::types::PyBytes::new(py, b).into_any(),
+        Value::Floats(x) => PyList::new(py, x.iter().map(|&v| v as f64))?.into_any(),
     })
 }
 
@@ -504,6 +506,113 @@ impl Enroller {
     }
 }
 
+/// Timbre: a voice from 16 kHz audio, on windows of 1.5 s.
+#[pyclass(module = "alkove._alkove")]
+struct Timbre {
+    inner: alkove_core::timbre::Timbre,
+}
+
+#[pymethods]
+impl Timbre {
+    #[new]
+    fn new(model: &Model) -> PyResult<Self> {
+        Ok(Timbre { inner: alkove_core::timbre::Timbre::new(&model.inner).map_err(error)? })
+    }
+
+    // [{ embedding, id, seconds }], half overlapping
+    fn windows<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+        let pcm = floats(pcm)?;
+        let inner = &mut self.inner;
+        let ws = py.detach(|| fp::exact(|| inner.windows(&pcm))).map_err(error)?;
+        to_py(py, &Value::Arr(ws.iter().map(alkove_core::timbre::Center::to_value).collect()))
+    }
+
+    // the print's JSON
+    fn embed<'py>(&mut self, py: Python<'py>, pcm: &[u8], source: &str) -> PyResult<Bound<'py, PyAny>> {
+        let pcm = floats(pcm)?;
+        let inner = &mut self.inner;
+        let p = py.detach(|| fp::exact(|| inner.embed(&pcm, source))).map_err(error)?;
+        to_py(py, &p.to_value())
+    }
+}
+
+/// What can be asked of prints: { op: 'verify', a, b, level } | { op: 'identify', voice, known, level } | { op: 'merge', prints } | { op: 'read', print }.
+#[pyfunction]
+fn voiceprint<'py>(py: Python<'py>, op: &Bound<'_, PyDict>) -> PyResult<Bound<'py, PyAny>> {
+    let v = fp::exact(|| alkove_core::timbre::op(&from_py(op.as_any())?).map_err(error))?;
+    to_py(py, &v)
+}
+
+/// A print learned window by window: a window joins only if it looks like the windows so far.
+#[pyclass(module = "alkove._alkove")]
+struct Learner {
+    inner: alkove_core::learner::Learner,
+}
+
+#[pymethods]
+impl Learner {
+    #[new]
+    #[pyo3(signature = (source, start=None))]
+    fn new(source: &str, start: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        let start = match start {
+            Some(s) if !s.is_none() => alkove_core::timbre::Voiceprint::from_value(&from_py(s)?).map_err(error)?,
+            _ => None,
+        };
+        Ok(Learner { inner: alkove_core::learner::Learner::new(source, start.as_ref()) })
+    }
+
+    fn learn<'py>(&mut self, py: Python<'py>, timbre: &mut Timbre, pcm: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+        let pcm = floats(pcm)?;
+        let (inner, t) = (&mut self.inner, &mut timbre.inner);
+        let r = py.detach(|| fp::exact(|| t.window(&pcm).map(|w| inner.learn(w)))).map_err(error)?;
+        to_py(
+            py,
+            &alkove_core::value::obj([
+                ("accepted", r.accepted.into()),
+                ("score", r.score.into()),
+                ("restarted", r.restarted.into()),
+                ("progress", self.inner.progress().into()),
+                ("ready", self.inner.ready().into()),
+            ]),
+        )
+    }
+
+    fn offer<'py>(&mut self, py: Python<'py>, timbre: &mut Timbre, pcm: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+        let pcm = floats(pcm)?;
+        let (inner, t) = (&mut self.inner, &mut timbre.inner);
+        let o = py.detach(|| fp::exact(|| inner.offer(&pcm, |w| t.window(w)))).map_err(error)?;
+        to_py(
+            py,
+            &alkove_core::value::obj([
+                ("accepted", (o.accepted as f64).into()),
+                ("rejected", (o.rejected as f64).into()),
+                ("restarted", o.restarted.into()),
+                ("progress", o.progress.into()),
+                ("ready", o.ready.into()),
+            ]),
+        )
+    }
+
+    #[pyo3(signature = (raw=false))]
+    fn voiceprint<'py>(&self, py: Python<'py>, raw: bool) -> PyResult<Bound<'py, PyAny>> {
+        to_py(py, &self.inner.voiceprint().map_or(Value::Null, |p| if raw { p.to_raw_value() } else { p.to_value() }))
+    }
+
+    fn forget(&mut self) {
+        self.inner.forget();
+    }
+
+    #[getter]
+    fn progress(&self) -> f64 {
+        self.inner.progress()
+    }
+
+    #[getter]
+    fn ready(&self) -> bool {
+        self.inner.ready()
+    }
+}
+
 /// Windowed sinc between any two rates, across chunks.
 #[pyclass(module = "alkove._alkove")]
 struct Resampler {
@@ -546,6 +655,9 @@ fn _alkove(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Lex>()?;
     m.add_class::<Listener>()?;
     m.add_class::<Enroller>()?;
+    m.add_class::<Timbre>()?;
+    m.add_class::<Learner>()?;
+    m.add_function(wrap_pyfunction!(voiceprint, m)?)?;
     m.add("LANGS", lex::LANGS.to_vec())?;
     m.add_function(wrap_pyfunction!(compile, m)?)?;
     m.add_function(wrap_pyfunction!(word, m)?)?;

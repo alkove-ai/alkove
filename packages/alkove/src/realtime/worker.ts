@@ -1,17 +1,12 @@
-import type { Chain, ChainOptions } from '../core/chain'
+import type { ChainOptions } from '../core/chain'
 import { WasmEngine } from '../core/engine'
-import { LEARN, rms, VoiceprintLearner } from '../core/learner'
-import type { NativeEnroller, NativeListener } from '../core/native'
+import type { NativeCoach, NativePipeline } from '../core/native'
 import { type Context, type WordJSON, wordOf } from '../core/spot/spot'
-import { dot, Timbre as TimbreCore, Voiceprint, type VoiceprintJSON } from '../core/timbre'
-import { log10 } from '../dsp/math'
-import { Resampler } from '../dsp/resample'
-import { encodeWav } from '../dsp/wav'
 import { Alk } from '../engine/alk'
-import { FOCUS, type ModelName, RATE, TIMBRE } from '../manifest'
+import { type ModelName, RATE } from '../manifest'
 import { makeCalls } from '../runtime/calls'
 import { HOP, RAW_HOP } from './core'
-import { encode, type OutputOptions, Packer } from './packer'
+import type { OutputOptions } from './packer'
 
 export type { OutputOptions }
 
@@ -29,15 +24,10 @@ async function boot(module: WebAssembly.Module): Promise<void> {
   })
 }
 
-// ---- real time: every hop the worklet sends, through the input's pipeline; events batched to the main thread
+// ---- real time: every hop the worklet sends, through the input's pipeline in the core; events batched to the main thread
 
 const EVENT_MS = 100
 const TIMING_HOPS = 125
-const TRACE_EVERY = 6
-// learning windows: 1.5 s of Focus's output while the user talks, one every 0.5 s; cleared after 1 s without speech
-const WINDOW_HOP = 0.5 * RATE
-const WINDOW_RESET = 1 * RATE
-const PREROLL = 0.3
 
 export interface RealtimeOptions {
   pipeline: 'call' | 'agent' | 'wake' | 'enroll'
@@ -59,26 +49,13 @@ interface Realtime {
   closed: boolean
   timer: ReturnType<typeof setInterval>
   opts: RealtimeOptions
-  chain: Chain | null
-  spot: { listener: NativeListener; names: string[]; shift: number } | null
+  p: NativePipeline
   events: unknown[]
   shift: number
   timing: { n: number; sum: number; max: number; slow: number }
-  learn: { buf: Float32Array; fill: number; fresh: number; silent: number } | null
   bg: MessagePort | null
   out: MessagePort | null
-  farQuietMs: number
-  record: { left: Float32Array; right: Float32Array; at: number; id: number } | null
-  recent: { raw: Float32Array; out: Float32Array; pos: number; full: boolean } | null
-  stats: { speech: number; hops: number; rawQuiet: number; outQuiet: number } | null
-  audio: Packer | null
-  history: { buf: Float32Array; pos: number; total: number } | null
-  utterance: { parts: Float32Array[]; start: number } | null
-  hops: number
-  enroll: { enroller: NativeEnroller; audio: Float32Array[]; sent: boolean } | null
-  tape: Float32Array | null
-  written: number
-  held: { e: Record<string, unknown>; ready: number; key: number }[]
+  recordId: number | null
 }
 
 const inputs = new Map<number, Realtime>()
@@ -91,70 +68,30 @@ function emitTo(r: Realtime, e: Record<string, unknown>): void {
   r.events.push(e)
 }
 
+const words = (list: WordJSON[]) => list.map((w) => wordOf(w).toJSON())
+const enrolling = (spec: { word: WordJSON; takes: number } | null | undefined) => (spec ? { word: wordOf(spec.word).toJSON(), takes: spec.takes } : null)
+
 function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out: MessagePort | null): Realtime {
-  const e = engine!
-  const chain = opts.pipeline === 'wake' || opts.pipeline === 'enroll' ? null : e.chain(opts.chain)
-  const o = opts.output
-  const r: Realtime = {
-    id,
-    port: null,
-    closed: false,
-    timer: setInterval(() => flush(r), EVENT_MS),
-    opts,
-    chain,
-    spot: null,
-    events: [],
-    shift: 0,
-    timing: { n: 0, sum: 0, max: 0, slow: 0 },
-    learn: opts.learn && chain ? { buf: new Float32Array(TIMBRE.window), fill: 0, fresh: 0, silent: 0 } : null,
-    bg,
-    out,
-    farQuietMs: Infinity,
-    record: null,
-    recent: opts.keepRecent ? { raw: new Float32Array(opts.keepRecent * RATE), out: new Float32Array(opts.keepRecent * RATE), pos: 0, full: false } : null,
-    stats: opts.stats ? { speech: 0, hops: 0, rawQuiet: 0, outQuiet: 0 } : null,
-    audio: null,
-    history: o?.utterance ? { buf: new Float32Array(4 * RATE), pos: 0, total: 0 } : null,
-    utterance: null,
-    hops: 0,
-    enroll: null,
-    tape: chain ? null : new Float32Array(TAPE),
-    written: 0,
-    held: [],
-  }
-  if (opts.enroll) startEnroll(r, opts.enroll)
+  const chained = opts.pipeline !== 'wake' && opts.pipeline !== 'enroll'
+  const p = engine!.pipeline({
+    chain: chained ? (opts.chain ?? {}) : null,
+    verify: !!(opts.verify && bg),
+    learn: !!(opts.learn && bg),
+    keepRecent: opts.keepRecent ?? 0,
+    trace: !!opts.trace,
+    stats: !!opts.stats,
+    output: opts.output ?? null,
+    words: words(opts.words ?? []),
+    context: opts.context ?? 'anywhere',
+    enroll: enrolling(opts.enroll),
+  })
+  const r: Realtime = { id, port: null, closed: false, timer: setInterval(() => flush(r), EVENT_MS), opts, p, events: [], shift: 0, timing: { n: 0, sum: 0, max: 0, slow: 0 }, bg, out, recordId: null }
   if (bg && opts.verify)
     bg.addEventListener('message', (ev: MessageEvent) => {
-      if (ev.data.type !== 'verified') return
-      const i = r.held.findIndex((h) => h.key === ev.data.key)
-      if (i < 0) return
-      const [h] = r.held.splice(i, 1)
-      if (ev.data.same) emitTo(r, { ...h!.e, voice: ev.data.score })
-      else emitTo(r, { type: 'diag', code: 'wake.other-voice', level: 'info', data: { word: h!.e.word, voice: +ev.data.score.toFixed(3) } })
+      if (ev.data.type !== 'verified' || r.closed) return
+      r.p.verified(ev.data.key, ev.data.same, ev.data.score)
+      drain(r)
     })
-  if (o?.audio) r.audio = new Packer(o, (chunk) => send(r, { type: 'audio', pcm: chunk }, [chunk]))
-  if (opts.words?.length) setWords(r, opts.words, opts.context ?? 'anywhere')
-  if (chain && opts.trace) {
-    let rows = 0
-    chain.onCue = (speech, t) => {
-      if (rows++ % 3 === 0) emitTo(r, { type: 'trace', primitive: 'cue', t, speech: +speech.toFixed(3) })
-    }
-  }
-  if (chain)
-    chain.onFocus = (hop, t) => {
-      feedSpot(r, hop)
-      if (r.learn) tapLearn(r, hop)
-      if (r.enroll) {
-        r.tape!.set(hop, r.written % TAPE)
-        r.written += HOP
-        feedEnroll(r, hop)
-      }
-      if (opts.trace && (t / HOP) % TRACE_EVERY === 0) {
-        let s = 0
-        for (const x of hop) s += x * x
-        emitTo(r, { type: 'trace', primitive: 'focus', t: t / RATE - FOCUS.lag / RATE, db: +(10 * log10(s / HOP + 1e-12)).toFixed(1) })
-      }
-    }
   inputs.set(id, r)
   return r
 }
@@ -163,6 +100,31 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
 function send(r: Realtime, m: Record<string, unknown>, transfer: Transferable[]): void {
   if (r.out) r.out.postMessage(m, transfer)
   else post({ ...m, kind: m.type, type: 'pcm', input: r.id }, transfer)
+}
+
+// what the pipeline gave: events to batch, windows and wakes to the background, audio out
+function drain(r: Realtime): void {
+  for (const o of r.p.outs())
+    switch (o[0]) {
+      case 'event':
+        emitTo(r, o[1])
+        break
+      case 'window':
+        r.bg?.postMessage({ type: 'window', pcm: o[1], farQuietMs: o[2], t: o[3] }, [o[1].buffer])
+        break
+      case 'verify':
+        r.bg?.postMessage({ type: 'verify', key: o[1], pcm: o[2] }, [o[2].buffer])
+        break
+      case 'audio':
+        send(r, { type: 'audio', pcm: o[1].buffer }, [o[1].buffer])
+        break
+      case 'utterance':
+        send(r, { type: 'utterance', pcm: o[1].buffer, start: o[2] + r.shift, end: o[3] + r.shift }, [o[1].buffer])
+        break
+      case 'record':
+        post({ type: 'reply', id: r.recordId, result: o[1] }, [o[1].buffer])
+        r.recordId = null
+    }
 }
 
 // loading Spot blocks this worker for hundreds of ms: the worklet goes raw at the same delay meanwhile, instead of starving into an overload
@@ -176,144 +138,22 @@ function withSpot<T>(r: Realtime, make: () => T): T {
   }
 }
 
-function setWords(r: Realtime, words: WordJSON[], context: Context): void {
-  const list = words.map(wordOf)
-  const json = list.map((w) => w.toJSON() as unknown as null)
-  const names = list.map((w) => w.text)
-  if (!r.spot) r.spot = { listener: withSpot(r, () => engine!.listener(json, context)), names, shift: r.chain ? FOCUS.lag / RATE : 0 }
-  else {
-    r.spot.listener.setWords(json, context)
-    r.spot.names = names
-  }
-}
-
-// on the raw mic, a wake carries its audio; with onlyMyVoice it waits 0.5 s more for Timbre in the background worker
-const VERIFY_AFTER = 0.5 * RATE
-let keys = 0
-
-function onWake(r: Realtime, w: Record<string, unknown> & { start: number; end: number }): void {
-  if (!r.tape) return emitTo(r, w)
-  if (!r.opts.verify || !r.bg) return emitTo(r, { ...w, audio: cut(r, w.start, w.end) })
-  r.held.push({ e: w, ready: Math.round(w.end * RATE) + VERIFY_AFTER, key: ++keys })
-}
-
-function cut(r: Realtime, start: number, end: number): Float32Array {
-  const now = r.written
-  const from = Math.max(now - TAPE + HOP, Math.round(start * RATE))
-  const to = Math.min(now, Math.round(end * RATE))
-  const out = new Float32Array(Math.max(0, to - from))
-  for (let i = 0; i < out.length; i++) out[i] = r.tape![(from + i) % TAPE]!
-  return out
-}
-
-function release(r: Realtime): void {
-  for (const h of r.held) {
-    if (h.ready > r.written || h.e.audio) continue
-    const e = h.e as { start: number; end: number }
-    h.e.audio = cut(r, e.start, e.end)
-    const pcm = cut(r, e.start, e.end + VERIFY_AFTER / RATE)
-    r.bg!.postMessage({ type: 'verify', key: h.key, pcm }, [pcm.buffer])
-  }
-}
-
-function feedSpot(r: Realtime, pcm: Float32Array): void {
-  const s = r.spot
-  if (!s) return
-  for (const [step, speech, values, wakes] of s.listener.push(pcm)) {
-    for (const w of wakes as { start: number; end: number }[]) onWake(r, { type: 'wake', ...w, start: Math.max(0, w.start - s.shift), end: Math.max(0, w.end - s.shift) })
-    const scores = () => s.names.map((word, i) => ({ word, score: values[i]! }))
-    if (r.opts.trace && step % 3 === 0) emitTo(r, { type: 'trace', primitive: 'spot', t: step * 0.03 - s.shift, speech: speech ?? 0, scores: scores() })
-    if (!r.chain && speech !== null && step % 10 === 0) emitTo(r, { type: 'heard', speech, scores: scores() })
-  }
-}
-
-// the last seconds of the mic, to cut the takes out of for the voiceprint
-const TAPE = 8 * RATE
-
-function startEnroll(r: Realtime, spec: { word: WordJSON; takes: number } | null): void {
-  r.enroll?.enroller.release()
-  r.enroll = null
-  if (!spec) return
-  const w = wordOf(spec.word)
-  const chain = r.chain ? 'focus' : 'raw'
-  r.enroll = { enroller: withSpot(r, () => engine!.enroller(w.toJSON() as unknown as null, spec.takes, chain)), audio: [], sent: false }
-  if (!r.tape) {
-    r.tape = new Float32Array(TAPE)
-    r.written = 0
-  }
-}
-
-function feedEnroll(r: Realtime, hop: Float32Array): void {
-  const en = r.enroll!
-  const shift = r.chain ? FOCUS.lag / RATE : 0
-  const { takes: heard, done } = en.enroller.push(hop)
-  for (const take of heard as { start: number; end: number; ok: boolean }[]) {
-    emitTo(r, { type: 'take', ...take, start: Math.max(0, take.start - shift), end: Math.max(0, take.end - shift) })
-    if (take.ok) en.audio.push(cut(r, take.start, take.end))
-  }
-  if (done && !en.sent) {
-    en.sent = true
-    try {
-      const { word, takes, warnings } = en.enroller.result()
-      const audio = concat(en.audio)
-      emitTo(r, { type: 'enrolled', word, takes, warnings, audio })
-    } catch (err) {
-      emitTo(r, { type: 'enrolled', error: String((err as Error).message) })
-    }
-  }
-}
-
-function tapLearn(r: Realtime, hop: Float32Array): void {
-  const l = r.learn!
-  if (!r.chain!.speaking) {
-    l.silent += HOP
-    if (l.silent >= WINDOW_RESET) l.fill = l.fresh = 0
-    return
-  }
-  l.silent = 0
-  if (l.fill + HOP > l.buf.length) {
-    l.buf.copyWithin(0, HOP)
-    l.fill -= HOP
-  }
-  l.buf.set(hop, l.fill)
-  l.fill += HOP
-  l.fresh += HOP
-  if (l.fresh < WINDOW_HOP || l.fill < 0.9 * l.buf.length || !r.bg) return
-  l.fresh = 0
-  const win = l.buf.slice(0, l.fill)
-  r.bg.postMessage({ type: 'window', pcm: win, farQuietMs: r.farQuietMs }, [win.buffer])
-}
-
 function onHop(r: Realtime, buf: ArrayBuffer, port: MessagePort): void {
   const f = new Float32Array(buf)
   const hop = f.subarray(0, HOP)
   if (f[HOP + 1] === RAW_HOP) {
-    r.audio?.push(hop)
-    if (r.history) keepHistory(r, hop)
+    r.p.raw(hop)
+    drain(r)
     port.postMessage(buf, [buf])
     return
   }
-  r.farQuietMs = f[HOP]!
-  const raw = r.record || r.recent || r.stats ? hop.slice() : null
   const t0 = performance.now()
-  let out: Float32Array
-  if (r.chain) out = r.chain.step(hop, (e) => emitTo(r, e))
-  else {
-    r.tape!.set(hop, r.written % TAPE)
-    r.written += HOP
-    feedSpot(r, hop)
-    if (r.enroll) feedEnroll(r, hop)
-    if (r.held.length) release(r)
-    out = hop
-  }
+  const out = r.p.step(hop, f[HOP]!)
   const ms = performance.now() - t0
   f.set(out)
   port.postMessage(buf, [buf])
-  r.hops++
-  if (r.audio) r.audio.push(out)
-  if (r.history) keepHistory(r, out)
+  drain(r)
   timing(r, ms)
-  if (raw) extras(r, raw, out)
 }
 
 function timing(r: Realtime, ms: number): void {
@@ -323,146 +163,43 @@ function timing(r: Realtime, ms: number): void {
   tm.max = Math.max(tm.max, ms)
   if (ms > (HOP / RATE) * 1000) tm.slow++
   if (tm.n < TIMING_HOPS) return
-  emitTo(r, { type: 'diag', code: 'timing', level: tm.slow > tm.n / 10 ? 'warn' : 'info', data: { meanMs: +(tm.sum / tm.n).toFixed(2), maxMs: +tm.max.toFixed(1), slow: tm.slow, asleep: r.chain?.sleeping ?? false, gainDb: r.chain ? +r.chain.gainDb.toFixed(1) : 0 } })
+  const chained = r.p.chained
+  emitTo(r, { type: 'diag', code: 'timing', level: tm.slow > tm.n / 10 ? 'warn' : 'info', data: { meanMs: +(tm.sum / tm.n).toFixed(2), maxMs: +tm.max.toFixed(1), slow: tm.slow, asleep: chained && r.p.sleeping, gainDb: chained ? +r.p.gainDb.toFixed(1) : 0 } })
   r.timing = { n: 0, sum: 0, max: 0, slow: 0 }
-}
-
-// the output's last seconds, for the pre-roll of an utterance
-function keepHistory(r: Realtime, out: Float32Array): void {
-  const h = r.history!
-  for (let i = 0; i < out.length; i++) {
-    h.buf[h.pos] = out[i]!
-    h.pos = (h.pos + 1) % h.buf.length
-  }
-  h.total += out.length
-  if (r.utterance) r.utterance.parts.push(out.slice())
-}
-
-// output sample index of an input time: the chain's delay, the worklet clock shift
-const outIndex = (r: Realtime, t: number) => Math.round((t - r.shift) * RATE) + (r.chain?.delay ?? 0)
-
-function onSpeech(r: Realtime, e: { type: string; start: number; end?: number }): void {
-  if (!r.history) return
-  const h = r.history
-  if (e.type === 'speechstart') {
-    const at = outIndex(r, e.start)
-    const from = Math.max(h.total - h.buf.length, at - Math.round(PREROLL * RATE))
-    const head = new Float32Array(Math.max(0, h.total - from))
-    for (let i = 0; i < head.length; i++) head[i] = h.buf[(h.pos - head.length + i + h.buf.length) % h.buf.length]!
-    r.utterance = { parts: [head], start: e.start - (at - from) / RATE }
-  } else if (e.type === 'speechend' && r.utterance) {
-    const all = concat(r.utterance.parts)
-    const keep = Math.max(0, all.length - Math.max(0, h.total - outIndex(r, e.end!)))
-    const pcm = all.subarray(0, keep)
-    const o = r.opts.output!
-    const res = Resampler.all(pcm, RATE, o.rate)
-    const data = encode(res, o.format)
-    send(r, { type: 'utterance', pcm: data, start: r.utterance.start, end: e.end }, [data])
-    r.utterance = null
-  }
-}
-
-function concat(parts: Float32Array[]): Float32Array {
-  const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
-  let o = 0
-  for (const p of parts) {
-    out.set(p, o)
-    o += p.length
-  }
-  return out
-}
-
-function extras(r: Realtime, raw: Float32Array, out: Float32Array): void {
-  if (r.stats) {
-    r.stats.hops++
-    if (r.chain?.speaking) r.stats.speech++
-    else {
-      r.stats.rawQuiet += energy(raw)
-      r.stats.outQuiet += energy(out)
-    }
-  }
-  if (r.record) {
-    const rec = r.record
-    const n = Math.min(HOP, rec.left.length - rec.at)
-    rec.left.set(raw.subarray(0, n), rec.at)
-    rec.right.set(out.subarray(0, n), rec.at)
-    rec.at += n
-    if (rec.at >= rec.left.length) {
-      const wav = encodeWav([rec.left, rec.right], RATE)
-      post({ type: 'reply', id: rec.id, result: wav }, [wav.buffer])
-      r.record = null
-    }
-  }
-  if (r.recent) {
-    const k = r.recent
-    for (let i = 0; i < HOP; i++) {
-      k.raw[k.pos] = raw[i]!
-      k.out[k.pos] = out[i]!
-      k.pos = (k.pos + 1) % k.raw.length
-      if (k.pos === 0) k.full = true
-    }
-  }
-}
-
-const energy = (x: Float32Array) => {
-  let s = 0
-  for (let i = 0; i < x.length; i++) s += x[i]! * x[i]!
-  return s
 }
 
 function flush(r: Realtime): void {
   if (!r.events.length) return
-  for (const e of r.events as { type: string; start: number; end?: number }[]) if (e.type === 'speechstart' || e.type === 'speechend') onSpeech(r, e)
   post({ type: 'events', input: r.id, list: r.events })
   r.events = []
-}
-
-function recentWav(r: Realtime | undefined): Uint8Array | null {
-  const k = r?.recent
-  if (!k) return null
-  const order = (x: Float32Array) => (k.full ? concat([x.subarray(k.pos), x.subarray(0, k.pos)]) : x.slice(0, k.pos))
-  return encodeWav([order(k.raw), order(k.out)], RATE)
 }
 
 // ---- background: Timbre, Lex, the learners (one per input), process()
 
 interface Learning {
-  ref: Voiceprint | null
-  learner: VoiceprintLearner | null
-  sent: Float32Array | null
-  at: number
+  coach: NativeCoach
   port: MessagePort
 }
 
 const calls = makeCalls(() => engine!)
 const learning = new Map<number, Learning>()
-// one window every 1.5 s until the print holds 40, then one every 10 s; only while the far end and the agent's voice were quiet 2 s
-const LEARN_GAP_MS = [1500, 10_000]
-const LEARN_SLOW = 40
-const LEARN_QUIET_MS = 2000
 
-const { getTimbre } = calls
 const event = (input: number, e: Record<string, unknown>) => post({ type: 'event', input, event: e })
 
-function onWindow(input: number, pcm: Float32Array, farQuietMs: number): void {
+// a window of the user's speech at sample `t` of the input: the print learns from it when the rules allow
+function onWindow(input: number, pcm: Float32Array, farQuietMs: number, t: number): void {
   const l = learning.get(input)
-  if (!l?.learner) return
-  const now = performance.now()
-  const count = l.learner.voiceprint?.windows.length ?? 0
-  const gap = LEARN_GAP_MS[count >= LEARN_SLOW ? 1 : 0]!
-  if (now - l.at < gap || farQuietMs < LEARN_QUIET_MS || rms(pcm) < LEARN.level) return
-  l.at = now
+  if (!l) return
   const t0 = performance.now()
-  const r = l.learner.learn(getTimbre().window(pcm))
+  const outs = l.coach.window(engine!.timbre(), pcm, farQuietMs, t)
   const ms = Math.round(performance.now() - t0)
-  event(input, { type: 'diag', code: r.accepted ? 'print.learn' : r.restarted ? 'print.restart' : 'print.reject', level: 'info', data: { score: +r.score.toFixed(3), progress: l.learner.progress, ms } })
-  if (!r.accepted) return
-  event(input, { type: 'learn', progress: l.learner.progress })
-  const print = l.learner.voiceprint
-  if (!print || (l.sent && dot(print.embedding, l.sent) >= LEARN.resend)) return
-  l.sent = print.embedding
-  l.port.postMessage({ type: 'print', embedding: print.embedding })
-  event(input, { type: 'voiceprint', json: print.toJSON() })
+  for (const o of outs) {
+    if (o[0] === 'print') l.port.postMessage({ type: 'print', embedding: o[1] })
+    else {
+      if (o[1].type === 'diag') (o[1].data as Record<string, unknown>).ms = ms
+      event(input, o[1])
+    }
+  }
 }
 
 type Rpc = { id: number; method: string; args: any[]; progress?: boolean }
@@ -472,7 +209,10 @@ function call({ id, method, args, progress }: Rpc): unknown {
     case 'process':
       return calls.process(args[0], args[1], progress ? (p) => post({ type: 'progress', id, p }) : undefined)
     case 'embed':
-    case 'windows':
+    case 'learnerOpen':
+    case 'learnerOffer':
+    case 'learnerForget':
+    case 'learnerClose':
     case 'phonemize':
     case 'compile':
     case 'streamOpen':
@@ -482,31 +222,22 @@ function call({ id, method, args, progress }: Rpc): unknown {
     case 'learner': {
       const l = learning.get(args[0])
       if (!l) throw new Error('no learning port for this input')
-      const start = args[1] ? Voiceprint.fromJSON(args[1] as VoiceprintJSON) : null
-      l.learner = new VoiceprintLearner((pcm) => getTimbre().window(pcm), 'focus', start)
-      l.sent = start?.embedding ?? null
-      return { progress: l.learner.progress }
+      return { progress: l.coach.learner(args[1] ?? null) }
     }
-    case 'forget': {
-      const l = learning.get(args[0])
-      l?.learner?.forget()
-      if (l) l.sent = null
+    case 'forget':
+      learning.get(args[0])?.coach.forget()
       return null
-    }
     case 'record': {
       const r = inputs.get(args[0])
       if (!r) throw new Error('no input')
-      const n = Math.round((args[1] as number) * RATE)
-      r.record = { left: new Float32Array(n), right: new Float32Array(n), at: 0, id }
+      r.p.record(args[1] as number)
+      r.recordId = id
       return undefined
     }
     case 'recent':
-      return recentWav(inputs.get(args[0]))
-    case 'stats': {
-      const s = inputs.get(args[0])?.stats
-      if (!s) return null
-      return { speechSeconds: (s.speech * HOP) / RATE, seconds: (s.hops * HOP) / RATE, noiseRemovedDb: s.outQuiet > 0 ? +(10 * log10(s.rawQuiet / s.outQuiet)).toFixed(1) : null }
-    }
+      return inputs.get(args[0])?.p.recent() ?? null
+    case 'stats':
+      return inputs.get(args[0])?.p.stats() ?? null
     default:
       throw new Error(`unknown method ${method}`)
   }
@@ -518,12 +249,11 @@ function dispose(input: number): void {
     r.closed = true
     r.port?.close()
     clearInterval(r.timer)
-    r.spot?.listener.release()
-    r.enroll?.enroller.release()
-    r.chain?.release()
+    r.p.release()
     inputs.delete(input)
   }
   learning.get(input)?.port.close()
+  learning.get(input)?.coach.release()
   learning.delete(input)
 }
 
@@ -544,7 +274,7 @@ self.onmessage = async (e: MessageEvent) => {
         const r = realtime(m.input, m.opts, m.bg ?? null, m.out ?? null)
         if (m.bg)
           (m.bg as MessagePort).onmessage = (ev: MessageEvent) => {
-            if (ev.data.type === 'print') r.chain?.setPrint(ev.data.embedding)
+            if (ev.data.type === 'print') r.p.set({ print: ev.data.embedding })
           }
         post({ type: 'reply', id: m.id, result: true })
         break
@@ -558,31 +288,35 @@ self.onmessage = async (e: MessageEvent) => {
           // hops still on their way when the input was closed land on released sessions
           if (r.closed) return
           if (ev.data instanceof ArrayBuffer) onHop(r, ev.data, port)
-          else if (typeof ev.data?.clock === 'number') r.shift = ev.data.clock / RATE - (r.chain?.time ?? (r.hops * HOP) / RATE)
+          else if (typeof ev.data?.clock === 'number') r.shift = ev.data.clock / RATE - r.p.time
         }
         break
       }
       case 'rt-port': {
-        const l: Learning = { ref: m.ref ? Voiceprint.fromJSON(m.ref) : null, learner: null, sent: null, at: -Infinity, port: m.port }
+        const l: Learning = { coach: engine!.coach(m.ref ?? null), port: m.port }
         learning.set(m.input, l)
         l.port.onmessage = (ev: MessageEvent) => {
-          if (ev.data.type === 'window') onWindow(m.input, ev.data.pcm, ev.data.farQuietMs)
-          else if (ev.data.type === 'verify') {
-            const pcm = ev.data.pcm as Float32Array
-            const voice = pcm.length >= TIMBRE.min && l.ref ? TimbreCore.verify(l.ref, new Voiceprint([getTimbre().window(pcm)])) : { same: true, score: 1 }
-            l.port.postMessage({ type: 'verified', key: ev.data.key, ...voice })
-          }
+          if (ev.data.type === 'window') onWindow(m.input, ev.data.pcm, ev.data.farQuietMs, ev.data.t)
+          else if (ev.data.type === 'verify') l.port.postMessage({ type: 'verified', key: ev.data.key, ...l.coach.verify(engine!.timbre(), ev.data.pcm) })
         }
         break
       }
       case 'set': {
         const r = inputs.get(m.input)
         if (!r) break
-        if ('strength' in m) r.chain?.setStrength(m.strength)
-        if ('enabled' in m) r.chain?.setEnabled(m.enabled)
-        if ('print' in m) r.chain?.setPrint(m.print)
-        if ('words' in m) setWords(r, m.words, m.context ?? 'anywhere')
-        if ('enroll' in m) startEnroll(r, m.enroll)
+        const change: Record<string, unknown> = {}
+        if ('strength' in m) change.strength = m.strength
+        if ('enabled' in m) change.enabled = m.enabled
+        if ('print' in m) change.print = m.print
+        if ('words' in m) Object.assign(change, { words: words(m.words), context: m.context ?? 'anywhere' })
+        if ('enroll' in m) change.enroll = enrolling(m.enroll)
+        if ('words' in m || ('enroll' in m && m.enroll))
+          withSpot(r, () => {
+            r.p.spot(engine!.model('spot'))
+            r.p.set(change)
+          })
+        else r.p.set(change)
+        drain(r)
         break
       }
       case 'dispose':

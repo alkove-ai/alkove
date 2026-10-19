@@ -1,4 +1,4 @@
-"""Alkove on device: keep the user's voice (Focus), find speech (Cue), hear words (Spot, Lex), the same to the bit as the web SDK."""
+"""Alkove on device: keep the user's voice (Focus), find speech (Cue), hear words (Spot, Lex), know a voice (Timbre), the same to the bit as the web SDK."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .errors import AlkoveError
 from .models import MANIFEST, Models, cache_dir, fetch
 
 __version__ = _alkove.VERSION
-__all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "Lex", "Listener", "Live", "MANIFEST", "Models", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
+__all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "Lex", "Listener", "Live", "MANIFEST", "Models", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Timbre", "Voiceprint", "VoiceprintLearner", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
 
 RATE = 16000
 WHY = ("silence", "forced", "wake")
@@ -90,6 +90,43 @@ class Word:
         return f"Word({self.text!r}, {[p['ipa'] for p in self._data['phonemes']]})"
 
 
+class Voiceprint:
+    """A voice, bound to this version's Timbre: give it to Focus (`voiceprint=`), compare it (`Timbre.verify`), store `to_json()`."""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    @staticmethod
+    def from_json(j: Union[dict, str]) -> Optional["Voiceprint"]:
+        """None for a print of another Timbre: it no longer means anything, learn it again."""
+        p = _alkove.voiceprint({"op": "read", "print": json.loads(j) if isinstance(j, str) else j})
+        return None if p is None else Voiceprint(p)
+
+    @staticmethod
+    def merge(prints: Sequence["Voiceprint"]) -> "Voiceprint":
+        """One print with the centers of several (near and far, phone and headset): a voice is as close as its closest center."""
+        return Voiceprint(_alkove.voiceprint({"op": "merge", "prints": [p._data for p in prints]}))
+
+    def to_json(self) -> dict:
+        return json.loads(json.dumps(self._data))
+
+    @property
+    def embedding(self) -> np.ndarray:
+        """What Focus takes: 192 numbers."""
+        return np.asarray(self._data["centers"][0]["embedding"], dtype=np.float32)
+
+    def similarity(self, other: "Voiceprint") -> float:
+        """The cosine of the closest pair of centers."""
+        return _alkove.voiceprint({"op": "verify", "a": self._data, "b": other._data})["score"]
+
+    def __repr__(self) -> str:
+        return f"Voiceprint({self._data['source']}, {[c['seconds'] for c in self._data['centers']]} s)"
+
+
+def _print(v: Any) -> Any:
+    return v.embedding if isinstance(v, Voiceprint) else v
+
+
 def _samples(pcm: Any) -> bytes:
     a = np.asarray(pcm)
     if a.dtype == np.int16:
@@ -121,7 +158,7 @@ def _part(raw: tuple) -> Part:
 def _options(focus: bool, voiceprint: Any, strength: float, cue: Optional[bool], speech: Optional[SpeechParams], normalize: bool, trace: bool, rate: float, words: Optional[Iterable], context: str) -> dict:
     ws = [Word.of(w).to_json() for w in words or ()]
     return {
-        "focus": {"print": np.asarray(voiceprint, dtype=np.float32).tolist() if voiceprint is not None else None, "strength": strength} if focus else None,
+        "focus": {"print": np.asarray(_print(voiceprint), dtype=np.float32).tolist() if voiceprint is not None else None, "strength": strength} if focus else None,
         "cue": cue,
         "speech": (speech or SpeechParams())._dict(),
         "normalize": normalize,
@@ -305,7 +342,7 @@ class Chain:
         sleep: bool = True,
     ):
         _needs(models, "focus", "cue")
-        print_ = _samples(voiceprint) if voiceprint is not None else None
+        print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
         self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_)
 
     def step(self, hop: Any) -> Tuple[np.ndarray, List[dict]]:
@@ -315,7 +352,7 @@ class Chain:
 
     def set_voiceprint(self, embedding: Any) -> None:
         """Applied at the next silence, from a fresh state; None goes back to the closest voice."""
-        self._c.set_print(_samples(embedding) if embedding is not None else None)
+        self._c.set_print(_samples(_print(embedding)) if embedding is not None else None)
 
     def set_strength(self, s: float) -> None:
         self._c.set_strength(s)
@@ -356,7 +393,7 @@ class Live:
         sleep: bool = True,
     ):
         _needs(models, "focus", "cue")
-        print_ = _samples(voiceprint) if voiceprint is not None else None
+        print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
         self.rate = rate
         self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_)
 
@@ -366,7 +403,7 @@ class Live:
         return _audio(out), [_event(*e) for e in events if e[0] < 5]
 
     def set_voiceprint(self, embedding: Any) -> None:
-        self._l.set_print(_samples(embedding) if embedding is not None else None)
+        self._l.set_print(_samples(_print(embedding)) if embedding is not None else None)
 
     def set_strength(self, s: float) -> None:
         self._l.set_strength(s)
@@ -407,6 +444,59 @@ def to_int16(pcm: Any) -> np.ndarray:
     """Float samples to int16 as the web SDK writes them: clipped, scaled by 32768 below zero and 32767 above, truncated."""
     x = np.clip(np.asarray(pcm, dtype=np.float64), -1, 1)
     return np.where(x < 0, x * 32768, x * 32767).astype(np.int16)
+
+
+class Timbre:
+    """Who is speaking: a print from 16 kHz audio (1.5 s or more), compared with others."""
+
+    def __init__(self, models: Models):
+        _needs(models, "timbre")
+        self._t = _alkove.Timbre(models.get("timbre"))
+
+    def embed(self, pcm: Any, *, source: str = "raw") -> Voiceprint:
+        """Windows of 1.5 s, half overlapping, their mean without the 10 % least alike; `source` says the audio was raw or Focus's output."""
+        return Voiceprint(self._t.embed(_samples(pcm), source))
+
+    @staticmethod
+    def verify(a: Voiceprint, b: Voiceprint, *, level: str = "balanced") -> Tuple[bool, float]:
+        """a: the known print, b: the voice heard; `level` lenient, balanced or strict, thresholds set for how much voice each holds."""
+        r = _alkove.voiceprint({"op": "verify", "a": a._data, "b": b._data, "level": level})
+        return r["same"], r["score"]
+
+    @staticmethod
+    def identify(voice: Voiceprint, known: dict, *, level: str = "balanced") -> Optional[Tuple[str, float]]:
+        """The known voice that matches best, if any matches."""
+        r = _alkove.voiceprint({"op": "identify", "voice": voice._data, "known": [[k, p._data] for k, p in known.items()], "level": level})
+        return None if r is None else (r["who"], r["score"])
+
+
+class VoiceprintLearner:
+    """A print learned from the user's speech, as the inputs of the web SDK learn it: a window joins only if it sounds like the others."""
+
+    def __init__(self, models: Models, *, voiceprint: Optional[Voiceprint] = None, source: str = "raw"):
+        _needs(models, "timbre")
+        self._t = _alkove.Timbre(models.get("timbre"))
+        self._l = _alkove.Learner(source, voiceprint._data if voiceprint is not None else None)
+
+    def offer(self, pcm: Any) -> dict:
+        """Speech of any length, cut into 1.5 s windows, quiet ones skipped: {accepted, rejected, restarted, progress, ready}."""
+        return self._l.offer(self._t, _samples(pcm))
+
+    @property
+    def progress(self) -> float:
+        return self._l.progress
+
+    @property
+    def ready(self) -> bool:
+        return self._l.ready
+
+    @property
+    def voiceprint(self) -> Optional[Voiceprint]:
+        p = self._l.voiceprint()
+        return None if p is None else Voiceprint(p)
+
+    def forget(self) -> None:
+        self._l.forget()
 
 
 class Resampler:

@@ -388,3 +388,294 @@ pub unsafe extern "C" fn alk_enroller_result(e: *mut EnrollerHandle) -> i32 {
             .map(|r| alkove_core::value::obj([("word", r.word.to_value()), ("takes", Value::Arr(r.takes.iter().map(|t| t.to_value()).collect())), ("warnings", Value::Arr(r.warnings))])),
     )
 }
+
+use alkove_core::learner::Learner;
+use alkove_core::timbre::{Center, Timbre, Voiceprint};
+
+// Safety: `m` is a live Timbre model.
+#[no_mangle]
+pub unsafe extern "C" fn alk_timbre(m: *const Model) -> *mut Timbre {
+    made(Timbre::new(&shared(m)))
+}
+
+// Safety: `t` comes from `alk_timbre`, freed once.
+#[no_mangle]
+pub unsafe extern "C" fn alk_timbre_free(t: *mut Timbre) {
+    drop(Box::from_raw(t));
+}
+
+// Safety: `t` is live, `x` holds `len` floats; out the windows' centers, half overlapping
+#[no_mangle]
+pub unsafe extern "C" fn alk_timbre_windows(t: *mut Timbre, x: *const f32, len: usize) -> i32 {
+    answer((*t).windows(pcm(x, len)).map(|ws| Value::Arr(ws.iter().map(Center::to_value).collect())))
+}
+
+// Safety: `t` is live, `x` holds `len` floats; in { source }, out the print's JSON
+#[no_mangle]
+pub unsafe extern "C" fn alk_timbre_embed(t: *mut Timbre, x: *const f32, len: usize) -> i32 {
+    answer(input().and_then(|v| (*t).embed(pcm(x, len), v.get("source").and_then(Value::str).unwrap_or("raw"))).map(|p| p.to_value()))
+}
+
+// in { op: 'verify', a, b, level } | { op: 'identify', voice, known: [[who, print]], level } | { op: 'merge', prints } | { op: 'read', print }
+#[no_mangle]
+pub extern "C" fn alk_voiceprint() -> i32 {
+    answer(input().and_then(|v| alkove_core::timbre::op(&v)))
+}
+
+// Safety: in { source, start: print | null }
+#[no_mangle]
+pub unsafe extern "C" fn alk_learner() -> *mut Learner {
+    made((|| {
+        let v = input()?;
+        let start = match v.get("start") {
+            Some(p @ Value::Obj(_)) => Voiceprint::from_value(p)?,
+            _ => None,
+        };
+        Ok(Learner::new(v.get("source").and_then(Value::str).unwrap_or("focus"), start.as_ref()))
+    })())
+}
+
+// Safety: `l` comes from `alk_learner`, freed once.
+#[no_mangle]
+pub unsafe extern "C" fn alk_learner_free(l: *mut Learner) {
+    drop(Box::from_raw(l));
+}
+
+unsafe fn learner_state(l: *mut Learner) -> Vec<(String, Value)> {
+    vec![("progress".into(), (*l).progress().into()), ("ready".into(), (*l).ready().into()), ("windows".into(), ((*l).windows() as f64).into())]
+}
+
+// Safety: `l` and `t` are live, `x` holds `len` floats: one window of the user's speech; out { accepted, score, restarted, progress, ready, windows }
+#[no_mangle]
+pub unsafe extern "C" fn alk_learner_learn(l: *mut Learner, t: *mut Timbre, x: *const f32, len: usize) -> i32 {
+    answer((*t).window(pcm(x, len)).map(|w| {
+        let r = (*l).learn(w);
+        let mut f = vec![("accepted".to_string(), Value::from(r.accepted)), ("score".into(), r.score.into()), ("restarted".into(), r.restarted.into())];
+        f.extend(learner_state(l));
+        Value::Obj(f)
+    }))
+}
+
+// Safety: `l` and `t` are live, `x` holds `len` floats: speech of any length; out { accepted, rejected, restarted, progress, ready, windows }
+#[no_mangle]
+pub unsafe extern "C" fn alk_learner_offer(l: *mut Learner, t: *mut Timbre, x: *const f32, len: usize) -> i32 {
+    answer((*l).offer(pcm(x, len), |w| (*t).window(w)).map(|o| {
+        let mut f = vec![("accepted".to_string(), Value::from(o.accepted as f64)), ("rejected".into(), (o.rejected as f64).into()), ("restarted".into(), o.restarted.into())];
+        f.extend(learner_state(l));
+        Value::Obj(f)
+    }))
+}
+
+// Safety: `l` is live; out the print's JSON (raw: its float32 as they are), or null before it is ready
+#[no_mangle]
+pub unsafe extern "C" fn alk_learner_voiceprint(l: *mut Learner, raw: u32) -> i32 {
+    answer(Ok((*l).voiceprint().map_or(Value::Null, |p| if raw != 0 { p.to_raw_value() } else { p.to_value() })))
+}
+
+// Safety: `l` is live; out { progress, ready, windows }
+#[no_mangle]
+pub unsafe extern "C" fn alk_learner_state(l: *mut Learner) -> i32 {
+    answer(Ok(Value::Obj(learner_state(l))))
+}
+
+// Safety: `l` is live.
+#[no_mangle]
+pub unsafe extern "C" fn alk_learner_forget(l: *mut Learner) {
+    (*l).forget();
+}
+
+use alkove_core::pipeline::{Coach, Coached, Pipeline, PipelineOptions};
+
+pub struct PipelineHandle {
+    p: Pipeline,
+    hop: Vec<f32>,
+    out: Vec<f32>,
+}
+
+// Safety: models live or null; in the options as `PipelineOptions::from_value` reads them
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline(focus: *const Model, cue: *const Model, spot: *const Model) -> *mut PipelineHandle {
+    let (f, c, s) = (model(focus), model(cue), model(spot));
+    made(input().and_then(|v| PipelineOptions::from_value(&v)).and_then(|o| Pipeline::new(f.as_ref(), c.as_ref(), s.as_ref(), o)).map(|p| PipelineHandle {
+        p,
+        hop: vec![0.0; 256],
+        out: vec![0.0; 256],
+    }))
+}
+
+// Safety: `p` comes from `alk_pipeline`, freed once.
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_free(p: *mut PipelineHandle) {
+    drop(Box::from_raw(p));
+}
+
+// Safety: `p` is live; where the next hop's 256 samples go
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_hop(p: *mut PipelineHandle) -> *mut f32 {
+    (*p).hop.as_mut_ptr()
+}
+
+// Safety: `p` is live; the hop out, valid until the next step; then `alk_pipeline_outs` when `alk_pipeline_pending` says so
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_step(p: *mut PipelineHandle, far_quiet_ms: f64) -> *const f32 {
+    let h = &mut *p;
+    let out = h.p.step(&h.hop, far_quiet_ms);
+    h.out.copy_from_slice(out);
+    h.out.as_ptr()
+}
+
+// Safety: `p` is live, `m` a live Spot model: for the words and the enrollment set from now on
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_spot(p: *mut PipelineHandle, m: *const Model) {
+    (*p).p.set_spot(&shared(m));
+}
+
+// Safety: `p` is live; a raw hop while the worklet bypasses the models: for the app's audio only
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_raw(p: *mut PipelineHandle) {
+    let h = &mut *p;
+    h.p.raw(&h.hop);
+}
+
+// Safety: `p` is live; out [[kind, …]] of what the hops gave since the last call
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_outs(p: *mut PipelineHandle) -> i32 {
+    answer(Ok(Value::Arr((*p).p.drain().map(|o| o.to_value()).collect())))
+}
+
+// Safety: `p` is live.
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_pending(p: *mut PipelineHandle) -> usize {
+    (*p).p.pending()
+}
+
+// Safety: `p` is live.
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_verified(p: *mut PipelineHandle, key: u32, same: u32, score: f64) {
+    (*p).p.verified(key, same != 0, score);
+}
+
+// Safety: `p` is live; in { strength?, enabled?, print?, words?, context?, enroll? }, applied in that order
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_set(p: *mut PipelineHandle) -> i32 {
+    let h = &mut (*p).p;
+    answer((|| {
+        let v = input()?;
+        if let Some(s) = v.get("strength").and_then(Value::num) {
+            if let Some(c) = h.chain_mut() {
+                c.set_strength(s);
+            }
+        }
+        if let Some(on) = v.get("enabled").and_then(Value::bool) {
+            if let Some(c) = h.chain_mut() {
+                c.set_enabled(on);
+            }
+        }
+        if let Some(pr) = v.get("print") {
+            let print: Option<Vec<f32>> = match pr {
+                Value::Arr(a) => Some(a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect()),
+                Value::Floats(x) => Some(x.clone()),
+                _ => None,
+            };
+            if let Some(c) = h.chain_mut() {
+                c.set_print(print.as_deref())?;
+            }
+        }
+        if v.get("words").is_some() {
+            let (ws, context) = words(&v)?;
+            h.set_words(ws, context)?;
+        }
+        if let Some(e) = v.get("enroll") {
+            let spec = match e {
+                Value::Obj(_) => Some((Word::of(e.get("word").unwrap_or(&Value::Null))?, e.get("takes").and_then(Value::num).unwrap_or(ENROLL.takes as f64) as usize)),
+                _ => None,
+            };
+            h.start_enroll(spec)?;
+        }
+        Ok(Value::Null)
+    })())
+}
+
+// Safety: `p` is live.
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_record(p: *mut PipelineHandle, seconds: f64) {
+    (*p).p.record(seconds);
+}
+
+// Safety: `p` is live; out the last seconds as a stereo WAV (raw, processed), or null
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_recent(p: *mut PipelineHandle) -> i32 {
+    answer(Ok((*p).p.recent().map_or(Value::Null, Value::Bytes)))
+}
+
+// Safety: `p` is live; out { speechSeconds, seconds, noiseRemovedDb } or null
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_stats(p: *mut PipelineHandle) -> i32 {
+    answer(Ok((*p).p.stats()))
+}
+
+// Safety: `p` is live; 0 time in seconds, 1 asleep, 2 gain in dB, 3 hops, 4 has a chain
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_get(p: *mut PipelineHandle, what: u32) -> f64 {
+    let h = &(*p).p;
+    match what {
+        0 => h.time(),
+        1 => h.chain().is_some_and(|c| c.sleeping()) as u8 as f64,
+        2 => h.chain().map_or(0.0, |c| c.gain_db()),
+        3 => h.hops() as f64,
+        4 => h.chain().is_some() as u8 as f64,
+        _ => f64::NAN,
+    }
+}
+
+fn print_or_none(v: Option<&Value>) -> Result<Option<Voiceprint>, Error> {
+    match v {
+        Some(p @ Value::Obj(_)) => Voiceprint::from_value(p),
+        _ => Ok(None),
+    }
+}
+
+// Safety: in { reference: print | null }
+#[no_mangle]
+pub unsafe extern "C" fn alk_coach() -> *mut Coach {
+    made(input().and_then(|v| print_or_none(v.get("reference"))).map(Coach::new))
+}
+
+// Safety: `c` comes from `alk_coach`, freed once.
+#[no_mangle]
+pub unsafe extern "C" fn alk_coach_free(c: *mut Coach) {
+    drop(Box::from_raw(c));
+}
+
+// Safety: `c` is live; in { start: print | null }, out the learner's progress
+#[no_mangle]
+pub unsafe extern "C" fn alk_coach_learner(c: *mut Coach) -> i32 {
+    answer(input().and_then(|v| print_or_none(v.get("start"))).map(|start| (*c).learner(start.as_ref()).into()))
+}
+
+// Safety: `c` is live.
+#[no_mangle]
+pub unsafe extern "C" fn alk_coach_forget(c: *mut Coach) {
+    (*c).forget();
+}
+
+// Safety: `c` and `t` are live, `x` holds `len` floats; out [['event', value] | ['print', embedding]]
+#[no_mangle]
+pub unsafe extern "C" fn alk_coach_window(c: *mut Coach, t: *mut Timbre, x: *const f32, len: usize, far_quiet_ms: f64, at: f64) -> i32 {
+    answer((*c).window(&mut *t, pcm(x, len), far_quiet_ms, at).map(|outs| {
+        Value::Arr(
+            outs.into_iter()
+                .map(|o| match o {
+                    Coached::Event(v) => Value::Arr(vec!["event".into(), v]),
+                    Coached::Print(e) => Value::Arr(vec!["print".into(), Value::Floats(e)]),
+                })
+                .collect(),
+        )
+    }))
+}
+
+// Safety: `c` and `t` are live, `x` holds `len` floats; out { same, score }
+#[no_mangle]
+pub unsafe extern "C" fn alk_coach_verify(c: *mut Coach, t: *mut Timbre, x: *const f32, len: usize) -> i32 {
+    answer((*c).verify(&mut *t, pcm(x, len)).map(|(same, score)| alkove_core::value::obj([("same", same.into()), ("score", score.into())])))
+}

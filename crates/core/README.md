@@ -16,9 +16,10 @@ Rust, no dependencies beyond the engine, Apache-2.0.
 | `spot` | the keyword search on Spot's phoneme posteriors (`Search`, `Spotter`, `Listener`), words and their JSON (`Word`, `compile`), enrollment (`Enroller`). |
 | `lex` | Lex's beam search, text to phonemes in fr, en, es, pt, it, ca, ro. |
 | `text` | what the SDK's TypeScript did with `normalize`, `toLowerCase` and its regular expressions; NFC and NFD on the Latin, IPA and Greek blocks. |
-| `value` | JSON-shaped values: platforms read and write JSON, the core reads and builds these. |
-
-Next: Timbre's prints, thresholds and learning; the real-time pipelines of the web worker.
+| `timbre` | Timbre's windows, prints and their JSON, the thresholds of `verify` and `identify`. |
+| `learner` | a print learned window by window from the user's speech. |
+| `pipeline` | a real-time input's own rules around the chain and Spot (`Pipeline`: learning windows, verified wakes, utterances with their pre-roll, enrollment, what it keeps), and their background side (`Coach`: the print it learns, the voice that verifies wakes); counted in samples. |
+| `value` | JSON-shaped values, plus bytes and float32 arrays for audio: platforms read and write JSON, the core reads and builds these. |
 
 ## What it guarantees
 
@@ -63,5 +64,6 @@ Event kinds: 0 speech start (`start`), 1 speech end (`start`, `end`), 2 idle (`a
 ## Tests
 
 - **`cargo test`**: JavaScript's number rules, the core's math, the float mode guard, the values' encoding.
-- **`packages/alkove/test/core.test.ts`, `spot-core.test.ts`**: the core against JavaScript and the TypeScript where they remain (math, resampler, `normalize`, `toLowerCase`, the regular expressions on every code point, phonemes), and against digests of what the TypeScript gave (chain, `process`, the keyword search, Lex, compiling, listening, enrolling) on streams drawn at random.
+- **`packages/alkove/test/core.test.ts`, `spot-core.test.ts`, `timbre-core.test.ts`**: the core against JavaScript and the TypeScript where they remain (math, resampler, `normalize`, `toLowerCase`, the regular expressions on every code point, phonemes, prints and their thresholds), and against digests of what the TypeScript gave (chain, `process`, the keyword search, Lex, compiling, listening, enrolling, Timbre, learning) on streams drawn at random.
+- **`packages/alkove/test/worker.test.ts`**: the built worker on a simulated clock, every channel (events, hops, audio, utterances, the background's messages) against digests of what the worker gave before the core.
 - **`python/tests`**: the same streams drawn in Python give the same digests, natively.

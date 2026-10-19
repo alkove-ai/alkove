@@ -1,7 +1,7 @@
 import type { Alk, Model, Session, Tensor } from '../engine/alk'
 import type { ModelName } from '../manifest'
 import { Chain, type ChainOptions } from './chain'
-import { compileNative, NativeEnroller, NativeLex, NativeListener, NativeProcessor, type Value } from './native'
+import { compileNative, NativeCoach, NativeEnroller, NativeLearner, NativeLex, NativeListener, NativePipeline, NativeProcessor, NativeTimbre, type Value, voiceprintOp } from './native'
 
 export type StreamModel = 'focus' | 'cue' | 'spot'
 
@@ -29,6 +29,11 @@ export interface Engine {
   lex(): NativeLex
   // a typed word with Lex, phonemes between slashes without
   compile(text: string, lang: string[], chain?: string): { word: Value; warnings: Value[] }
+  timbre(): NativeTimbre
+  learner(source: string, start: Value): NativeLearner
+  pipeline(options: { chain: unknown; words?: unknown[]; enroll?: unknown; [k: string]: unknown }): NativePipeline
+  coach(reference: Value): NativeCoach
+  voiceprint(op: Record<string, unknown>): Value
 }
 
 // one model per name (weights unpacked once), one session per stream: each keeps its own state
@@ -36,6 +41,7 @@ export class WasmEngine implements Engine {
   private models = new Map<ModelName, Model>()
   private calls = new Map<string, Session>()
   private lexer: NativeLex | null = null
+  private voices: NativeTimbre | null = null
 
   constructor(
     readonly alk: Alk,
@@ -79,6 +85,30 @@ export class WasmEngine implements Engine {
     return (this.lexer ??= new NativeLex(this.alk, this.model('lex')))
   }
 
+  // one per engine, as Lex
+  timbre(): NativeTimbre {
+    return (this.voices ??= new NativeTimbre(this.alk, this.model('timbre')))
+  }
+
+  learner(source: string, start: Value): NativeLearner {
+    return new NativeLearner(this.alk, source, start)
+  }
+
+  // Spot comes with the options when they need it, else later through `pipeline.spot()`
+  pipeline(options: { chain: unknown; words?: unknown[]; enroll?: unknown; [k: string]: unknown }): NativePipeline {
+    const chain = !!options.chain
+    const spot = !!options.words?.length || !!options.enroll
+    return new NativePipeline(this.alk, { focus: chain ? this.model('focus') : undefined, cue: chain ? this.model('cue') : undefined, spot: spot ? this.model('spot') : undefined }, options as Value)
+  }
+
+  coach(reference: Value): NativeCoach {
+    return new NativeCoach(this.alk, reference)
+  }
+
+  voiceprint(op: Record<string, unknown>): Value {
+    return voiceprintOp(this.alk, op)
+  }
+
   compile(text: string, lang: string[], chain?: string): { word: Value; warnings: Value[] } {
     return compileNative(this.alk, /^\s*\/.+\/\s*$/.test(text) ? null : this.lex(), text, lang, chain)
   }
@@ -93,7 +123,9 @@ export class WasmEngine implements Engine {
 
   release(): void {
     this.lexer?.release()
+    this.voices?.release()
     this.lexer = null
+    this.voices = null
     for (const s of this.calls.values()) s.release()
     for (const m of this.models.values()) m.release()
     this.calls.clear()

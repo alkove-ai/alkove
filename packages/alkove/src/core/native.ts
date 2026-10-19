@@ -1,8 +1,8 @@
 import type { Alk, Model } from '../engine/alk'
 import { AlkoveError, type ErrorCode } from '../errors'
 
-// a value of the core: what JSON can say, crossing the wasm as tagged bytes (0 null, 1 false, 2 true, 3 f64, 4 string, 5 array, 6 object)
-export type Value = null | boolean | number | string | Value[] | { [key: string]: Value }
+// a value of the core: what JSON can say, and audio, crossing the wasm as tagged bytes (0 null, 1 false, 2 true, 3 f64, 4 string, 5 array, 6 object, 7 bytes, 8 float32 array)
+export type Value = null | boolean | number | string | Value[] | { [key: string]: Value } | Uint8Array | Float32Array
 
 const utf8 = new TextEncoder()
 const text = new TextDecoder()
@@ -37,6 +37,14 @@ export function encode(v: unknown): Uint8Array {
     } else if (typeof x === 'string') {
       parts.push(4)
       str(x)
+    } else if (x instanceof Uint8Array) {
+      parts.push(7)
+      u32(x.length)
+      raw(x.slice())
+    } else if (x instanceof Float32Array) {
+      parts.push(8)
+      u32(x.length)
+      raw(new Uint8Array(x.slice().buffer))
     } else if (Array.isArray(x) || ArrayBuffer.isView(x)) {
       const a = Array.from(x as ArrayLike<unknown>)
       parts.push(5)
@@ -94,6 +102,16 @@ export function decode(b: Uint8Array): Value {
       case 6:
         // own properties even for a key like __proto__, as Object.fromEntries made them
         return Object.fromEntries(Array.from({ length: u32() }, () => [str(), read()]))
+      case 7: {
+        const n = u32()
+        at += n
+        return b.slice(at - n, at)
+      }
+      case 8: {
+        const n = u32()
+        at += 4 * n
+        return new Float32Array(b.slice(at - 4 * n, at).buffer)
+      }
       default:
         throw new Error('bad value from the core')
     }
@@ -254,6 +272,229 @@ export class NativeEnroller {
 
   release(): void {
     if (this.ptr) this.alk.x.alk_enroller_free(this.ptr)
+    this.ptr = 0
+  }
+}
+
+export interface NativeCenter {
+  embedding: number[]
+  id: number[]
+  seconds: number
+}
+
+// Timbre in the core: its windows, and a print from them
+export class NativeTimbre {
+  private ptr: number
+
+  constructor(
+    private alk: Alk,
+    model: Model,
+  ) {
+    this.ptr = alk.x.alk_timbre(model.ptr)
+    if (!this.ptr) alk.fail('timbre')
+  }
+
+  get handle(): number {
+    return this.ptr
+  }
+
+  windows(pcm: Float32Array): NativeCenter[] {
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_timbre_windows(this.ptr, p, n)))
+  }
+
+  embed(pcm: Float32Array, source: string): Value {
+    send(this.alk, { source })
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_timbre_embed(this.ptr, p, n)))
+  }
+
+  release(): void {
+    if (this.ptr) this.alk.x.alk_timbre_free(this.ptr)
+    this.ptr = 0
+  }
+}
+
+// verify, identify, merge or read prints, given as JSON
+export function voiceprintOp(alk: Alk, op: Record<string, unknown>): Value {
+  send(alk, op)
+  return receive(alk, alk.x.alk_voiceprint())
+}
+
+export interface LearnerState {
+  progress: number
+  ready: boolean
+  windows: number
+}
+
+// a print learned window by window, in the core
+export class NativeLearner {
+  private ptr: number
+
+  constructor(
+    private alk: Alk,
+    source: string,
+    start: Value,
+  ) {
+    send(alk, { source, start })
+    this.ptr = alk.x.alk_learner()
+    if (!this.ptr) alk.fail('learner')
+  }
+
+  learn(timbre: NativeTimbre, pcm: Float32Array): LearnerState & { accepted: boolean; score: number; restarted: boolean } {
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_learner_learn(this.ptr, timbre.handle, p, n)))
+  }
+
+  offer(timbre: NativeTimbre, pcm: Float32Array): LearnerState & { accepted: number; rejected: number; restarted: boolean } {
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_learner_offer(this.ptr, timbre.handle, p, n)))
+  }
+
+  progress(): number {
+    return receive<LearnerState>(this.alk, this.state()).progress
+  }
+
+  ready(): boolean {
+    return receive<LearnerState>(this.alk, this.state()).ready
+  }
+
+  private state(): number {
+    return this.alk.x.alk_learner_state(this.ptr)
+  }
+
+  // JSON, or raw: its float32 as they are and its windows unpacked
+  voiceprint(raw = false): Value {
+    return receive(this.alk, this.alk.x.alk_learner_voiceprint(this.ptr, +raw))
+  }
+
+  forget(): void {
+    this.alk.x.alk_learner_forget(this.ptr)
+  }
+
+  release(): void {
+    if (this.ptr) this.alk.x.alk_learner_free(this.ptr)
+    this.ptr = 0
+  }
+}
+
+export type PipelineOut = ['event', Record<string, unknown>] | ['window', Float32Array, number, number] | ['verify', number, Float32Array] | ['audio', Uint8Array] | ['utterance', Uint8Array, number, number] | ['record', Uint8Array]
+
+// a real-time input's own rules in the core: the chain, Spot, learning windows, verified wakes, utterances, enrollment, what it keeps
+export class NativePipeline {
+  private ptr: number
+  private out = new Float32Array(256)
+
+  constructor(
+    private alk: Alk,
+    models: { focus?: Model; cue?: Model; spot?: Model },
+    options: Value,
+  ) {
+    send(alk, options)
+    this.ptr = alk.x.alk_pipeline(models.focus?.ptr ?? 0, models.cue?.ptr ?? 0, models.spot?.ptr ?? 0)
+    if (!this.ptr) alk.fail('pipeline')
+  }
+
+  // one hop; the result is valid until the next call
+  step(hop: Float32Array, farQuietMs: number): Float32Array {
+    const { alk, ptr } = this
+    new Float32Array(alk.heap, alk.x.alk_pipeline_hop(ptr), 256).set(hop)
+    const out = alk.x.alk_pipeline_step(ptr, farQuietMs)
+    this.out.set(new Float32Array(alk.heap, out, 256))
+    return this.out
+  }
+
+  spot(model: Model): void {
+    this.alk.x.alk_pipeline_spot(this.ptr, model.ptr)
+  }
+
+  raw(hop: Float32Array): void {
+    new Float32Array(this.alk.heap, this.alk.x.alk_pipeline_hop(this.ptr), 256).set(hop)
+    this.alk.x.alk_pipeline_raw(this.ptr)
+  }
+
+  outs(): PipelineOut[] {
+    if (!this.alk.x.alk_pipeline_pending(this.ptr)) return []
+    return receive(this.alk, this.alk.x.alk_pipeline_outs(this.ptr))
+  }
+
+  verified(key: number, same: boolean, score: number): void {
+    this.alk.x.alk_pipeline_verified(this.ptr, key, +same, score)
+  }
+
+  set(change: Record<string, unknown>): void {
+    send(this.alk, change)
+    receive(this.alk, this.alk.x.alk_pipeline_set(this.ptr))
+  }
+
+  record(seconds: number): void {
+    this.alk.x.alk_pipeline_record(this.ptr, seconds)
+  }
+
+  recent(): Uint8Array | null {
+    return receive(this.alk, this.alk.x.alk_pipeline_recent(this.ptr))
+  }
+
+  stats(): Value {
+    return receive(this.alk, this.alk.x.alk_pipeline_stats(this.ptr))
+  }
+
+  get time(): number {
+    return this.alk.x.alk_pipeline_get(this.ptr, 0)
+  }
+
+  get sleeping(): boolean {
+    return this.alk.x.alk_pipeline_get(this.ptr, 1) === 1
+  }
+
+  get gainDb(): number {
+    return this.alk.x.alk_pipeline_get(this.ptr, 2)
+  }
+
+  get hops(): number {
+    return this.alk.x.alk_pipeline_get(this.ptr, 3)
+  }
+
+  get chained(): boolean {
+    return this.alk.x.alk_pipeline_get(this.ptr, 4) === 1
+  }
+
+  release(): void {
+    if (this.ptr) this.alk.x.alk_pipeline_free(this.ptr)
+    this.ptr = 0
+  }
+}
+
+export type CoachOut = ['event', Record<string, unknown>] | ['print', Float32Array]
+
+// an input's background side in the core: the print learned from the user's windows, and the voice that verifies its wakes
+export class NativeCoach {
+  private ptr: number
+
+  constructor(
+    private alk: Alk,
+    reference: Value,
+  ) {
+    send(alk, { reference })
+    this.ptr = alk.x.alk_coach()
+    if (!this.ptr) alk.fail('coach')
+  }
+
+  learner(start: Value): number {
+    send(this.alk, { start })
+    return receive(this.alk, this.alk.x.alk_coach_learner(this.ptr))
+  }
+
+  forget(): void {
+    this.alk.x.alk_coach_forget(this.ptr)
+  }
+
+  window(timbre: NativeTimbre, pcm: Float32Array, farQuietMs: number, t: number): CoachOut[] {
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_coach_window(this.ptr, timbre.handle, p, n, farQuietMs, t)))
+  }
+
+  verify(timbre: NativeTimbre, pcm: Float32Array): { same: boolean; score: number } {
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_coach_verify(this.ptr, timbre.handle, p, n)))
+  }
+
+  release(): void {
+    if (this.ptr) this.alk.x.alk_coach_free(this.ptr)
     this.ptr = 0
   }
 }

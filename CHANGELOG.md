@@ -7,8 +7,9 @@ The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a pa
 **The SDK runs on Alkove's own engine instead of onnxruntime.** Breaking: stored prints and words must be made again.
 
 - The models are `.alk` files (`alkove-focus-1-preview.alk`, …) instead of `.onnx`. Same weights: the outputs differ from the ONNX ones by less than 10⁻⁴.
-- The engine is `alkove-engine.wasm`, 118 KB brotli instead of 1.5 MB, and gives the same result to the bit in every browser.
-- The chain (Focus, Cue, level, gate), Spot's search, compiling and enrolling words, and Lex's beam search run in Alkove's core, in Rust inside `alkove-engine.wasm`: the same outputs and events to the bit, shared with the Python package.
+- The engine is `alkove-engine.wasm`, 143 KB brotli instead of 1.5 MB, and gives the same result to the bit in every browser.
+- The chain (Focus, Cue, level, gate), Spot's search, compiling and enrolling words, Lex's beam search, Timbre's prints and learning, and the inputs' own rules (learning windows, verified wakes, utterances) run in Alkove's core, in Rust inside `alkove-engine.wasm`: the same outputs and events to the bit, shared with the Python package. An input's `utterance` now comes as soon as the speech ends, not with the next batch of events.
+- A print's learning paces itself on the audio's clock (one window every 1.5 s, then every 10 s), not on the wall clock: the same under load as without.
 - Lex reads a word once, then gives one phoneme per call, keeping what it computed for each beam: a word takes about 5 ms instead of 75 (WebAssembly, Apple M1 Max). Same pronunciations.
 - Focus is 4 % faster and takes half the memory per input.
 - The SDK's own math (word scores, levels, fades, resampling, voiceprint thresholds) no longer goes through `Math.exp`, `Math.log`, `Math.sin` or `**`, whose last digit varies between browsers: the same audio gives the same events, to the bit, in Chrome, Firefox and Safari.

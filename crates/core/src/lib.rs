@@ -5,14 +5,17 @@ mod cue;
 mod focus;
 pub mod fp;
 pub mod js;
+pub mod learner;
 mod level;
 pub mod lex;
 mod live;
 pub mod math;
+pub mod pipeline;
 mod process;
 mod resample;
 pub mod spot;
 pub mod text;
+pub mod timbre;
 pub mod value;
 
 use std::fmt;

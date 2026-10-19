@@ -1,4 +1,4 @@
-//! JSON-shaped values with no text format: platforms parse and print JSON themselves, the core reads and builds these, and they cross the C ABI as tagged bytes.
+//! JSON-shaped values (plus bytes and float32 arrays, for audio) with no text format: platforms parse and print JSON themselves, the core reads and builds these, and they cross the C ABI as tagged bytes.
 
 use crate::Error;
 
@@ -10,6 +10,8 @@ pub enum Value {
     Str(String),
     Arr(Vec<Value>),
     Obj(Vec<(String, Value)>),
+    Bytes(Vec<u8>),
+    Floats(Vec<f32>),
 }
 
 pub fn obj<const N: usize>(fields: [(&str, Value); N]) -> Value {
@@ -82,7 +84,7 @@ impl Value {
         }
     }
 
-    // 0 null, 1 false, 2 true, 3 f64, 4 string, 5 array, 6 object; lengths as u32, all little-endian
+    // 0 null, 1 false, 2 true, 3 f64, 4 string, 5 array, 6 object, 7 bytes, 8 float32 array; lengths as u32, all little-endian
     pub fn encode(&self, out: &mut Vec<u8>) {
         let len = |out: &mut Vec<u8>, n: usize| out.extend_from_slice(&(n as u32).to_le_bytes());
         let text = |out: &mut Vec<u8>, s: &str| {
@@ -113,6 +115,18 @@ impl Value {
                 for (k, v) in f {
                     text(out, k);
                     v.encode(out);
+                }
+            }
+            Value::Bytes(b) => {
+                out.push(7);
+                len(out, b.len());
+                out.extend_from_slice(b);
+            }
+            Value::Floats(x) => {
+                out.push(8);
+                len(out, x.len());
+                for v in x {
+                    out.extend_from_slice(&v.to_le_bytes());
                 }
             }
         }
@@ -174,6 +188,14 @@ fn read(b: &[u8], at: &mut usize, depth: usize) -> Result<Value, Error> {
             }
             Value::Obj(f)
         }
+        7 => {
+            let n = count(b, at)?;
+            Value::Bytes(take(b, at, n)?.to_vec())
+        }
+        8 => {
+            let n = count(b, at)?;
+            Value::Floats(take(b, at, n.checked_mul(4).ok_or(Error::Value("too long"))?)?.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+        }
         _ => return Err(Error::Value("unknown tag")),
     })
 }
@@ -184,7 +206,7 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let v = obj([("a", Value::Null), ("b", vec![1.5, -0.0].into()), ("c", "é".into()), ("d", obj([("e", true.into())]))]);
+        let v = obj([("a", Value::Null), ("b", vec![1.5, -0.0].into()), ("c", "é".into()), ("d", obj([("e", true.into())])), ("f", Value::Bytes(vec![1, 2])), ("g", Value::Floats(vec![0.5, -1.0]))]);
         let mut b = Vec::new();
         v.encode(&mut b);
         assert_eq!(Value::decode(&b).unwrap(), v);

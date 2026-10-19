@@ -355,3 +355,32 @@ impl ChainEvent {
         })
     }
 }
+
+impl ChainOptions {
+    // { gate, normalize, strength, print, speech, sleep }, as the web's options with their defaults
+    pub fn from_value(v: &crate::Value) -> ChainOptions {
+        use crate::Value;
+        let d = ChainOptions::default();
+        let flag = |k: &str, or: bool| v.get(k).and_then(Value::bool).unwrap_or(or);
+        let s = v.get("speech").cloned().unwrap_or(Value::Null);
+        let num = |o: &Value, k: &str, or: f64| o.get(k).and_then(Value::num).unwrap_or(or);
+        let print = match v.get("print") {
+            Some(Value::Arr(a)) => Some(a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect()),
+            Some(Value::Floats(x)) => Some(x.clone()),
+            _ => None,
+        };
+        ChainOptions {
+            gate: flag("gate", d.gate),
+            normalize: flag("normalize", d.normalize),
+            strength: num(v, "strength", d.strength),
+            print,
+            speech: SpeechParams {
+                confidence: num(&s, "confidence", d.speech.confidence),
+                exit_confidence: num(&s, "exitConfidence", d.speech.exit_confidence),
+                start_secs: num(&s, "startSecs", d.speech.start_secs),
+                stop_secs: num(&s, "stopSecs", d.speech.stop_secs),
+            },
+            sleep: flag("sleep", d.sleep),
+        }
+    }
+}

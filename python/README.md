@@ -1,10 +1,10 @@
 # alkove
 
-On-device voice input for Python: keep the user's voice and drop the rest (Focus), find where they speak (Cue), hear a wake word typed in 7 languages (Spot, Lex). It runs natively on the CPU, one thread per stream. No server, no key, no telemetry.
+On-device voice input for Python: keep the user's voice and drop the rest (Focus), find where they speak (Cue), hear a wake word typed in 7 languages (Spot, Lex), know who is speaking (Timbre). It runs natively on the CPU, one thread per stream. No server, no key, no telemetry.
 
 The core is the one the web SDK runs in WebAssembly: for the same 16 kHz audio, the output is the same to the bit.
 
-> **Preview (0.x).** A minor version may break the API until 1.0; a patch never does. Voiceprints (Timbre) come next.
+> **Preview (0.x).** A minor version may break the API until 1.0; a patch never does.
 
 **Read this first.** Alkove is made for **a near microphone and one person**: a phone, a headset, a laptop, a caller on a line. It keeps the closest voice (or the voice of a print) and removes the others. Audio is processed at 16 kHz: the output carries speech up to 8 kHz.
 
@@ -70,6 +70,18 @@ for frame in mic:                            # 16 kHz
 ```
 
 `Processor(..., words=[word])` and `process(..., words=[word])` find the words too, behind Focus when it is on: `part.wakes`. `alkove.Enroller(models, word)` sets a word's thresholds on the user's own voice from three takes (`push` the audio, then `result()`). `lex.phonemize("amendement", "fr")` gives the likeliest pronunciations, `alkove.Lex.distance(a, b)` how far two of them are.
+
+## A voice
+
+```python
+models = alkove.Models.load(["timbre", "focus", "cue"])
+timbre = alkove.Timbre(models)
+me = timbre.embed(pcm)                                   # 1.5 s of voice or more
+same, score = alkove.Timbre.verify(me, timbre.embed(other))
+p = alkove.Processor(models, focus=True, voiceprint=me)  # Focus keeps that voice, not just the closest one
+```
+
+`alkove.VoiceprintLearner(models).offer(pcm)` learns a print from the user's speech, window by window, as the web SDK's inputs do: a window joins only if it sounds like the others. A print is bound to this version's Timbre: `alkove.Voiceprint.from_json` gives None for another one.
 
 ## A file
 

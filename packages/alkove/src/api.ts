@@ -1,4 +1,3 @@
-import { LEARN, VoiceprintLearner as Learner } from './core/learner'
 import { Lex as LexCore, type Pronunciation } from './core/lex'
 import { type CompileOptions, type Word, type WordJSON, wordOf } from './core/spot/spot'
 import { Enrollment, type EnrollTarget } from './recipes/enroll'
@@ -247,56 +246,52 @@ export const Spot = {
   },
 }
 
-// an enrollment screen (« read this sentence »): the same rules as the inputs' learning
+// an enrollment screen (« read this sentence »): the same rules as the inputs' learning, run in the background worker
+type LearnerState = { progress: number; ready: boolean; voiceprint: RawPrint | null }
+type RawPrint = { source: Voiceprint['source']; model: string; centers: Center[]; windows: Center[] }
+
+const fromRaw = (p: RawPrint | null) => (p ? new Voiceprint(p.centers, p.source, p.model, p.windows) : null)
+const toRaw = (p: Voiceprint) => ({ alkove: 'voiceprint', model: p.model, source: p.source, centers: p.centers, windows: p.windows })
+const closing = typeof FinalizationRegistry === 'undefined' ? null : new FinalizationRegistry<() => void>((close) => close())
+
 export class VoiceprintLearner {
-  private core: Learner
+  private state: { progress: number; ready: boolean; voiceprint: Voiceprint | null }
 
   private constructor(
     private b: Backend,
-    start: Voiceprint | null,
+    private id: number,
+    s: LearnerState,
   ) {
-    this.core = new Learner(
-      () => {
-        throw new Error('windows come from the background worker')
-      },
-      'raw',
-      start,
-    )
+    this.state = { progress: s.progress, ready: s.ready, voiceprint: fromRaw(s.voiceprint) }
+    closing?.register(this, () => void b.call('learnerClose', [id]).catch(() => {}))
   }
 
   static async create(opts: { voiceprint?: Voiceprint | null } = {}): Promise<VoiceprintLearner> {
-    return new VoiceprintLearner(await backend(['timbre']), opts.voiceprint ?? null)
+    const b = await backend(['timbre'])
+    const s = await b.call<LearnerState & { id: number }>('learnerOpen', [opts.voiceprint ? toRaw(opts.voiceprint) : null])
+    return new VoiceprintLearner(b, s.id, s)
   }
 
   get progress(): number {
-    return this.core.progress
+    return this.state.progress
   }
 
   get ready(): boolean {
-    return this.core.ready
+    return this.state.ready
   }
 
   get voiceprint(): Voiceprint | null {
-    return this.core.voiceprint
+    return this.state.voiceprint
   }
 
   async offer(pcm: Float32Array): Promise<{ accepted: number; rejected: number; progress: number; ready: boolean }> {
-    const n = 24000
-    let accepted = 0
-    let rejected = 0
-    for (let i = 0; i + 0.9 * n <= pcm.length; i += n) {
-      const win = pcm.subarray(i, Math.min(pcm.length, i + n))
-      let s = 0
-      for (const x of win) s += x * x
-      if (Math.sqrt(s / win.length) < LEARN.level) continue
-      const [w] = await this.b.call<Center[]>('windows', [win.slice()])
-      if (this.core.learn(w!).accepted) accepted++
-      else rejected++
-    }
-    return { accepted, rejected, progress: this.progress, ready: this.ready }
+    const r = await this.b.call<LearnerState & { accepted: number; rejected: number }>('learnerOffer', [this.id, pcm])
+    this.state = { progress: r.progress, ready: r.ready, voiceprint: fromRaw(r.voiceprint) }
+    return { accepted: r.accepted, rejected: r.rejected, progress: r.progress, ready: r.ready }
   }
 
   forget(): void {
-    this.core.forget()
+    this.state = { progress: 0, ready: false, voiceprint: null }
+    void this.b.call('learnerForget', [this.id])
   }
 }

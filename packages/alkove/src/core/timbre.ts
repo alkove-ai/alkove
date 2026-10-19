@@ -1,6 +1,5 @@
 import { ln } from '../dsp/math'
 import { RATE, TIMBRE } from '../manifest'
-import type { Net } from './engine'
 
 export type Source = 'raw' | 'focus'
 
@@ -19,33 +18,10 @@ export interface VoiceprintJSON {
   windows?: string
 }
 
-const unit = (v: ArrayLike<number>): Float32Array => {
-  let n = 0
-  for (let i = 0; i < v.length; i++) n += v[i]! * v[i]!
-  n = Math.sqrt(n) || 1
-  return Float32Array.from(v, (x) => x / n)
-}
-
 export const dot = (a: ArrayLike<number>, b: ArrayLike<number>) => {
   let s = 0
   for (let i = 0; i < a.length; i++) s += a[i]! * b[i]!
   return s
-}
-
-const mean = (vs: ArrayLike<number>[]) => {
-  const m = new Float32Array(vs[0]!.length)
-  for (const v of vs) for (let i = 0; i < m.length; i++) m[i]! += v[i]!
-  return unit(m)
-}
-
-// mean of the windows without the 10 % least like it
-export function trimmedMean(windows: Center[], seconds: number): Center {
-  const first = mean(windows.map((w) => w.id))
-  if (windows.length < 10) return { embedding: mean(windows.map((w) => w.embedding)), id: first, seconds }
-  const scores = windows.map((w) => dot(w.id, first))
-  const cut = [...scores].sort((a, b) => a - b)[Math.floor(windows.length / 10)]!
-  const kept = windows.filter((_, i) => scores[i]! >= cut)
-  return { embedding: mean(kept.map((w) => w.embedding)), id: mean(kept.map((w) => w.id)), seconds }
 }
 
 // one or more centers (near / far, phone / headset); a voice is as close as its closest center
@@ -190,28 +166,8 @@ const LEVELS: { print: number[]; heard: number[] } & Record<Level, number[][]> =
   ],
 }
 
-// a voice from 16 kHz audio: Timbre on 1.5 s windows, half overlapping
+// what the main thread knows of Timbre without running it: whether two prints are the same voice (the model runs in the core)
 export class Timbre {
-  constructor(private net: Net) {}
-
-  window(pcm: Float32Array): Center {
-    const out = this.net.run({ audio: { data: pcm, dims: [1, pcm.length] } })
-    return { embedding: out.embedding!.data as Float32Array, id: out.id!.data as Float32Array, seconds: pcm.length / RATE }
-  }
-
-  windows(pcm: Float32Array): Center[] {
-    if (pcm.length < TIMBRE.min) throw new RangeError(`audio.too-short: ${pcm.length} samples, Timbre needs at least ${TIMBRE.min}`)
-    if (pcm.length <= TIMBRE.window) return [this.window(pcm)]
-    const hop = TIMBRE.window / 2
-    const out: Center[] = []
-    for (let i = 0; i + TIMBRE.window <= pcm.length; i += hop) out.push(this.window(pcm.subarray(i, i + TIMBRE.window)))
-    return out
-  }
-
-  embed(pcm: Float32Array, source: Source = 'raw'): Voiceprint {
-    return new Voiceprint([trimmedMean(this.windows(pcm), pcm.length / RATE)], source)
-  }
-
   // a: the known print, b: the voice heard; each knows how much voice it holds
   static verify(a: Voiceprint, b: Voiceprint, { level = 'balanced' }: { level?: Level } = {}): { same: boolean; score: number } {
     const { score, mine, theirs } = a.closest(b)

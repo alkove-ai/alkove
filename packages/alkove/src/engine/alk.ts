@@ -51,6 +51,38 @@ export interface AlkExports {
   alk_enroller_free(e: number): void
   alk_enroller_push(e: number, pcm: number, len: number): number
   alk_enroller_result(e: number): number
+  alk_timbre(m: number): number
+  alk_timbre_free(t: number): void
+  alk_timbre_windows(t: number, pcm: number, len: number): number
+  alk_timbre_embed(t: number, pcm: number, len: number): number
+  alk_voiceprint(): number
+  alk_learner(): number
+  alk_learner_free(l: number): void
+  alk_learner_learn(l: number, t: number, pcm: number, len: number): number
+  alk_learner_offer(l: number, t: number, pcm: number, len: number): number
+  alk_learner_voiceprint(l: number, raw: number): number
+  alk_learner_forget(l: number): void
+  alk_learner_state(l: number): number
+  alk_pipeline(focus: number, cue: number, spot: number): number
+  alk_pipeline_free(p: number): void
+  alk_pipeline_hop(p: number): number
+  alk_pipeline_step(p: number, farQuietMs: number): number
+  alk_pipeline_raw(p: number): void
+  alk_pipeline_spot(p: number, m: number): void
+  alk_pipeline_outs(p: number): number
+  alk_pipeline_pending(p: number): number
+  alk_pipeline_verified(p: number, key: number, same: number, score: number): void
+  alk_pipeline_set(p: number): number
+  alk_pipeline_record(p: number, seconds: number): void
+  alk_pipeline_recent(p: number): number
+  alk_pipeline_stats(p: number): number
+  alk_pipeline_get(p: number, what: number): number
+  alk_coach(): number
+  alk_coach_free(c: number): void
+  alk_coach_learner(c: number): number
+  alk_coach_forget(c: number): void
+  alk_coach_window(c: number, t: number, pcm: number, len: number, farQuietMs: number, at: number): number
+  alk_coach_verify(c: number, t: number, pcm: number, len: number): number
 }
 
 export type TypedData = Float32Array | Int32Array
