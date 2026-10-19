@@ -1,0 +1,13 @@
+[package]
+name = "alkove-engine"
+description = "Alkove's inference engine: runs .alk models, same result to the bit on every target"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# fused multiply-add in the sums of products (native only): faster, results no longer those of the web build
+fma = []
+
+[dependencies]

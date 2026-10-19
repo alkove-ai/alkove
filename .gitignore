@@ -3,3 +3,4 @@ dist/
 .cache/
 *.log
 .DS_Store
+target/
