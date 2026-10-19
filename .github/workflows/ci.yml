@@ -21,6 +21,14 @@ jobs:
       - run: cargo clippy --release --all-targets -- -D warnings
       - run: cargo test --release
 
+  # rust-version: what someone building the sdist or the crates needs; we build with rust-toolchain.toml's
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.88 --profile minimal
+      - run: cargo +1.88 check --workspace --all-targets
+
   wasm:
     runs-on: ubuntu-latest
     env:

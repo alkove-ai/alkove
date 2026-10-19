@@ -3,6 +3,7 @@ name = "alkove-python"
 description = "The Python package of Alkove: the core and the engine, natively"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false

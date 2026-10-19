@@ -3,6 +3,7 @@ name = "alkove-core"
 description = "Alkove's core: what turns the models' outputs into features (chain, speech, wake words, voiceprints), the same to the bit on every platform"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
