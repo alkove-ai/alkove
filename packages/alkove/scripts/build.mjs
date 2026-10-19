@@ -9,8 +9,10 @@ import { build } from 'esbuild'
 const root = join(import.meta.dirname, '..')
 const dist = join(root, 'dist')
 const workspace = join(root, '../..')
-// every browser with SIMD has bulk memory: without it, the engine's copies go through a loop
-execFileSync('cargo', ['build', '--release', '-p', 'alkove-engine-wasm', '--target', 'wasm32-unknown-unknown'], { cwd: workspace, stdio: 'inherit', env: { ...process.env, RUSTFLAGS: '-C target-feature=+simd128,+bulk-memory' } })
+const sysroot = execFileSync('rustc', ['--print', 'sysroot'], { encoding: 'utf8' }).trim()
+// every browser with SIMD has bulk memory (without it, the engine's copies go through a loop); paths of panic locations remapped: no home directory in the package, the same bytes on every machine
+const flags = ['-C', 'target-feature=+simd128,+bulk-memory', `--remap-path-prefix=${sysroot}=/rust`, `--remap-path-prefix=${workspace}=/alkove`]
+execFileSync('cargo', ['build', '--release', '-p', 'alkove-engine-wasm', '--target', 'wasm32-unknown-unknown'], { cwd: workspace, stdio: 'inherit', env: { ...process.env, CARGO_ENCODED_RUSTFLAGS: flags.join('\x1f') } })
 const wasm = join(workspace, 'target/wasm32-unknown-unknown/release/alkove_engine_wasm.wasm')
 
 const bytes = readFileSync(wasm)

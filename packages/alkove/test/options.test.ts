@@ -76,7 +76,7 @@ describe('every option does something', () => {
     expect(r.trace!.focus.at(-1)!.t).toBeGreaterThanOrEqual((n - 256) / 16000)
     // Cue's rows with Focus on too, one per 30 ms
     expect(r.trace!.cue.length).toBeGreaterThanOrEqual(Math.floor(n / 480) - 4)
-    expect(Math.max(...r.trace!.cue.map((c) => c.speech))).toBeGreaterThan(0.5)
+    expect(Math.max(...r.trace!.cue.map((c) => c.speech ?? 0))).toBeGreaterThan(0.5)
   })
 
   it('setEnabled(false): the raw mic at the chain delay, without level or gate', () => {

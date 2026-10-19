@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # the engine's tests compare its kernels to plain loops, to the bit: passing on every target means the same bits everywhere
+  engine:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup component add rustfmt clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --release --all-targets -- -D warnings
+      - run: cargo test --release
+
+  engine-wasm:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add wasm32-wasip1
+      - run: curl -sSf https://wasmtime.dev/install.sh | bash -s -- --version v25.0.0 && echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+      - run: cargo test --release -p alkove-engine --target wasm32-wasip1
+        env:
+          RUSTFLAGS: -C target-feature=+simd128
+      - run: cargo test --release -p alkove-engine --target wasm32-wasip1
+
+  sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: rustup target add wasm32-unknown-unknown
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - run: pnpm --filter alkove build
+      - run: pnpm --filter alkove check
