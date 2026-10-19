@@ -19,8 +19,8 @@ export const MODELS: Record<ModelName, ModelFile> = {
   focus: {
     name: 'alkove-focus-1-preview',
     file: 'alkove-focus-1-preview.alk',
-    bytes: 1105296,
-    sha256: 'f0c174ef38d2060c6e7129bf18900a90e1848a3c14e4b9f6d397e119bf900d90',
+    bytes: 1111696,
+    sha256: '55318cf0a463d523e249a8d4fe3b83e205b83bdb3f275468bcd0707f52d8b97c',
   },
   cue: {
     name: 'alkove-cue-1-preview',
