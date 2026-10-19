@@ -18,5 +18,5 @@
   "noise": "pink, generated",
   "noise_db": -10
  },
- "reference": "onnxruntime (Python, CPU, 1 thread) on the published models, one step per call from a zero state"
+ "reference": "the Alkove engine built natively, on the .alk models, one step per call from a zero state: the SDK's wasm gives the same bits"
 }

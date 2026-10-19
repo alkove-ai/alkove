@@ -89,7 +89,7 @@ The package ships one command, to copy what your installed version loads into a 
 npx alkove models <dir> [focus cue spot timbre lex]
 ```
 
-It downloads the models at the revision pinned by your version, checks their sha256, and copies `alkove-ort.wasm`, `alkove-worker.js` and `alkove-worklet.js` next to them. Name models to copy only those; with none, it copies all five. Use the folder as `modelDir` in Node, or serve it and set `modelBaseUrl` and `assetBaseUrl` in the browser (see [Self-hosting the models](/docs/guides/self-hosting/)).
+It downloads the models at the revision pinned by your version, checks their sha256, and copies `alkove-engine.wasm`, `alkove-worker.js` and `alkove-worklet.js` next to them. Name models to copy only those; with none, it copies all five. Use the folder as `modelDir` in Node, or serve it and set `modelBaseUrl` and `assetBaseUrl` in the browser (see [Self-hosting the models](/docs/guides/self-hosting/)).
 
 ## Voiceprints and words for files
 

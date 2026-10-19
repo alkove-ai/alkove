@@ -94,6 +94,18 @@ pub unsafe extern "C" fn alk_reset(s: *mut Session) {
     (*s).reset();
 }
 
+// Safety: `s` is a live session.
+#[no_mangle]
+pub unsafe extern "C" fn alk_state_clear(s: *mut Session) {
+    (*s).clear_state();
+}
+
+// Safety: `m` is a live model; returns the index of the input `alk_set_len` measures, or -1.
+#[no_mangle]
+pub unsafe extern "C" fn alk_variable(m: *const Model) -> i32 {
+    (*m).frames().map_or(-1, |f| f.input as i32)
+}
+
 // Safety: `m` is a live model.
 #[no_mangle]
 pub unsafe extern "C" fn alk_state_len(m: *const Model) -> usize {

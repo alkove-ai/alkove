@@ -260,6 +260,13 @@ impl Session {
         self.arena.fill(0.0);
     }
 
+    // the state back to zeros, the inputs kept (Focus's print)
+    pub fn clear_state(&mut self) {
+        for p in &self.model.state {
+            self.arena[p.off..p.off + p.len].fill(0.0);
+        }
+    }
+
     pub fn state(&self, out: &mut [f32]) {
         for p in &self.model.state {
             out[p.flat..p.flat + p.len].copy_from_slice(&self.arena[p.off..p.off + p.len]);

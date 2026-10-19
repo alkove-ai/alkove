@@ -2,9 +2,9 @@ import { WasmEngine } from '../src/core/engine'
 import { Lex } from '../src/core/lex'
 import { compileWord } from '../src/core/spot/spot'
 import { processPcm } from '../src/process'
-import { loadOrt, modelBytes, wav } from '../test/helpers'
+import { loadEngine, modelBytes, wav } from '../test/helpers'
 
-const engine = new WasmEngine(await loadOrt(), modelBytes)
+const engine = new WasmEngine(await loadEngine(), modelBytes)
 const mix = wav('mix.wav')
 const minute = new Float32Array(60 * 16000)
 for (let i = 0; i < minute.length; i++) minute[i] = mix[i % mix.length]!

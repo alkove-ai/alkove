@@ -5,11 +5,11 @@ import { Lex } from '../src/core/lex'
 import { Enroller, type Take } from '../src/core/spot/enroll'
 import { compileWord, Spot } from '../src/core/spot/spot'
 import { processPcm } from '../src/process'
-import { loadOrt, modelBytes, wav } from './helpers'
+import { loadEngine, modelBytes, wav } from './helpers'
 
 let engine: WasmEngine
 beforeAll(async () => {
-  engine = new WasmEngine(await loadOrt(), modelBytes)
+  engine = new WasmEngine(await loadEngine(), modelBytes)
 })
 
 const join = (...parts: Float32Array[]) => {

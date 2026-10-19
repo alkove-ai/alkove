@@ -1,9 +1,10 @@
 import type { ConsoleMessage } from '@playwright/test'
 
+import { MODELS } from '../../src/manifest'
 import { expect, open, test } from './fixtures'
 
 // every request the page may make: the test page, its scripts, the package, the models, the fixtures
-const ALLOWED = [/^\/csp\.html$/, /^\/browser\/(csp|lib)\.js$/, /^\/dist\/[\w./-]+$/, /^\/models\/alkove-[a-z]+-1-preview\.onnx$/, /^\/fixtures\/[\w.]+$/, /^\/favicon\.ico$/]
+const ALLOWED = [/^\/csp\.html$/, /^\/browser\/(csp|lib)\.js$/, /^\/dist\/[\w./-]+$/, /^\/models\/alkove-[a-z]+-1-preview\.alk$/, /^\/fixtures\/[\w.]+$/, /^\/favicon\.ico$/]
 
 test.describe('network guarantee', () => {
   test('under the strict CSP, cache empty: every model and script from the page origin, no violation, no other request', async ({ page, origin, serverLog, browserName }) => {
@@ -46,8 +47,8 @@ test.describe('network guarantee', () => {
     // the server saw only expected paths, all the models among them; the route guard of the fixture saw nothing else
     const hits = (await serverLog()).filter((h) => h.at >= since)
     expect(hits.filter((h) => !ALLOWED.some((re) => re.test(h.path))).map((h) => h.path)).toEqual([])
-    for (const m of ['focus', 'cue', 'spot', 'timbre', 'lex']) expect(hits.some((h) => h.path === `/models/alkove-${m}-1-preview.onnx` && h.status === 200)).toBe(true)
-    expect(hits.some((h) => h.path === '/dist/alkove-ort.wasm' && h.status === 200)).toBe(true)
+    for (const m of ['focus', 'cue', 'spot', 'timbre', 'lex']) expect(hits.some((h) => h.path === `/models/alkove-${m}-1-preview.alk` && h.status === 200)).toBe(true)
+    expect(hits.some((h) => h.path === '/dist/alkove-engine.wasm' && h.status === 200)).toBe(true)
   })
 
   test('without modelBaseUrl the models go to Hugging Face: the guard catches it, the SDK says so', async ({ page, origin, foreign }) => {
@@ -64,7 +65,8 @@ test.describe('network guarantee', () => {
     })
     expect(r.error).toBe('AlkoveError models.fetch')
     expect(r.diags).toContain('models.default-host')
-    expect(foreign).toEqual(['https://huggingface.co/alkove-ai/alkove-lex-1-preview/resolve/74a478a8dc1cca370365f90ab17d2f753ddcb7e0/alkove-lex-1-preview.onnx'])
+    const lex = MODELS.lex
+    expect(foreign).toEqual(lex.revision ? [`https://huggingface.co/alkove-ai/${lex.name}/resolve/${lex.revision}/${lex.file}`] : [])
     // seen and expected: the fixture's check is for requests nobody asked for
     foreign.length = 0
   })

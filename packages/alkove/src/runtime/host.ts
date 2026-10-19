@@ -1,6 +1,6 @@
 import { AlkoveError } from '../errors'
 import { currentConfig, loadFile, loadModel, lockConfig, type Progress, report, under } from '../loader'
-import { type ModelName, ORT_WASM } from '../manifest'
+import { ENGINE_WASM, type ModelName } from '../manifest'
 
 type Reply = { resolve: (v: any) => void; reject: (e: unknown) => void; progress?: (p: any) => void }
 
@@ -71,12 +71,12 @@ export async function scriptUrl(kind: 'worker' | 'worklet'): Promise<string> {
 
 let wasm: Promise<WebAssembly.Module> | null = null
 
-export function ortModule(onProgress?: (p: Progress) => void): Promise<WebAssembly.Module> {
+export function engineModule(onProgress?: (p: Progress) => void): Promise<WebAssembly.Module> {
   return (wasm ??= (async () => {
-    const own = currentConfig().models?.ort
+    const own = currentConfig().models?.engine
     const base = currentConfig().assetBaseUrl
-    const url = own ?? (base ? under(base, ORT_WASM.file) : new URL('./alkove-ort.wasm', import.meta.url).href)
-    const bytes = await loadFile(ORT_WASM, onProgress, url)
+    const url = own ?? (base ? under(base, ENGINE_WASM.file) : new URL('./alkove-engine.wasm', import.meta.url).href)
+    const bytes = await loadFile(ENGINE_WASM, onProgress, url)
     return WebAssembly.compile(bytes as Uint8Array<ArrayBuffer>)
   })().catch((e) => {
     wasm = null
@@ -97,7 +97,7 @@ export class Host {
 
   link(role: 'realtime' | 'background'): Promise<WorkerLink> {
     return (this.links[role] ??= (async () => {
-      const [module, url] = await Promise.all([ortModule(), scriptUrl('worker')])
+      const [module, url] = await Promise.all([engineModule(), scriptUrl('worker')])
       const link = new WorkerLink(new Worker(url, { type: 'module', name: `alkove-${role}` }))
       const mine = this.links[role]
       link.listen((m) => m.type === 'crash' && this.links[role] === mine && this.drop(role, link))

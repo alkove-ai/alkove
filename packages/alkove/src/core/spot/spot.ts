@@ -26,9 +26,9 @@ export interface WordJSON {
   chain: Chain
 }
 
-// median of ~30 typed words per language at 0.5 false alarm / h on the published Spot; ro's test set is too short, set by hand
-const UNCALIBRATED: Partial<Record<Lang, number>> = { fr: -1.23, en: -1.21, es: -1.14, it: -1.01, pt: -1.39, ca: -1.12, ro: -1.2 }
-const UNCALIBRATED_ANY = -1.17
+// median of ~30 typed words per language at 0.5 false alarm / h on Spot as the engine runs it; ro's test set is too short, set by hand
+const UNCALIBRATED: Partial<Record<Lang, number>> = { fr: -1.26, en: -1.22, es: -1.18, it: -1.02, pt: -1.41, ca: -1.12, ro: -1.2 }
+const UNCALIBRATED_ANY = -1.21
 // the threshold after a pause sits this much under the one anywhere (mean over the typed words)
 export const PAUSE_GAP = -0.77
 // shared by both thresholds: a hard word's pause threshold (under -2.2) is clamped, stricter than 0.5 false alarm / h

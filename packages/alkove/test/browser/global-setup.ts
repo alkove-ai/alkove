@@ -10,7 +10,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const dist = join(pkg, 'dist')
   if (!existsSync(join(dist, 'index.js'))) throw new Error('dist/ is missing: run `pnpm build` first')
   const models = join(pkg, '.cache/models')
-  if (!existsSync(join(models, 'alkove-focus-1-preview.onnx'))) throw new Error(`models not found in ${models}`)
+  if (!existsSync(join(models, 'alkove-focus-1-preview.alk'))) throw new Error(`models not found in ${models}`)
   const snap = join(pkg, '.cache/browser', String(process.pid))
   mkdirSync(snap, { recursive: true })
   cpSync(dist, join(snap, 'dist'), { recursive: true })

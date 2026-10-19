@@ -11,7 +11,7 @@ const TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json',
   '.wasm': 'application/wasm',
-  '.onnx': 'application/octet-stream',
+  '.alk': 'application/octet-stream',
   '.wav': 'audio/wav',
   '.f32': 'application/octet-stream',
 }

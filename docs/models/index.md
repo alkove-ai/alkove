@@ -20,7 +20,7 @@ Alkove is five small models, each doing a single job, and one WebAssembly engine
 
 All five together weigh under 8 MB. All take 16 kHz mono audio (Lex takes text). The SDK resamples the microphone or your file for you.
 
-The engine, `alkove-ort.wasm` (7.6 MB), is onnxruntime reduced to the operators these five models use. It ships inside the npm package, runs on one thread, and needs WebAssembly SIMD.
+The engine, `alkove-engine.wasm` (220 KB, 56 KB brotli), is Alkove's own: it runs these five models and gives the same result to the bit on every target. It ships inside the npm package, runs on one thread, and needs WebAssembly SIMD.
 
 ## Who runs what
 

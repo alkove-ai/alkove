@@ -1,25 +1,15 @@
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
 
-import { Ort, type OrtFactory } from '../src/engine/ort'
+import { Alk } from '../src/engine/alk'
 import { MODELS, type ModelName } from '../src/manifest'
 
 const root = join(import.meta.dirname, '..')
-const stock = dirname(createRequire(import.meta.url).resolve('onnxruntime-web'))
 
-// the reduced build the package ships; ALKOVE_ORT=stock for onnxruntime-web's own
-export const ortFiles = () =>
-  process.env.ALKOVE_ORT === 'stock'
-    ? { mjs: join(stock, 'ort-wasm-simd-threaded.mjs'), wasm: join(stock, 'ort-wasm-simd-threaded.wasm') }
-    : { mjs: join(root, 'vendor/ort/alkove-ort.mjs'), wasm: join(root, 'vendor/ort/alkove-ort.wasm') }
+// the wasm `pnpm build` makes (crates/engine-wasm)
+export const engineWasm = () => readFileSync(join(root, '../../target/wasm32-unknown-unknown/release/alkove_engine_wasm.wasm'))
 
-export async function loadOrt(): Promise<Ort> {
-  const { mjs, wasm } = ortFiles()
-  const factory = (await import(pathToFileURL(mjs).href)).default as OrtFactory
-  return Ort.create(factory, await WebAssembly.compile(readFileSync(wasm)))
-}
+export const loadEngine = async (): Promise<Alk> => Alk.create(await WebAssembly.compile(engineWasm()))
 
 export const modelBytes = (name: ModelName) => new Uint8Array(readFileSync(join(root, '.cache/models', MODELS[name].file)))
 

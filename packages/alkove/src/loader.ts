@@ -4,7 +4,7 @@ import { HF_ORG, type ModelFile, type ModelName, MODELS } from './manifest'
 export type Source = ArrayBuffer | Uint8Array | URL | string
 
 export interface Config {
-  models?: Partial<Record<ModelName | 'ort', Source>>
+  models?: Partial<Record<ModelName | 'engine', Source>>
   modelBaseUrl?: string | URL
   assetBaseUrl?: string | URL
   modelDir?: string
@@ -56,6 +56,7 @@ export function under(base: string | URL, file: string): string {
 
 function urlOf(file: ModelFile): string {
   if (config.modelBaseUrl) return under(config.modelBaseUrl, file.file)
+  if (!file.revision) throw new AlkoveError('models.fetch', `${file.name}: not on Hugging Face in this version, set modelBaseUrl`)
   report({ code: 'models.default-host', level: 'warn', message: `${file.name} comes from Hugging Face: each user sends it their IP. Self-host the models in production (modelBaseUrl).` })
   return `https://huggingface.co/${HF_ORG}/${file.name}/resolve/${file.revision}/${file.file}`
 }
@@ -150,7 +151,7 @@ export async function isCached(file: ModelFile): Promise<boolean> {
   }
 }
 
-const nameOf = (file: ModelFile) => (Object.entries(MODELS).find(([, f]) => f === file)?.[0] ?? 'ort') as ModelName | 'ort'
+const nameOf = (file: ModelFile) => (Object.entries(MODELS).find(([, f]) => f === file)?.[0] ?? 'engine') as ModelName | 'engine'
 
 export async function loadFile(file: ModelFile, onProgress?: (p: Progress) => void, fallback?: Source): Promise<Uint8Array> {
   const own = config.models?.[nameOf(file)] ?? fallback

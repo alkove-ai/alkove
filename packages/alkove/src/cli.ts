@@ -3,13 +3,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { configure, loadModel } from './loader'
-import { type ModelName, MODELS, ORT_WASM } from './manifest'
+import { ENGINE_WASM, type ModelName, MODELS } from './manifest'
 
 const USAGE = `alkove models <dir> [focus cue spot timbre lex]
 
 Copies what the installed version of alkove loads into <dir>, for self-hosting:
 the models (downloaded from Hugging Face at the pinned revision, sha256 checked),
-alkove-ort.wasm, alkove-worker.js and alkove-worklet.js.
+alkove-engine.wasm, alkove-worker.js and alkove-worklet.js.
 
 Then: Alkove.configure({ modelBaseUrl: '/<dir>/', assetBaseUrl: '/<dir>/' })`
 
@@ -30,7 +30,7 @@ async function main(argv: string[]): Promise<void> {
     console.log(`${MODELS[n].file}  ${(bytes.length / 1e6).toFixed(2)} MB  sha256 ok`)
   }
   const here = dirname(fileURLToPath(import.meta.url))
-  for (const f of [ORT_WASM.file, 'alkove-worker.js', 'alkove-worklet.js']) {
+  for (const f of [ENGINE_WASM.file, 'alkove-worker.js', 'alkove-worklet.js']) {
     await copyFile(join(here, f), join(dir, f))
     console.log(f)
   }

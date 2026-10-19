@@ -1,69 +1,85 @@
-import * as ort from 'onnxruntime-web'
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import type { Ort } from '../src/engine/ort'
-import { FOCUS, LEX, STREAMS, TIMBRE } from '../src/manifest'
-import { loadOrt, maxDiff, modelBytes, noise } from './helpers'
+import { type Alk, EngineError, type Model } from '../src/engine/alk'
+import { FOCUS, LEX, type ModelName, TIMBRE } from '../src/manifest'
+import { loadEngine, maxDiff, modelBytes, noise } from './helpers'
 
-let engine: Ort
+let alk: Alk
+const models = new Map<ModelName, Model>()
+const model = (name: ModelName) => models.get(name) ?? models.set(name, alk.model(modelBytes(name))).get(name)!
+
 beforeAll(async () => {
-  engine = await loadOrt()
-  ort.env.wasm.numThreads = 1
+  alk = await loadEngine()
 })
 
-const reference = (name: 'focus' | 'cue' | 'spot' | 'timbre' | 'lex') => ort.InferenceSession.create(modelBytes(name), { executionProviders: ['wasm'] })
-
-describe('engine against onnxruntime-web 1.30.0', () => {
-  for (const name of ['focus', 'cue', 'spot'] as const) {
-    it(`${name}: 15 streamed steps, same outputs`, async () => {
-      const spec = STREAMS[name]
-      const ref = await reference(name)
-      const binding = engine.session(modelBytes(name)).bind({ ...spec.shapes }, spec.loops)
-      const chunk = spec.shapes.audio[1]!
-      let state = new Float32Array(spec.shapes.state[0]!)
-      let worst = 0
-      for (let step = 0; step < 15; step++) {
-        const audio = noise(chunk, step + 1)
-        const feeds: Record<string, ort.Tensor> = {
-          audio: new ort.Tensor('float32', audio, [1, chunk]),
-          state: new ort.Tensor('float32', state, [state.length]),
-        }
-        if (name === 'focus') feeds.print = new ort.Tensor('float32', new Float32Array(FOCUS.print), [1, FOCUS.print])
-        const out = await ref.run(feeds)
-        binding.f32('audio').set(audio)
-        binding.run()
-        for (const o of ref.outputNames.filter((n) => n !== 'next_state')) worst = Math.max(worst, maxDiff(binding.f32(o), out[o]!.data as Float32Array))
-        state = out.next_state!.data as Float32Array<ArrayBuffer>
-        worst = Math.max(worst, maxDiff(binding.f32('state'), state))
-      }
-      expect(worst).toBe(0)
-    })
+const steps = (name: 'focus' | 'cue' | 'spot', n: number, out: string, setup?: (s: ReturnType<Model['session']>) => void) => {
+  const s = model(name).session()
+  setup?.(s)
+  const chunk = s.f32('audio').length
+  const got: Float32Array[] = []
+  for (let k = 0; k < n; k++) {
+    s.f32('audio').set(noise(chunk, k + 1))
+    s.run()
+    got.push(s.f32(out).slice())
   }
+  return { s, got }
+}
 
-  it('timbre: windows of any length', async () => {
-    const ref = await reference('timbre')
-    const s = engine.session(modelBytes('timbre'))
-    for (const n of [TIMBRE.min, 16000, TIMBRE.window]) {
-      const audio = noise(n, n)
-      const out = await ref.run({ audio: new ort.Tensor('float32', audio, [1, n]) })
-      const mine = s.run({ audio: { data: audio, dims: [1, n] } })
-      expect(maxDiff(mine.embedding!.data, out.embedding!.data as Float32Array)).toBe(0)
-      expect(maxDiff(mine.id!.data, out.id!.data as Float32Array)).toBe(0)
-    }
+describe('engine', () => {
+  it('one state per stream: a second session of a model starts from zero', () => {
+    const a = steps('cue', 6, 'speech')
+    const b = steps('cue', 6, 'speech')
+    expect(a.got.map((x) => x[0])).toEqual(b.got.map((x) => x[0]))
+    expect(a.got[5]![0]).not.toBe(a.got[0]![0])
+    a.s.release()
+    b.s.release()
   })
 
-  it('lex: int32 inputs', async () => {
-    const ref = await reference('lex')
-    const s = engine.session(modelBytes('lex'))
+  it('reset clears the state and keeps the inputs (Focus keeps its print)', () => {
+    const print = (s: ReturnType<Model['session']>) => s.f32('print').set(noise(FOCUS.print, 9))
+    const a = steps('focus', 4, 'audio_out', print)
+    a.s.reset()
+    a.s.f32('audio').set(noise(FOCUS.chunk, 1))
+    a.s.run()
+    const fresh = steps('focus', 1, 'audio_out', print)
+    expect(maxDiff(a.s.f32('audio_out'), fresh.got[0]!)).toBe(0)
+    a.s.release()
+    fresh.s.release()
+  })
+
+  it('timbre: windows of any length, each as from a fresh session', () => {
+    const s = model('timbre').session()
+    for (const n of [TIMBRE.window, TIMBRE.min, 16000, TIMBRE.window - 1]) {
+      const audio = noise(n, n)
+      const fresh = model('timbre').session()
+      const want = fresh.call({ audio: { data: audio, dims: [1, n] } })
+      const got = s.call({ audio: { data: audio, dims: [1, n] } })
+      expect(got.id!.dims).toEqual([1, TIMBRE.dim])
+      expect(maxDiff(got.id!.data, want.id!.data)).toBe(0)
+      expect(maxDiff(got.embedding!.data, want.embedding!.data)).toBe(0)
+      fresh.release()
+    }
+    for (const n of [TIMBRE.min - 1, TIMBRE.window + 1]) expect(() => s.call({ audio: { data: noise(n), dims: [1, n] } })).toThrow(EngineError)
+    s.release()
+  })
+
+  it('lex: int32 inputs, one row of log-probabilities per beam', () => {
+    const s = model('lex').session()
     const word = new Int32Array(LEX.word)
     ;[...'camille'].forEach((c, i) => (word[i] = c.codePointAt(0)!))
     const prefix = new Int32Array(LEX.beams * LEX.prefix)
     for (let b = 0; b < LEX.beams; b++) prefix[b * LEX.prefix] = LEX.bos
-    const feeds = { word, lang: Int32Array.of(0), prefix, pos: Int32Array.of(0) }
-    const dims = { word: [1, LEX.word], lang: [1], prefix: [LEX.beams, LEX.prefix], pos: [1] }
-    const out = await ref.run(Object.fromEntries(Object.entries(feeds).map(([k, v]) => [k, new ort.Tensor('int32', v, dims[k as keyof typeof dims])])))
-    const mine = s.run(Object.fromEntries(Object.entries(feeds).map(([k, v]) => [k, { data: v, dims: dims[k as keyof typeof dims] }])))
-    expect(mine.logp!.dims).toEqual([LEX.beams, LEX.vocab])
-    expect(maxDiff(mine.logp!.data, out.logp!.data as Float32Array)).toBe(0)
+    const out = s.call({ word: { data: word, dims: [1, LEX.word] }, lang: { data: Int32Array.of(0), dims: [1] }, prefix: { data: prefix, dims: [LEX.beams, LEX.prefix] }, pos: { data: Int32Array.of(0), dims: [1] } })
+    expect(out.logp!.dims).toEqual([LEX.beams, LEX.vocab])
+    const row = out.logp!.data.subarray(0, LEX.vocab)
+    expect(row.every(Number.isFinite)).toBe(true)
+    expect(Math.abs(Array.from(row, Math.exp).reduce((a, v) => a + v, 0) - 1)).toBeLessThan(1e-4)
+    expect(() => s.call({ word: { data: word, dims: [1, LEX.word] } })).toThrow(EngineError)
+    s.release()
+  })
+
+  it('a file that is not a plan is refused, not run', () => {
+    expect(() => alk.model(new Uint8Array(64))).toThrow(EngineError)
+    expect(() => alk.model(modelBytes('cue').subarray(0, 4096))).toThrow(EngineError)
   })
 })

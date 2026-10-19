@@ -18,10 +18,10 @@ Merge these directives into your own policy: your app will need more (styles, im
 | Directive | Why |
 |---|---|
 | `script-src 'self'` | The `alkove` package itself, served with your app. |
-| `script-src 'wasm-unsafe-eval'` | Compiling the WebAssembly engine (`alkove-ort.wasm`). It allows WebAssembly only, not `eval()`. |
+| `script-src 'wasm-unsafe-eval'` | Compiling the WebAssembly engine (`alkove-engine.wasm`). It allows WebAssembly only, not `eval()`. |
 | `script-src blob:` | The AudioWorklet module, started from a `blob:` URL. Worklets are governed by `script-src`, not `worker-src`. |
 | `worker-src blob:` | The workers (one real-time, one background), started from `blob:` URLs. |
-| `connect-src 'self'` | Downloading the models and `alkove-ort.wasm` with `fetch()`. |
+| `connect-src 'self'` | Downloading the models and `alkove-engine.wasm` with `fetch()`. |
 
 No `unsafe-eval`, no `unsafe-inline`, no `style-src`: the SDK has no user interface.
 
@@ -55,7 +55,7 @@ import { Alkove } from 'alkove'
 Alkove.configure({ modelBaseUrl: '/alkove/', assetBaseUrl: '/alkove/' })
 ```
 
-The SDK then reads `/alkove/alkove-worker.js`, `/alkove/alkove-worklet.js` and `/alkove/alkove-ort.wasm`, and the policy becomes:
+The SDK then reads `/alkove/alkove-worker.js`, `/alkove/alkove-worklet.js` and `/alkove/alkove-engine.wasm`, and the policy becomes:
 
 ```http
 Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'

@@ -2,7 +2,7 @@ import type { ConsoleMessage } from '@playwright/test'
 
 import { expect, fromB64, locate, open, test, wavPcm } from './fixtures'
 
-const FOCUS_FILE = 'alkove-focus-1-preview.onnx'
+const FOCUS_FILE = 'alkove-focus-1-preview.alk'
 
 test.describe('failures', () => {
   test('models in 404: raw "failed", the raw mic at the same delay, new tries after 5 s then 10 s, focus once they are back', async ({ page, origin, serverLog, browserName }) => {
@@ -208,7 +208,7 @@ test.describe('failures', () => {
     expect(after.statuses.at(-1)).toBe('running')
   })
 
-  test('the packaged wasm is found next to the package, without models.ort or assetBaseUrl', async ({ page, origin, serverLog }) => {
+  test('the packaged wasm is found next to the package, without models.engine or assetBaseUrl', async ({ page, origin, serverLog }) => {
     const since = Date.now()
     await open(page, origin)
     const r = await page.evaluate(async () => {
@@ -220,6 +220,6 @@ test.describe('failures', () => {
     })
     expect(r).toBe(1)
     const wasm = (await serverLog()).filter((h) => h.at >= since && h.path.endsWith('.wasm'))
-    expect(wasm.map((h) => [h.path, h.status])).toEqual([['/dist/alkove-ort.wasm', 200]])
+    expect(wasm.map((h) => [h.path, h.status])).toEqual([['/dist/alkove-engine.wasm', 200]])
   })
 })

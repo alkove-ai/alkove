@@ -1,5 +1,3 @@
-import factory from 'alkove:ort-glue'
-
 import { Chain, type ChainOptions } from '../core/chain'
 import { Cue } from '../core/cue'
 import { WasmEngine } from '../core/engine'
@@ -10,7 +8,7 @@ import { type Context, Spot, Spotter, type WordJSON, wordOf } from '../core/spot
 import { dot, Timbre as TimbreCore, Voiceprint, type VoiceprintJSON } from '../core/timbre'
 import { Resampler } from '../dsp/resample'
 import { encodeWav } from '../dsp/wav'
-import { Ort } from '../engine/ort'
+import { Alk } from '../engine/alk'
 import { FOCUS, type ModelName, RATE, TIMBRE } from '../manifest'
 import { makeCalls } from '../runtime/calls'
 import { HOP, RAW_HOP } from './core'
@@ -25,8 +23,7 @@ let engine: WasmEngine | null = null
 const post = (m: unknown, transfer: Transferable[] = []) => self.postMessage(m, transfer)
 
 async function boot(module: WebAssembly.Module): Promise<void> {
-  const ort = await Ort.create(factory, module)
-  engine = new WasmEngine(ort, (name) => {
+  engine = new WasmEngine(await Alk.create(module), (name) => {
     const b = models.get(name)
     if (!b) throw new Error(`model ${name} not sent`)
     return b

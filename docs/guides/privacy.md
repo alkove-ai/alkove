@@ -14,7 +14,7 @@ Only files the SDK needs to run, and only when it does not have them yet:
 | File | From, by default | Your choice |
 |---|---|---|
 | the models an input uses (Focus, Cue, Spot, Timbre, Lex) | Hugging Face | `modelBaseUrl`, or `models` per file |
-| onnxruntime's WebAssembly (`alkove-ort.wasm`) | next to the package's own files, wherever you serve them | `assetBaseUrl`, or `models.ort` |
+| the engine's WebAssembly (`alkove-engine.wasm`) | next to the package's own files, wherever you serve them | `assetBaseUrl`, or `models.engine` |
 | the worker and the worklet | none: built into the package, started from `blob:` URLs | `assetBaseUrl`, to serve them as files |
 
 Each file is checked against its sha256 before use; a file with other bytes is refused (`models.hash`).

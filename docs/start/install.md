@@ -9,7 +9,7 @@ sidebar:
 npm install alkove
 ```
 
-The package is ESM only and has no runtime dependency. The engine (onnxruntime, reduced to the operators of the Alkove models) is bundled; its license is in `THIRD_PARTY_LICENSES`. It needs no special headers: no COOP / COEP, no `SharedArrayBuffer`, no threads.
+The package is ESM only and has no runtime dependency. The engine, Alkove's own, is bundled. It needs no special headers: no COOP / COEP, no `SharedArrayBuffer`, no threads.
 
 ## Check the browser
 
@@ -50,9 +50,9 @@ What each use downloads (brotli):
 
 | Use | Download |
 |---|---|
-| call or agent | Focus 0.8 MB + Cue 0.9 MB, + Timbre 0.7 MB with a voiceprint |
+| call or agent | Focus 0.9 MB + Cue 0.9 MB, + Timbre 0.7 MB with a voiceprint |
 | wake word | Spot 2.5 MB, + Lex 1.5 MB for a typed word |
-| engine, for every use | 1.5 MB |
+| engine, for every use | 56 KB |
 
 ## Configure before the first input
 
@@ -60,8 +60,8 @@ What each use downloads (brotli):
 
 ```ts
 Alkove.configure({
-  modelBaseUrl: '/alkove/', // where the .onnx files are
-  assetBaseUrl: '/alkove/', // where alkove-ort.wasm, the worker and the worklet are
+  modelBaseUrl: '/alkove/', // where the .alk files are
+  assetBaseUrl: '/alkove/', // where alkove-engine.wasm, the worker and the worklet are
 })
 ```
 

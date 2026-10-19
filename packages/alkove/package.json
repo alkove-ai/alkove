@@ -24,8 +24,7 @@
     "on-device",
     "browser",
     "webassembly",
-    "wasm",
-    "onnx"
+    "wasm"
   ],
   "homepage": "https://alkove.ai",
   "repository": {
@@ -47,8 +46,7 @@
   "files": [
     "dist",
     "LICENSE",
-    "NOTICE",
-    "THIRD_PARTY_LICENSES"
+    "NOTICE"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -60,7 +58,6 @@
     "@playwright/test": "1.60.0",
     "@types/node": "^22.10.0",
     "esbuild": "^0.25.0",
-    "onnxruntime-web": "1.30.0",
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

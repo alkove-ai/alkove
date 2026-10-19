@@ -9,12 +9,12 @@ import { Cue } from '../src/core/cue'
 import { Focus } from '../src/core/focus'
 import { WasmEngine } from '../src/core/engine'
 import { processPcm } from '../src/process'
-import { loadOrt, maxDiff, modelBytes, ortFiles, wav } from './helpers'
+import { engineWasm, loadEngine, maxDiff, modelBytes, wav } from './helpers'
 
 let engine: WasmEngine
 beforeAll(async () => {
-  engine = new WasmEngine(await loadOrt(), modelBytes)
-  Alkove.configure({ modelDir: join(import.meta.dirname, '../.cache/models'), models: { ort: new Uint8Array(readFileSync(ortFiles().wasm)) } })
+  engine = new WasmEngine(await loadEngine(), modelBytes)
+  Alkove.configure({ modelDir: join(import.meta.dirname, '../.cache/models'), models: { engine: new Uint8Array(engineWasm()) } })
 })
 
 const rms = (x: Float32Array) => Math.sqrt(x.reduce((s, v) => s + v * v, 0) / x.length)

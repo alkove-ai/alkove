@@ -7,19 +7,20 @@ import { Lex } from '../src/core/lex'
 import { compileWord, Spot } from '../src/core/spot/spot'
 import { dot, Timbre } from '../src/core/timbre'
 import { processPcm } from '../src/process'
-import { f32, loadOrt, maxDiff, modelBytes, wav } from './helpers'
+import { f32, loadEngine, maxDiff, modelBytes, wav } from './helpers'
 
 let engine: WasmEngine
 beforeAll(async () => {
-  engine = new WasmEngine(await loadOrt(), modelBytes)
+  engine = new WasmEngine(await loadEngine(), modelBytes)
 })
 
-describe('primitives against onnxruntime Python', () => {
+// the references come from the engine's native build: its wasm must give the same bits
+describe('primitives against the engine natively (lab)', () => {
   it('focus', () => {
     const out = new Focus(engine.stream('focus')).push(wav('mix.wav'))
     const ref = f32('mix.focus.f32')
     expect(out.length).toBe(ref.length)
-    expect(maxDiff(out, ref)).toBeLessThan(1e-4)
+    expect(maxDiff(out, ref)).toBe(0)
   })
 
   it('cue: one probability per 30 ms, one step late', () => {
@@ -27,26 +28,25 @@ describe('primitives against onnxruntime Python', () => {
     const got: number[] = []
     new Cue(engine.stream('cue')).push(wav('speech.wav'), (p, k) => (got[k] = p))
     expect(got.length).toBe(ref.length - 1)
-    expect(maxDiff(got, ref.subarray(1))).toBeLessThan(1e-4)
+    expect(maxDiff(got, ref.subarray(1))).toBe(0)
   })
 
-  // 190 chained steps: native and wasm sum in different orders, the state carries it (probabilities, not deep log values)
   it('spot', () => {
     const logp = f32('speech.spot.logp.f32')
     const speech = f32('speech.spot.speech.f32')
     let worst = 0
     new Spot(engine.stream('spot')).push(wav('speech.wav'), (f, s) => {
-      for (let k = 0; k < 59; k++) worst = Math.max(worst, Math.abs(Math.exp(f.logp[k]!) - Math.exp(logp[59 * s + k]!)))
+      for (let k = 0; k < 59; k++) worst = Math.max(worst, Math.abs(f.logp[k]! - logp[59 * s + k]!))
       if (f.speech !== null) worst = Math.max(worst, Math.abs(f.speech - speech[s]!))
     })
-    expect(worst).toBeLessThan(1e-3)
+    expect(worst).toBe(0)
   })
 
   it('timbre', () => {
     const ref = f32('enroll.timbre.f32')
     const w = new Timbre(engine.net('timbre')).window(wav('enroll.wav').subarray(0, 24000))
-    expect(maxDiff(w.embedding, ref.subarray(0, 192))).toBeLessThan(1e-4)
-    expect(maxDiff(w.id, ref.subarray(192))).toBeLessThan(1e-4)
+    expect(maxDiff(w.embedding, ref.subarray(0, 192))).toBe(0)
+    expect(maxDiff(w.id, ref.subarray(192))).toBe(0)
   })
 })
 
@@ -85,7 +85,7 @@ describe('what the primitives say', () => {
     const r = processPcm(engine, mix, { focus: true, cue: true })
     expect(r.audio.length).toBe(mix.length)
     const ref = f32('mix.focus.f32')
-    expect(maxDiff(r.audio.subarray(0, ref.length - 256), ref.subarray(256))).toBeLessThan(1e-4)
+    expect(maxDiff(r.audio.subarray(0, ref.length - 256), ref.subarray(256))).toBe(0)
     expect(r.speech.length).toBeGreaterThan(0)
   })
 })

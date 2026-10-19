@@ -23,8 +23,8 @@ Without configuration, the SDK loads:
 
 | File | Default source |
 |---|---|
-| The models (`alkove-focus-1-preview.onnx`, …) | Hugging Face, `https://huggingface.co/alkove-ai/<model>/resolve/…` |
-| `alkove-ort.wasm`, the WebAssembly engine | next to the package's own JavaScript, through `import.meta.url` |
+| The models (`alkove-focus-1-preview.alk`, …) | Hugging Face, `https://huggingface.co/alkove-ai/<model>/resolve/…` |
+| `alkove-engine.wasm`, the WebAssembly engine | next to the package's own JavaScript, through `import.meta.url` |
 | The worker and the AudioWorklet | built into the package, started from `blob:` URLs |
 
 The Hugging Face default is there so you can try the SDK in five minutes. Each time a model comes from Hugging Face, the SDK emits a `models.default-host` diag (level `warn`): every user's browser sends its IP address to Hugging Face. Self-host before you ship.
@@ -44,7 +44,7 @@ npx alkove models <dir> [focus cue spot timbre lex]
 It copies what the installed version of `alkove` loads into `<dir>`:
 
 - the models, downloaded from Hugging Face, each one checked against the sha256 this version of the SDK pins;
-- `alkove-ort.wasm`, `alkove-worker.js` and `alkove-worklet.js`, copied from the installed package.
+- `alkove-engine.wasm`, `alkove-worker.js` and `alkove-worklet.js`, copied from the installed package.
 
 With no model names it copies all five. Name only what your app uses to keep the folder small:
 
@@ -66,15 +66,15 @@ The worker and the worklet talk to the main bundle of the same version. Run the 
 
 ```ts
 Alkove.configure({
-  modelBaseUrl: '/alkove/', // the .onnx files
-  assetBaseUrl: '/alkove/', // alkove-ort.wasm, alkove-worker.js, alkove-worklet.js
+  modelBaseUrl: '/alkove/', // the .alk files
+  assetBaseUrl: '/alkove/', // alkove-engine.wasm, alkove-worker.js, alkove-worklet.js
 })
 ```
 
 | Field | What it does |
 |---|---|
-| `modelBaseUrl` | Folder of the `.onnx` files. Each model is read at `<modelBaseUrl>/<model>.onnx`, for example `/alkove/alkove-focus-1-preview.onnx`. |
-| `assetBaseUrl` | Folder of `alkove-ort.wasm`, `alkove-worker.js` and `alkove-worklet.js`. When it is set, the worker and the worklet load from these URLs instead of `blob:` URLs. |
+| `modelBaseUrl` | Folder of the `.alk` files. Each model is read at `<modelBaseUrl>/<model>.alk`, for example `/alkove/alkove-focus-1-preview.alk`. |
+| `assetBaseUrl` | Folder of `alkove-engine.wasm`, `alkove-worker.js` and `alkove-worklet.js`. When it is set, the worker and the worklet load from these URLs instead of `blob:` URLs. |
 | `models` | One source per file, by name (`focus`, `cue`, `spot`, `timbre`, `lex`, or `ort` for the engine): a URL, a string, an `ArrayBuffer` or a `Uint8Array`. Takes precedence over the base URLs for that file. |
 | `modelDir` | Node only: a folder on disk the models are read from. |
 
@@ -91,7 +91,7 @@ If your app ships the files another way (an app bundle, IndexedDB, a native shel
 ```ts
 Alkove.configure({
   models: {
-    focus: await (await fetch('/assets/focus.onnx')).arrayBuffer(),
+    focus: await (await fetch('/assets/focus.alk')).arrayBuffer(),
     cue: cueBytes,
   },
 })
@@ -124,17 +124,17 @@ await Alkove.preload('call', { voiceprint: true, onProgress: ({ loaded, total })
 if (await Alkove.cached('wake', { typedWords: true })) showOfflineBadge()
 ```
 
-`voiceprint: true` adds Timbre, `typedWords: true` adds Lex. A call or an agent needs Focus and Cue, a wake listener needs Spot. The engine (`alkove-ort.wasm`) is always included. See the [models overview](/docs/models/) for which model does what.
+`voiceprint: true` adds Timbre, `typedWords: true` adds Lex. A call or an agent needs Focus and Cue, a wake listener needs Spot. The engine (`alkove-engine.wasm`) is always included. See the [models overview](/docs/models/) for which model does what.
 
 ## Serving the files
 
-- **Any static host works.** The engine is fetched and compiled from bytes, so the `Content-Type` of `.wasm` and `.onnx` files does not matter.
+- **Any static host works.** The engine is fetched and compiled from bytes, so the `Content-Type` of `.wasm` and `.alk` files does not matter.
 - **Another origin (a CDN)**: the files are fetched with `fetch()`, so the server must send CORS headers (`Access-Control-Allow-Origin`) for your page's origin, and your [Content Security Policy](/docs/guides/csp/) must allow that origin in `connect-src`.
 - **No special headers**: Alkove does not need COOP or COEP. It runs on a single thread, without `SharedArrayBuffer`.
 
 ## Bundlers
 
-The package finds `alkove-ort.wasm` next to its own JavaScript chunk (`new URL('./alkove-ort.wasm', import.meta.url)`), and starts the worker and worklet from code built into the package. If your bundler or dev server serves the package's files as they are, there is nothing to do.
+The package finds `alkove-engine.wasm` next to its own JavaScript chunk (`new URL('./alkove-engine.wasm', import.meta.url)`), and starts the worker and worklet from code built into the package. If your bundler or dev server serves the package's files as they are, there is nothing to do.
 
 Some setups move the chunk without the `.wasm` beside it: dependency pre-bundling in dev servers, single-file builds, some CDNs. The engine request then fails with `models.fetch`, or with `models.hash` if your server answers with an HTML fallback. The fix is the same everywhere: copy the files with the CLI into a folder your build serves as-is, and set `assetBaseUrl`.
 

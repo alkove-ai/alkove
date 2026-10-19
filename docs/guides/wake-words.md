@@ -64,7 +64,7 @@ After a detection, the same word cannot fire again for 1 s.
 Each word carries two thresholds, one per context ([`Thresholds`](/docs/reference/interfaces/thresholds/)):
 
 ```ts
-word.thresholds // { anywhere: -1.23, pause: -2 }
+word.thresholds // { anywhere: -1.26, pause: -2.03 }
 word.calibrated // false for a typed word, true for an enrolled one
 ```
 
@@ -72,7 +72,7 @@ A score is a log-probability: a word said clearly scores close to 0, and the wor
 
 | fr | en | es | it | pt | ca | ro |
 |---|---|---|---|---|---|---|
-| -1.23 | -1.21 | -1.14 | -1.01 | -1.39 | -1.12 | -1.2 |
+| -1.26 | -1.22 | -1.18 | -1.02 | -1.41 | -1.12 | -1.2 |
 
 With several languages, the lowest default wins. The pause threshold sits 0.77 under the one anywhere: after a pause there is less to confuse the word with. Both stay within bounds (anywhere between -2.2 and -0.6, after a pause down to -2.9).
 

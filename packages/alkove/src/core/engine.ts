@@ -1,7 +1,7 @@
-import type { Binding, Ort, Session, Tensor } from '../engine/ort'
-import { type ModelName, STREAMS } from '../manifest'
+import type { Alk, Model, Session, Tensor } from '../engine/alk'
+import type { ModelName } from '../manifest'
 
-export type StreamModel = keyof typeof STREAMS
+export type StreamModel = 'focus' | 'cue' | 'spot'
 
 export interface StreamNet {
   f32(name: string): Float32Array
@@ -20,35 +20,41 @@ export interface Engine {
   net(model: 'timbre' | 'lex'): Net
 }
 
+// one model per name (weights unpacked once), one session per stream: each keeps its own state
 export class WasmEngine implements Engine {
-  private sessions = new Map<ModelName, Session>()
+  private models = new Map<ModelName, Model>()
+  private calls = new Map<ModelName, Session>()
 
   constructor(
-    readonly ort: Ort,
+    readonly alk: Alk,
     private bytes: (model: ModelName) => Uint8Array,
   ) {}
 
   has(model: ModelName): boolean {
-    return this.sessions.has(model)
+    return this.models.has(model)
   }
 
-  session(model: ModelName): Session {
-    let s = this.sessions.get(model)
-    if (!s) this.sessions.set(model, (s = this.ort.session(this.bytes(model))))
-    return s
+  model(name: ModelName): Model {
+    let m = this.models.get(name)
+    if (!m) this.models.set(name, (m = this.alk.model(this.bytes(name))))
+    return m
   }
 
-  stream(model: StreamModel): Binding {
-    const spec = STREAMS[model]
-    return this.session(model).bind({ ...spec.shapes }, spec.loops)
+  stream(model: StreamModel): StreamNet {
+    return this.model(model).session()
   }
 
   net(model: 'timbre' | 'lex'): Net {
-    return this.session(model)
+    let s = this.calls.get(model)
+    if (!s) this.calls.set(model, (s = this.model(model).session()))
+    const session = s
+    return { run: (feeds, wanted) => session.call(feeds, wanted) }
   }
 
   release(): void {
-    for (const s of this.sessions.values()) s.release()
-    this.sessions.clear()
+    for (const s of this.calls.values()) s.release()
+    for (const m of this.models.values()) m.release()
+    this.calls.clear()
+    this.models.clear()
   }
 }
