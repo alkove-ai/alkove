@@ -23,7 +23,7 @@ use std::sync::Arc;
 use alkove_engine::{Model, Session};
 
 let model = Arc::new(Model::load(&std::fs::read("alkove-cue-1-preview.alk")?)?);
-let mut s = Session::new(model);
+let mut s = Session::new(model)?;
 for chunk in audio.chunks_exact(480) {
     s.input_mut("audio").unwrap().copy_from_slice(chunk);
     s.run();
@@ -36,7 +36,7 @@ The other calls on a session:
 - the state persists from one `run` to the next; `clear_state` sets it back to zero and keeps the inputs, and `state` / `set_state` read and write it as one vector;
 - a model whose input length varies (Timbre) takes `set_len` before `run`.
 
-A model run in several steps holds one plan per step, over the same weights. Lex reads a word with its `encoder` plan, then runs its `decoder` plan once per phoneme. `Session::new` opens the first plan, `Session::of(model, i)` the `i`-th of `model.plans()`.
+A model run in several steps holds one plan per step, over the same weights. Lex reads a word with its `encoder` plan, then runs its `decoder` plan once per phoneme. `Session::new` opens the first plan, `Session::of(model, i)` the `i`-th of `model.plans()`. Opening a session allocates its arena, and an allocation that fails is an error.
 
 ## Build
 
@@ -58,7 +58,7 @@ The web SDK (`packages/alkove`) builds the wasm itself (`pnpm build`). It needs 
 | `alk_model(bytes, len)` | a model, or null (then `alk_error(out, cap)` writes why) |
 | `alk_model_free(m)` | |
 | `alk_plans(m)`, `alk_plan_name(m, p, out, cap)` | number of plans, name of plan `p` |
-| `alk_session(m, p)`, `alk_session_free(s)` | a session on plan `p`: one arena, at zero (null past the last plan) |
+| `alk_session(m, p)`, `alk_session_free(s)` | a session on plan `p`: one arena, at zero (null past the last plan or out of memory, then `alk_error` says why) |
 | `alk_io_count(m, p, kind)` | number of inputs (`kind` 0) or outputs (1) of plan `p` |
 | `alk_io_name(m, p, kind, i, out, cap)` | name of the `i`-th one |
 | `alk_io_shape(m, p, kind, i, dims, cap)` | its shape |

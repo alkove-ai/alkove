@@ -19,6 +19,8 @@ pub enum Error {
     Version(u32),
     Op(usize, &'static str),
     Length(usize),
+    Plan(usize),
+    Memory(usize),
 }
 
 impl fmt::Display for Error {
@@ -28,6 +30,8 @@ impl fmt::Display for Error {
             Error::Version(v) => write!(f, ".alk version {v}, this engine reads {}", format::VERSION),
             Error::Op(i, m) => write!(f, "bad .alk file: instruction {i}: {m}"),
             Error::Length(n) => write!(f, "input of {n} samples: out of the model's range"),
+            Error::Plan(i) => write!(f, "no plan {i} in this model"),
+            Error::Memory(n) => write!(f, "a session of {n} floats: not enough memory"),
         }
     }
 }
@@ -233,6 +237,22 @@ fn pack(mut weights: Vec<Vec<f32>>, plans: &mut [Plan]) -> Vec<Vec<f32>> {
     weights
 }
 
+// the arena's size comes from the file: an allocation that fails is an error, not an abort
+fn zeros(n: usize) -> Result<Vec<f32>, Error> {
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let layout = std::alloc::Layout::array::<f32>(n).map_err(|_| Error::Memory(n))?;
+    // Safety: a layout of n > 0 floats; the vector takes back the block with that same layout.
+    unsafe {
+        let p = std::alloc::alloc_zeroed(layout) as *mut f32;
+        if p.is_null() {
+            return Err(Error::Memory(n));
+        }
+        Ok(Vec::from_raw_parts(p, n, n))
+    }
+}
+
 pub struct Session {
     model: Arc<Model>,
     plan: usize,
@@ -242,15 +262,15 @@ pub struct Session {
 
 impl Session {
     // on the model's first plan
-    pub fn new(model: Arc<Model>) -> Session {
-        Session::of(model, 0).expect("a model has a plan")
+    pub fn new(model: Arc<Model>) -> Result<Session, Error> {
+        Session::of(model, 0)
     }
 
-    pub fn of(model: Arc<Model>, plan: usize) -> Option<Session> {
-        let p = model.plans.get(plan)?;
-        let arena = vec![0.0; p.arena];
+    pub fn of(model: Arc<Model>, plan: usize) -> Result<Session, Error> {
+        let p = model.plans.get(plan).ok_or(Error::Plan(plan))?;
+        let arena = zeros(p.arena)?;
         let frames = p.frames.map_or(0, |f| f.of(f.max_len));
-        Some(Session { model, plan, arena, frames })
+        Ok(Session { model, plan, arena, frames })
     }
 
     pub fn plan(&self) -> &Plan {

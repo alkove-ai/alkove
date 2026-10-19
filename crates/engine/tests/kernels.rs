@@ -82,7 +82,7 @@ fn noise(n: usize, seed: &mut u64) -> Vec<f32> {
 
 fn run(bytes: &[u8], x: &[f32]) -> Vec<f32> {
     let model = Arc::new(Model::load(bytes).expect("load"));
-    let mut s = Session::new(model);
+    let mut s = Session::new(model).unwrap();
     s.input_mut("x").unwrap().copy_from_slice(x);
     s.run();
     s.output("y").unwrap().to_vec()
@@ -195,7 +195,19 @@ fn plans_share_the_weights() {
     s.input_mut("x").unwrap().copy_from_slice(&[5.0]);
     s.run();
     assert_eq!(s.output("y").unwrap(), [10.0, 15.0]);
-    assert!(Session::of(model, 2).is_none());
+    assert_eq!(Session::of(model, 2).err(), Some(alkove_engine::Error::Plan(2)));
     assert!(Model::load(&p.file(&[("a", 4, (0, 2), (2, 1), &dot), ("a", 4, (0, 2), (2, 1), &dot)])).is_err());
     assert!(Model::load(&p.file(&[])).is_err());
+}
+
+#[test]
+fn an_arena_out_of_reach_is_an_error() {
+    let p = Plan { words: Vec::new(), weights: Vec::new(), ops: Vec::new() };
+    // the largest arena a file may ask for, 8 GB: never there on 32 bits, maybe on 64
+    let n = (1 << 31) - 1;
+    let model = Arc::new(Model::load(&p.bytes(n, (0, 1), (1, 1))).expect("load"));
+    match Session::new(model) {
+        Ok(_) => assert!(cfg!(target_pointer_width = "64")),
+        Err(e) => assert_eq!(e, alkove_engine::Error::Memory(n)),
+    }
 }

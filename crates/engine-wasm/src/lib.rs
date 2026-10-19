@@ -79,14 +79,17 @@ pub unsafe extern "C" fn alk_plan_name(m: *const Model, i: usize, out: *mut u8, 
     plan_at(m, i).map_or(0, |p| copy_name(&p.name, out, cap))
 }
 
-// Safety: `m` comes from `alk_model` and is still alive; null past the last plan.
+// Safety: `m` comes from `alk_model` and is still alive; null past the last plan or when its arena cannot be had (`alk_error` says why).
 #[no_mangle]
 pub unsafe extern "C" fn alk_session(m: *const Model, plan: usize) -> *mut Session {
-    if plan >= (*m).plans().len() {
-        return std::ptr::null_mut();
-    }
     Arc::increment_strong_count(m);
-    Session::of(Arc::from_raw(m), plan).map_or(std::ptr::null_mut(), |s| Box::into_raw(Box::new(s)))
+    match Session::of(Arc::from_raw(m), plan) {
+        Ok(s) => Box::into_raw(Box::new(s)),
+        Err(e) => {
+            ERROR.with(|s| *s.borrow_mut() = e.to_string());
+            std::ptr::null_mut()
+        }
+    }
 }
 
 // Safety: `s` comes from `alk_session`, freed once.

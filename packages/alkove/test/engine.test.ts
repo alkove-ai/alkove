@@ -94,6 +94,23 @@ describe('engine', () => {
     dec.release()
   })
 
+  it('a session too big for the wasm memory is an error, not a crash', () => {
+    const str = (t: string) => {
+      const b = new Uint8Array(4 * Math.ceil(t.length / 4))
+      b.set(new TextEncoder().encode(t))
+      return [t.length, ...new Uint32Array(b.buffer)]
+    }
+    // one plan, no weight, no instruction, the largest arena a file may ask for (8 GB)
+    const words = [...str('t'), 0, 1, ...str('main'), 2 ** 31 - 1, 0, 0, 0, 0]
+    const file = new Uint8Array(16 + 4 * words.length + 12)
+    const head = new Uint32Array(file.buffer, 0, 4 + words.length)
+    head.set([0x004b4c41, 1, 4 * words.length, file.length, ...words])
+    const huge = alk.model(file)
+    expect(() => huge.session()).toThrow(EngineError)
+    huge.release()
+    expect(model('cue').session().plan.name).toBe('main')
+  })
+
   it('a file that is not a plan is refused, not run', () => {
     expect(() => alk.model(new Uint8Array(64))).toThrow(EngineError)
     expect(() => alk.model(modelBytes('cue').subarray(0, 4096))).toThrow(EngineError)

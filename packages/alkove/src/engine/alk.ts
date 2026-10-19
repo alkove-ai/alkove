@@ -139,6 +139,7 @@ export class Session {
     const { alk } = model
     const x = alk.x
     this.ptr = x.alk_session(model.ptr, plan.index)
+    if (!this.ptr) alk.fail('session')
     const name = new TextEncoder()
     for (const [ios, find] of [
       [plan.inputs, x.alk_input],
