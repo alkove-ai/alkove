@@ -20,3 +20,8 @@ strip = true
 # the core runs light loops around the engine: built for size
 [profile.release.package.alkove-core]
 opt-level = "s"
+
+# the Python wheel: a panic raises in Python instead of ending the interpreter
+[profile.python]
+inherits = "release"
+panic = "unwind"

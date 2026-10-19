@@ -1,6 +1,6 @@
 # pipecat-alkove
 
-[Alkove](https://alkove.ai) for [Pipecat](https://github.com/pipecat-ai/pipecat): `AlkoveFilter` keeps the user's voice and removes the others and the noise (Focus), `AlkoveVADAnalyzer` finds where they speak (Cue). Both run on the bot's CPU, with no server and no key, and give the same output as Alkove's web SDK.
+[Alkove](https://alkove.ai) for [Pipecat](https://github.com/pipecat-ai/pipecat): `AlkoveFilter` keeps the user's voice and removes the others and the noise (Focus), `AlkoveVADAnalyzer` finds where they speak (Cue). Both run on the bot's CPU, with no server and no key: Focus gives the audio of Alkove's web SDK, Cue its speech probabilities (where speech starts and ends is Pipecat's `VADParams`).
 
 Maintained by Alkove, not by the Pipecat team.
 

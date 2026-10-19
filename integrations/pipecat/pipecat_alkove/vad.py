@@ -16,13 +16,14 @@ class AlkoveVADAnalyzer(VADAnalyzer):
     def __init__(self, *, sample_rate: Optional[int] = None, params: Optional[VADParams] = None, models: Optional[alkove.Models] = None) -> None:
         # Cue was tuned at 0.5; Pipecat's default of 0.7 misses quiet speech
         super().__init__(sample_rate=sample_rate, params=params or VADParams(confidence=0.5))
-        self._models = models
+        # loaded here, as Silero's analyzer does, rather than when the transport sets the rate on the event loop
+        self._models = models or shared_models()
         self._processor: Optional[alkove.Processor] = None
         self._last = 0.0
 
     def set_sample_rate(self, sample_rate: int) -> None:
         super().set_sample_rate(sample_rate)
-        self._processor = alkove.Processor(self._models or shared_models(), cue=True, trace=True, rate=self.sample_rate)
+        self._processor = alkove.Processor(self._models, cue=True, trace=True, rate=self.sample_rate)
         self._last = 0.0
 
     def num_frames_required(self) -> int:

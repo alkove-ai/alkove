@@ -25,7 +25,8 @@ class VAD(agents.vad.VAD):
         max_buffered_speech: float = 60.0,
     ) -> None:
         super().__init__(capabilities=agents.vad.VADCapabilities(update_interval=WINDOW))
-        self._models = models
+        # read now, off the frames' path: `download-files` filled the cache
+        self._models = models or shared_models(download=False)
         self.speech = speech or alkove.SpeechParams()
         self.prefix_padding_duration = prefix_padding_duration
         self.max_buffered_speech = max_buffered_speech
@@ -34,10 +35,8 @@ class VAD(agents.vad.VAD):
 
     @classmethod
     def load(cls, **kwargs) -> "VAD":
-        """The models are loaded now rather than on the first frame (`models=` to give your own)."""
-        vad = cls(**kwargs)
-        vad._models = vad._models or shared_models()
-        return vad
+        """For prewarm: the models are loaded, or downloaded, now (`models=` to give your own)."""
+        return cls(**{**kwargs, "models": kwargs.get("models") or shared_models()})
 
     @property
     def model(self) -> str:
@@ -70,7 +69,7 @@ class VADStream(agents.vad.VADStream):
 
         def reset() -> None:
             nonlocal processor, tracker, audio, base, onset, speech_acc, silence_acc, speech_pub, silence_pub
-            processor = alkove.Processor(v._models or shared_models(), cue=True, speech=v.speech, trace=True, rate=rate) if rate else None
+            processor = alkove.Processor(v._models, cue=True, speech=v.speech, trace=True, rate=rate) if rate else None
             tracker = alkove.SpeechTracker(v.speech, WINDOW)
             audio = np.zeros(0, dtype=np.int16)
             base = 0

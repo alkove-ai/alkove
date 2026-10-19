@@ -1,6 +1,6 @@
 # livekit-plugins-alkove
 
-[Alkove](https://alkove.ai) for [LiveKit Agents](https://docs.livekit.io/agents/): Focus keeps the user's voice and removes the others and the noise, Cue finds where they speak. Both run on the agent's CPU, with no server and no key, and give the same output as Alkove's web SDK.
+[Alkove](https://alkove.ai) for [LiveKit Agents](https://docs.livekit.io/agents/): Focus keeps the user's voice and removes the others and the noise, Cue finds where they speak. Both run on the agent's CPU, with no server and no key: Focus gives the audio of Alkove's web SDK, Cue its speech times.
 
 ## Install
 
@@ -25,7 +25,7 @@ await session.start(
 )
 ```
 
-- **`alkove.Focus()`** is a `rtc.FrameProcessor`. It keeps the closest voice, or with `voiceprint=` the voice of that print; `strength=` and `normalize=` work as in the web SDK. It works at the session's sample rate (24 kHz by default), and its output frames are the samples that are ready: never padded, a little shorter at the start (16 ms).
+- **`alkove.Focus()`** is a `rtc.FrameProcessor`. It keeps the closest voice, or with `voiceprint=` the voice of that print; `strength=` and `normalize=` work as in the web SDK. It works at the session's sample rate (24 kHz by default) and gives each frame back at the size it came in, 20 ms behind: whole 10 ms frames, as LiveKit's gain control needs. The models are read from the cache `download-files` filled when it is created.
 - **`alkove.VAD.load()`** gives one speech probability every 30 ms, with `speech=alkove.SpeechParams(confidence=0.5, exit_confidence=0.1, start_secs=0.2, stop_secs=0.6)` by default. It counts as the turn detector's `min_silence_duration` (`stop_secs`). Behind `Focus`, it hears only the user.
 
 The models are loaded once per process and shared by every session. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder.

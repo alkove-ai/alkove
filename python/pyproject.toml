@@ -32,4 +32,5 @@ test = ["pytest>=7"]
 
 [tool.maturin]
 module-name = "alkove._alkove"
+profile = "python"
 features = ["pyo3/extension-module"]

@@ -56,9 +56,9 @@ jobs:
       - uses: PyO3/maturin-action@v1
         with:
           working-directory: python
-          args: --release --out dist
+          args: --profile python --out dist
           manylinux: auto
-      - run: cargo clippy --release -p alkove-python -- -D warnings
+      - run: cargo clippy --profile python -p alkove-python -- -D warnings
         if: matrix.os == 'ubuntu-latest'
       - run: pip install python/dist/*.whl pytest
         shell: bash
@@ -77,7 +77,7 @@ jobs:
       - uses: PyO3/maturin-action@v1
         with:
           working-directory: python
-          args: --release --out dist
+          args: --profile python --out dist
           manylinux: auto
       - run: pip install python/dist/*.whl "livekit-agents==1.8.8" "pipecat-ai==1.13.0" pytest
       - run: pip install --no-deps -e integrations/livekit -e integrations/pipecat

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import sys
@@ -52,24 +53,33 @@ def _url(name: str) -> str:
     return f"https://huggingface.co/{MANIFEST['org']}/{m['name']}/resolve/{m['revision']}/{m['file']}"
 
 
-def fetch(names: Iterable[str] = NAMES, *, cache: Optional[Union[str, os.PathLike]] = None) -> dict:
-    """Downloads the models into the cache once, checked by their sha256, and gives their paths. Nothing goes on the network afterwards."""
+def fetch(names: Iterable[str] = NAMES, *, cache: Optional[Union[str, os.PathLike]] = None, download: bool = True) -> dict:
+    """Downloads the models into the cache once, checked by their sha256, and gives their paths. Nothing goes on the network afterwards; `download=False` only reads the cache."""
     root = Path(cache) if cache is not None else cache_dir()
     paths = {}
     for name in names:
         m = _spec(name)
         path = root / m["sha256"] / m["file"]
         if not path.exists():
+            if not download:
+                raise AlkoveError("models.fetch", f"{m['name']}: not in the cache {root}, fetch it first (alkove.fetch, or your framework's download step)")
             path.parent.mkdir(parents=True, exist_ok=True)
             try:
                 with urllib.request.urlopen(_url(name), timeout=60) as r:
                     data = _checked(name, r.read())
-            except OSError as e:
+            except (OSError, http.client.HTTPException) as e:
                 raise AlkoveError("models.fetch", f"{m['name']}: {e}") from e
             # whole or not at all: another process may read the cache meanwhile
             with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as f:
-                f.write(data)
-            os.replace(f.name, path)
+                try:
+                    f.write(data)
+                    f.close()
+                    # the temporary file is 0600: a cache shared between users stays readable
+                    os.chmod(f.name, 0o644)
+                    os.replace(f.name, path)
+                except BaseException:
+                    os.unlink(f.name)
+                    raise
         paths[name] = path
     return paths
 
@@ -88,6 +98,7 @@ class Models:
         dir: Optional[Union[str, os.PathLike]] = None,
         files: Optional[Mapping[str, Source]] = None,
         cache: Optional[Union[str, os.PathLike]] = None,
+        download: bool = True,
     ) -> "Models":
         """`files` gives a path or the bytes of a model, `dir` a folder holding the .alk files, else they come from Hugging Face (`fetch`)."""
         files = dict(files or {})
@@ -97,7 +108,7 @@ class Models:
             if src is None and dir is not None:
                 src = Path(dir) / _spec(name)["file"]
             if src is None:
-                src = fetch([name], cache=cache)[name]
+                src = fetch([name], cache=cache, download=download)[name]
             data = bytes(src) if isinstance(src, (bytes, bytearray, memoryview)) else Path(src).read_bytes()
             loaded[name] = _alkove.Model(_checked(name, data))
         return cls(loaded)
