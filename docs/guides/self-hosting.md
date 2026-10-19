@@ -57,7 +57,7 @@ npx alkove models public/alkove focus cue timbre    # a call with a voiceprint
 Each model prints its name, size and `sha256 ok`. Any error (network, hash, unknown model name) exits with code 1.
 
 :::caution
-The worker and the worklet talk to the main bundle of the same version. Run the CLI again every time you upgrade `alkove`, and deploy the new folder with the new bundle. A good habit is one folder per version, for example `public/alkove/0.1.0/`: you can then cache the files forever.
+The worker and the worklet talk to the main bundle of the same version. Run the CLI again every time you upgrade `alkove`, and deploy the new folder with the new bundle. A good habit is one folder per version, for example `public/alkove/0.2.0/`: you can then cache the files forever.
 :::
 
 ## Configuration

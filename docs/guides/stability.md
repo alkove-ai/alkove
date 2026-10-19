@@ -11,7 +11,7 @@ Alkove is in preview: the package is `0.x` and the models end in `-preview`. Thi
 
 A version of `alkove` is a fixed set of files: its code, its engine (`alkove-engine.wasm`, inside the package) and its five models, each pinned by SHA-256 and read at a fixed Hugging Face commit. Nothing it loads can change under it.
 
-- **The models.** A file whose hash does not match is refused with `models.hash`, whether it comes from Hugging Face, your server or `Alkove.configure({ models })`. Your users run the models you tested, wherever you host them. Hugging Face keeps every commit, so an old version still finds its models after newer ones are published.
+- **The models.** A file whose hash does not match is refused with `models.hash`, whether it comes from Hugging Face, your server or `Alkove.configure({ models })`. Your users run the models you tested, wherever you host them. From 0.2 on, Hugging Face keeps every commit, so an old version still finds its models after newer ones are published.
 - **The results.** The engine gives the same output, to the bit, in every browser and on every CPU: x86 or ARM, with or without WebAssembly SIMD, in Node too. For one version, the same audio gives the same events everywhere, so a bug seen on one machine replays on another.
 - **The thresholds.** Spot's word thresholds, Timbre's verify levels and the gate's timings were measured on that version's models, and ship with it.
 
@@ -25,6 +25,8 @@ Versions follow semver, with its rule for `0.x`:
 | Minor (`0.2` → `0.3`) | Breaking changes: to the API, the models, the defaults. |
 
 `npm install alkove` saves a `^0.2.0` range, which takes patches and stops before the next minor: a breaking version never arrives on its own. Each version is in the [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md), with what to change in your code and which models moved.
+
+The npm package, the Python package and its LiveKit and Pipecat plugins share the minor version: `alkove` 0.2 on the web and in Python runs the same core and the same models, and reads the same voiceprints and words. Their patches are numbered on their own.
 
 Some things move in any version, patches included. Write your code so they do not break it:
 
