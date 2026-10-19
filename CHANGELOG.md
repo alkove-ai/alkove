@@ -8,6 +8,8 @@ The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a pa
 
 - The models are `.alk` files (`alkove-focus-1-preview.alk`, …) instead of `.onnx`. Same weights: the outputs differ from the ONNX ones by less than 10⁻⁴.
 - The engine is `alkove-engine.wasm`, 56 KB brotli instead of 1.5 MB, and gives the same result to the bit in every browser.
+- Lex is two files, an encoder run once per word and a decoder run once per phoneme: a word takes about 5 ms instead of 75 (WebAssembly, Apple M1 Max). Same pronunciations. In `Alkove.configure({ models })`, the decoder's key is `lexDecoder`.
+- Focus is 4 % faster and takes half the memory per input.
 - `Alkove.configure({ models: { ort } })` becomes `models: { engine }`.
 - Self-hosting: run `npx alkove models <dir>` again. The `.onnx` files and `alkove-ort.wasm` can go; your CSP stays the same.
 - Prints and words are bound to the model file's hash, which changed: `Voiceprint.fromJSON()` returns `null` for a print made by 0.1, and a word compiled or enrolled with 0.1 throws `word.outdated`. Learn prints again, compile or enroll words again.

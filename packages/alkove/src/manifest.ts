@@ -1,5 +1,10 @@
 export type ModelName = 'focus' | 'cue' | 'spot' | 'timbre' | 'lex'
 
+// Lex is two files: its encoder runs once per word, its decoder once per phoneme
+export type FileName = ModelName | 'lexDecoder'
+
+export const filesOf = (m: ModelName): FileName[] => (m === 'lex' ? ['lex', 'lexDecoder'] : [m])
+
 export interface ModelFile {
   name: string
   file: string
@@ -15,7 +20,7 @@ export const RATE = 16000
 
 export const HF_ORG = 'alkove-ai'
 
-export const MODELS: Record<ModelName, ModelFile> = {
+export const MODELS: Record<FileName, ModelFile> = {
   focus: {
     name: 'alkove-focus-1-preview',
     file: 'alkove-focus-1-preview.alk',
@@ -42,9 +47,15 @@ export const MODELS: Record<ModelName, ModelFile> = {
   },
   lex: {
     name: 'alkove-lex-1-preview',
-    file: 'alkove-lex-1-preview.alk',
-    bytes: 1940212,
-    sha256: '2c83ca72eb09b1fdc9e0f3cca83cb2d132c11f7d93a137e793520bfda9e86092',
+    file: 'alkove-lex-1-preview.encoder.alk',
+    bytes: 1013712,
+    sha256: '47f3646ffbcc30c21271bec6670679ded0a9d74114952b6a9e60aedcd677951e',
+  },
+  lexDecoder: {
+    name: 'alkove-lex-1-preview',
+    file: 'alkove-lex-1-preview.decoder.alk',
+    bytes: 804372,
+    sha256: 'e79076b03e566fe4e52f0fd870ae5d4140a074dd3fd20d891d8e00c6a1a6fb3d',
   },
 }
 
@@ -84,7 +95,7 @@ export const LEX = {
   eos: 60,
   vocab: 61,
   word: 33,
-  prefix: 39,
+  steps: 39,
 }
 
 export type Lang = (typeof LEX.langs)[number]

@@ -17,7 +17,7 @@ await lex.phonemize('Camille', 'fr')
 
 | | |
 |---|---|
-| Size | 1.9 MB (int8 weights) |
+| Size | 1.8 MB in two files (int8 weights) |
 | Languages | French, English, Spanish, Portuguese, Italian, Catalan, Romanian |
 | Input | a word of up to 33 characters, and its language |
 | Output | up to 3 pronunciations, in Spot's 58 phonemes, each with its probability |
@@ -83,10 +83,9 @@ When it compiles a word, the SDK warns about text that will not be read the way 
 
 | | |
 |---|---|
-| WebAssembly, 1 thread, Apple M1 Max (Node 22) | 8.4 ms per beam step (one step per phoneme of the longest pronunciation, plus one) |
-| WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | 5.4 ms per beam step |
+| WebAssembly, 1 thread, Apple M1 Max (Node 22) | 2.1 ms to read the word, then 0.4 ms per phoneme: about 5.5 ms per word |
 
-A typical word takes a few dozen milliseconds. Lex runs in the background worker, never on the audio path.
+Lex runs in the background worker, never on the audio path.
 
 ## Benchmarks
 
@@ -101,14 +100,21 @@ Out of scope: phonetizing whole sentences for speech synthesis (it works word by
 
 ## Running it without the SDK
 
-The model is an `.alk` file for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [its format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. One call gives, for each of 3 beams, the probabilities of the next phoneme; you run a beam search around it. The inputs are whole numbers held as floats.
+The model is two `.alk` files for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [their format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. The encoder reads the word once. Then the decoder gives, one call per position, the probabilities of the next phoneme for each of 3 beams, and keeps each beam's keys and values in its state. You run a beam search around it. Whole numbers are held as floats.
 
-| Name | Type | |
+| Encoder | Type | |
 |---|---|---|
 | `word` (in) | float32 `[1, 33]` | the word's Unicode code points after NFC, lowercase and `’` → `'`, zeros after |
 | `lang` (in) | float32 `[1]` | index of the language in the manifest's `langs` |
-| `prefix` (in) | float32 `[3, 39]` | each beam's phonemes so far, starting with `bos`, zeros after |
-| `pos` (in) | float32 `[1]` | the position whose next phoneme is wanted |
-| `logp` (out) | float32 `[3, 61]` | log-probabilities of the next phoneme for each beam |
+| `cross` (out) | float32 `[3, 34, 256]` | for each decoder layer, the keys then the values over the word |
+| `pad` (out) | float32 `[34]` | 1 where there is no letter |
 
-The SDK runs the beam search, combines the words of a phrase and merges duplicate pronunciations for you.
+| Decoder | Type | |
+|---|---|---|
+| `token` (in) | float32 `[3]` | each beam's phoneme at `pos`: `bos` at 0 |
+| `parent` (in) | float32 `[3]` | the row of the previous call each beam goes on from: zeros at 0 |
+| `pos` (in) | float32 `[1]` | the position, from 0 |
+| `cross`, `pad` (in) | | the encoder's outputs, the same for the whole word |
+| `logp` (out) | float32 `[3, 61]` | log-probabilities of the phoneme after `pos`, for each beam |
+
+Clear the decoder's state before each word. The [model card](https://huggingface.co/alkove-ai/alkove-lex-1-preview) gives the beam search step by step. The SDK runs it, combines the words of a phrase and merges duplicate pronunciations for you.

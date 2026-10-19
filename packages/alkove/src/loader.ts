@@ -1,10 +1,10 @@
 import { AlkoveError, type Diag } from './errors'
-import { HF_ORG, type ModelFile, type ModelName, MODELS } from './manifest'
+import { type FileName, HF_ORG, type ModelFile, MODELS } from './manifest'
 
 export type Source = ArrayBuffer | Uint8Array | URL | string
 
 export interface Config {
-  models?: Partial<Record<ModelName | 'engine', Source>>
+  models?: Partial<Record<FileName | 'engine', Source>>
   modelBaseUrl?: string | URL
   assetBaseUrl?: string | URL
   modelDir?: string
@@ -151,7 +151,7 @@ export async function isCached(file: ModelFile): Promise<boolean> {
   }
 }
 
-const nameOf = (file: ModelFile) => (Object.entries(MODELS).find(([, f]) => f === file)?.[0] ?? 'engine') as ModelName | 'engine'
+const nameOf = (file: ModelFile) => (Object.entries(MODELS).find(([, f]) => f === file)?.[0] ?? 'engine') as FileName | 'engine'
 
 export async function loadFile(file: ModelFile, onProgress?: (p: Progress) => void, fallback?: Source): Promise<Uint8Array> {
   const own = config.models?.[nameOf(file)] ?? fallback
@@ -171,6 +171,6 @@ export async function loadFile(file: ModelFile, onProgress?: (p: Progress) => vo
   return cached(file, () => fromSource(file, own ?? urlOf(file), onProgress))
 }
 
-export function loadModel(name: ModelName, onProgress?: (p: Progress) => void): Promise<Uint8Array> {
+export function loadModel(name: FileName, onProgress?: (p: Progress) => void): Promise<Uint8Array> {
   return loadFile(MODELS[name], onProgress)
 }

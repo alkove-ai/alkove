@@ -1,6 +1,6 @@
 import { AlkoveError } from '../errors'
 import { currentConfig, loadFile, loadModel, lockConfig, type Progress, report, under } from '../loader'
-import { ENGINE_WASM, type ModelName } from '../manifest'
+import { ENGINE_WASM, type FileName, filesOf, type ModelName } from '../manifest'
 
 type Reply = { resolve: (v: any) => void; reject: (e: unknown) => void; progress?: (p: any) => void }
 
@@ -87,7 +87,7 @@ export function engineModule(onProgress?: (p: Progress) => void): Promise<WebAss
 // one engine for the page: two workers (real time, background) sharing one compiled wasm
 export class Host {
   private static current: Host | null = null
-  private sent = { realtime: new Set<ModelName>(), background: new Set<ModelName>() }
+  private sent = { realtime: new Set<FileName>(), background: new Set<FileName>() }
   private links: Partial<Record<'realtime' | 'background', Promise<WorkerLink>>> = {}
 
   static get(): Host {
@@ -134,9 +134,9 @@ export class Host {
 
   async models(role: 'realtime' | 'background', names: ModelName[], onProgress?: (p: Progress) => void): Promise<WorkerLink> {
     const link = await this.link(role)
-    const missing = names.filter((n) => !this.sent[role].has(n))
+    const missing = names.flatMap(filesOf).filter((n) => !this.sent[role].has(n))
     if (!missing.length) return link
-    const totals = new Map<ModelName, Progress>()
+    const totals = new Map<FileName, Progress>()
     const bytes = await Promise.all(
       missing.map((n) =>
         loadModel(n, (p) => {

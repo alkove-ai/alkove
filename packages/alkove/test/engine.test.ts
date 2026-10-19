@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { type Alk, EngineError, type Model } from '../src/engine/alk'
-import { FOCUS, LEX, type ModelName, TIMBRE } from '../src/manifest'
+import { FOCUS, type FileName, LEX, TIMBRE } from '../src/manifest'
 import { loadEngine, maxDiff, modelBytes, noise } from './helpers'
 
 let alk: Alk
-const models = new Map<ModelName, Model>()
-const model = (name: ModelName) => models.get(name) ?? models.set(name, alk.model(modelBytes(name))).get(name)!
+const models = new Map<FileName, Model>()
+const model = (name: FileName) => models.get(name) ?? models.set(name, alk.model(modelBytes(name))).get(name)!
 
 beforeAll(async () => {
   alk = await loadEngine()
@@ -63,19 +63,33 @@ describe('engine', () => {
     s.release()
   })
 
-  it('lex: int32 inputs, one row of log-probabilities per beam', () => {
-    const s = model('lex').session()
+  it('lex: the encoder once, then the decoder phoneme by phoneme, its keys and values following each beam', () => {
+    const enc = model('lex').session()
+    const dec = model('lexDecoder').session()
     const word = new Int32Array(LEX.word)
     ;[...'camille'].forEach((c, i) => (word[i] = c.codePointAt(0)!))
-    const prefix = new Int32Array(LEX.beams * LEX.prefix)
-    for (let b = 0; b < LEX.beams; b++) prefix[b * LEX.prefix] = LEX.bos
-    const out = s.call({ word: { data: word, dims: [1, LEX.word] }, lang: { data: Int32Array.of(0), dims: [1] }, prefix: { data: prefix, dims: [LEX.beams, LEX.prefix] }, pos: { data: Int32Array.of(0), dims: [1] } })
-    expect(out.logp!.dims).toEqual([LEX.beams, LEX.vocab])
-    const row = out.logp!.data.subarray(0, LEX.vocab)
+    const { cross, pad } = enc.call({ word: { data: word, dims: [1, LEX.word] }, lang: { data: Int32Array.of(0), dims: [1] } })
+    const B = LEX.beams
+    const step = (s: typeof dec, tokens: number[], parents: number[], pos: number) =>
+      s.call({ token: { data: Int32Array.from(tokens), dims: [B] }, parent: { data: Int32Array.from(parents), dims: [B] }, pos: { data: Int32Array.of(pos), dims: [1] }, cross: cross!, pad: pad! }).logp!
+    const first = step(dec, [LEX.bos, LEX.bos, LEX.bos], [0, 0, 0], 0)
+    expect(first.dims).toEqual([B, LEX.vocab])
+    const row = first.data.subarray(0, LEX.vocab)
     expect(row.every(Number.isFinite)).toBe(true)
     expect(Math.abs(Array.from(row, Math.exp).reduce((a, v) => a + v, 0) - 1)).toBeLessThan(1e-4)
-    expect(() => s.call({ word: { data: word, dims: [1, LEX.word] } })).toThrow(EngineError)
-    s.release()
+    // the same beams in other rows: through parent, each keeps its keys and values, to the bit
+    const run = (second: number[], parents: number[]) => {
+      dec.reset()
+      step(dec, [LEX.bos, LEX.bos, LEX.bos], [0, 0, 0], 0)
+      step(dec, second, [0, 0, 0], 1)
+      return step(dec, [5, 5, 5], parents, 2).data
+    }
+    const straight = run([10, 20, 30], [0, 1, 2])
+    expect(maxDiff(run([10, 30, 20], [0, 2, 1]), straight)).toBe(0)
+    expect(maxDiff(run([10, 30, 20], [0, 1, 2]), straight)).toBeGreaterThan(0)
+    expect(() => dec.call({ token: { data: Int32Array.of(1, 2, 3), dims: [B] } })).toThrow(EngineError)
+    enc.release()
+    dec.release()
   })
 
   it('a file that is not a plan is refused, not run', () => {

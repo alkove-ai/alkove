@@ -9,7 +9,7 @@ import { dot, Timbre as TimbreCore, Voiceprint, type VoiceprintJSON } from '../c
 import { Resampler } from '../dsp/resample'
 import { encodeWav } from '../dsp/wav'
 import { Alk } from '../engine/alk'
-import { FOCUS, type ModelName, RATE, TIMBRE } from '../manifest'
+import { FOCUS, type FileName, RATE, TIMBRE } from '../manifest'
 import { makeCalls } from '../runtime/calls'
 import { HOP, RAW_HOP } from './core'
 import { encode, type OutputOptions, Packer } from './packer'
@@ -18,7 +18,7 @@ export type { OutputOptions }
 
 declare const self: DedicatedWorkerGlobalScope
 
-const models = new Map<ModelName, Uint8Array>()
+const models = new Map<FileName, Uint8Array>()
 let engine: WasmEngine | null = null
 const post = (m: unknown, transfer: Transferable[] = []) => self.postMessage(m, transfer)
 
@@ -532,7 +532,7 @@ self.onmessage = async (e: MessageEvent) => {
         post({ type: 'booted' })
         break
       case 'models':
-        for (const [name, bytes] of Object.entries(m.models as Record<ModelName, ArrayBuffer>)) models.set(name as ModelName, new Uint8Array(bytes))
+        for (const [name, bytes] of Object.entries(m.models as Record<FileName, ArrayBuffer>)) models.set(name as FileName, new Uint8Array(bytes))
         post({ type: 'reply', id: m.id, result: true })
         break
       case 'realtime': {

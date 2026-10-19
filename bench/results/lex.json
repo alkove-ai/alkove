@@ -1,8 +1,17 @@
 {
  "model": "alkove-lex-1-preview",
- "file": "alkove-lex-1-preview.alk",
- "bytes": 1940212,
- "sha256": "2c83ca72eb09b1fdc9e0f3cca83cb2d132c11f7d93a137e793520bfda9e86092",
+ "files": [
+  {
+   "file": "alkove-lex-1-preview.encoder.alk",
+   "bytes": 1013712,
+   "sha256": "47f3646ffbcc30c21271bec6670679ded0a9d74114952b6a9e60aedcd677951e"
+  },
+  {
+   "file": "alkove-lex-1-preview.decoder.alk",
+   "bytes": 804372,
+   "sha256": "e79076b03e566fe4e52f0fd870ae5d4140a074dd3fd20d891d8e00c6a1a6fb3d"
+  }
+ ],
  "benchmarks": [
   {
    "id": "held-out-words",

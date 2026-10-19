@@ -47,7 +47,7 @@ test.describe('network guarantee', () => {
     // the server saw only expected paths, all the models among them; the route guard of the fixture saw nothing else
     const hits = (await serverLog()).filter((h) => h.at >= since)
     expect(hits.filter((h) => !ALLOWED.some((re) => re.test(h.path))).map((h) => h.path)).toEqual([])
-    for (const m of ['focus', 'cue', 'spot', 'timbre', 'lex']) expect(hits.some((h) => h.path === `/models/alkove-${m}-1-preview.alk` && h.status === 200)).toBe(true)
+    for (const f of Object.values(MODELS)) expect(hits.some((h) => h.path === `/models/${f.file}` && h.status === 200)).toBe(true)
     expect(hits.some((h) => h.path === '/dist/alkove-engine.wasm' && h.status === 200)).toBe(true)
   })
 
@@ -65,8 +65,8 @@ test.describe('network guarantee', () => {
     })
     expect(r.error).toBe('AlkoveError models.fetch')
     expect(r.diags).toContain('models.default-host')
-    const lex = MODELS.lex
-    expect(foreign).toEqual(lex.revision ? [`https://huggingface.co/alkove-ai/${lex.name}/resolve/${lex.revision}/${lex.file}`] : [])
+    const lex = [MODELS.lex, MODELS.lexDecoder]
+    expect(foreign.sort()).toEqual(lex.filter((f) => f.revision).map((f) => `https://huggingface.co/alkove-ai/${f.name}/resolve/${f.revision}/${f.file}`))
     // seen and expected: the fixture's check is for requests nobody asked for
     foreign.length = 0
   })

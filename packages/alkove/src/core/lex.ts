@@ -30,44 +30,55 @@ export function checkText(text: string): Warning[] {
   return out
 }
 
+interface Beam {
+  ids: number[]
+  score: number
+  // the decoder's row this beam came from: its keys and values follow it there
+  row: number
+}
+
 // text -> phonemes: Lex's beam search, word by word (what happens between words is left out)
 export class Lex {
   static readonly langs = LEX.langs
   static readonly inventory = PHONES.map((p) => p.normalize('NFC'))
 
-  constructor(private net: Net) {}
+  constructor(
+    private encoder: Net,
+    private decoder: Net,
+  ) {}
 
   word(word: string, lang: Lang): Pronunciation[] {
     const li = LEX.langs.indexOf(lang)
     if (li < 0) throw new RangeError(`lang.unsupported: ${lang}`)
     const B = LEX.beams
-    const T = LEX.prefix
     const letters = new Int32Array(LEX.word)
     ;[...clean(word)].slice(0, LEX.word).forEach((c, i) => (letters[i] = c.codePointAt(0)!))
-    let beams: [number[], number][] = [[[LEX.bos], 0]]
-    const done: [number[], number][] = []
-    for (let t = 0; t < T; t++) {
-      const prefix = new Int32Array(B * T)
-      for (let j = 0; j < B; j++) beams[Math.min(j, beams.length - 1)]![0].forEach((v, i) => (prefix[j * T + i] = v))
-      const out = this.net.run({
-        word: { data: letters, dims: [1, LEX.word] },
-        lang: { data: Int32Array.of(li), dims: [1] },
-        prefix: { data: prefix, dims: [B, T] },
+    const { cross, pad } = this.encoder.run({ word: { data: letters, dims: [1, LEX.word] }, lang: { data: Int32Array.of(li), dims: [1] } })
+    this.decoder.reset()
+    let beams: Beam[] = [{ ids: [LEX.bos], score: 0, row: 0 }]
+    const done: Beam[] = []
+    for (let t = 0; t < LEX.steps; t++) {
+      const rows = Array.from({ length: B }, (_, j) => beams[Math.min(j, beams.length - 1)]!)
+      const out = this.decoder.run({
+        token: { data: Int32Array.from(rows, (b) => b.ids[b.ids.length - 1]!), dims: [B] },
+        parent: { data: Int32Array.from(rows, (b) => b.row), dims: [B] },
         pos: { data: Int32Array.of(t), dims: [1] },
+        cross: cross!,
+        pad: pad!,
       }).logp!.data as Float32Array
-      const cand: [number[], number][] = []
-      beams.forEach(([s, sc], j) => {
+      const cand: Beam[] = []
+      beams.forEach(({ ids, score }, j) => {
         const row = out.subarray(j * LEX.vocab, (j + 1) * LEX.vocab)
         const top = [...row.keys()].sort((a, b) => row[b]! - row[a]!).slice(0, B)
-        for (const i of top) (i === LEX.eos ? done : cand).push([[...s, i], sc + row[i]!])
+        for (const i of top) (i === LEX.eos ? done : cand).push({ ids: [...ids, i], score: score + row[i]!, row: j })
       })
-      done.sort((a, b) => b[1] - a[1])
-      beams = cand.sort((a, b) => b[1] - a[1]).slice(0, B)
-      if (!beams.length || (done.length >= B && done[B - 1]![1] >= beams[0]![1])) break
+      done.sort((a, b) => b.score - a.score)
+      beams = cand.sort((a, b) => b.score - a.score).slice(0, B)
+      if (!beams.length || (done.length >= B && done[B - 1]!.score >= beams[0]!.score)) break
     }
-    return done.slice(0, B).map(([s, sc]) => {
+    return done.slice(0, B).map(({ ids: s, score }) => {
       const ids = s.slice(1, -1)
-      return { ids, ipa: toIpa(ids), p: Math.exp(sc) }
+      return { ids, ipa: toIpa(ids), p: Math.exp(score) }
     })
   }
 

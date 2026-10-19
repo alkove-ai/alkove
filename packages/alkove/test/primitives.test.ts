@@ -52,7 +52,7 @@ describe('primitives against the engine natively (lab)', () => {
 
 describe('what the primitives say', () => {
   it('lex writes « amendement » as French does', () => {
-    const p = new Lex(engine.net('lex')).phonemize('amendement', 'fr')
+    const p = new Lex(engine.net('lex'), engine.net('lexDecoder')).phonemize('amendement', 'fr')
     expect(p[0]!.ipa).toBe('amɑ̃dmɑ̃')
     expect(p[0]!.p).toBeGreaterThan(0.5)
   })
@@ -67,7 +67,7 @@ describe('what the primitives say', () => {
   })
 
   it('process: speech found, the word spotted', () => {
-    const word = compileWord('amendement', { lang: 'fr' }, () => new Lex(engine.net('lex')))
+    const word = compileWord('amendement', { lang: 'fr' }, () => new Lex(engine.net('lex'), engine.net('lexDecoder')))
     const r = processPcm(engine, wav('speech.wav'), { cue: true, spot: { words: [word] } })
     expect(r.speech.length).toBe(1)
     // 0.5 s of silence, then the clip's own 0.7 s before the voice

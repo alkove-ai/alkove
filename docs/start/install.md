@@ -65,7 +65,7 @@ Alkove.configure({
 })
 ```
 
-You can also pass the bytes or the URL of each model in `models` (keys `focus`, `cue`, `spot`, `timbre`, `lex`, and `ort` for the engine). Bytes are still checked by sha256. A relative base like `/alkove/` is read against the page. Calling `configure()` after the first input has no effect on models already loaded, and raises a `diag` `config.late`. All fields: [`Config`](/docs/reference/interfaces/config/).
+You can also pass the bytes or the URL of each model in `models` (keys `focus`, `cue`, `spot`, `timbre`, `lex` and `lexDecoder` for Lex's two files, and `engine` for the engine). Bytes are still checked by sha256. A relative base like `/alkove/` is read against the page. Calling `configure()` after the first input has no effect on models already loaded, and raises a `diag` `config.late`. All fields: [`Config`](/docs/reference/interfaces/config/).
 
 ## Load ahead of time
 
