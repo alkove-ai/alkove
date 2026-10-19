@@ -1,3 +1,4 @@
+import { exp, log10, pow } from '../dsp/math'
 import { RATE } from '../manifest'
 
 const TARGET_DB = -23
@@ -10,8 +11,8 @@ const LIMIT_RATIO = 20
 const LIMIT_ATTACK = 0.003
 const LIMIT_RELEASE = 0.1
 
-const coef = (tau: number) => 1 - Math.exp(-1 / (tau * RATE))
-const perTick = (k: number, secs: number) => 1 - (1 - k) ** (secs / 0.05)
+const coef = (tau: number) => 1 - exp(-1 / (tau * RATE))
+const perTick = (k: number, secs: number) => 1 - pow(1 - k, secs / 0.05)
 
 // AGC on the sending side: follows speech only (Cue), fast on the first second of speech then slow, bounded gain, limiter
 export class Level {
@@ -20,10 +21,10 @@ export class Level {
   private target = 1
   private gain = 1
   private env = 0
-  private readonly limit = 10 ** (LIMIT_DB / 20)
+  private readonly limit = pow(10, LIMIT_DB / 20)
 
   get db(): number {
-    return 20 * Math.log10(this.gain)
+    return 20 * log10(this.gain)
   }
 
   // one frame of the audio about to be leveled, and whether Cue heard speech in it
@@ -31,14 +32,14 @@ export class Level {
     if (!speech) return
     let s = 0
     for (let i = 0; i < pcm.length; i++) s += pcm[i]! * pcm[i]!
-    const db = 10 * Math.log10(s / pcm.length + 1e-12)
+    const db = 10 * log10(s / pcm.length + 1e-12)
     const secs = pcm.length / RATE
     const fast = this.heard < FAST_SECS
     this.heard += secs
     const k = perTick(fast ? 0.25 : db > this.level ? 0.08 : 0.025, secs)
     this.level += (db - this.level) * k
     const g = Math.max(MAX_CUT_DB, Math.min(MAX_BOOST_DB, TARGET_DB - this.level))
-    this.target = 10 ** (g / 20)
+    this.target = pow(10, g / 20)
   }
 
   apply(pcm: Float32Array): void {
@@ -50,7 +51,7 @@ export class Level {
       const x = pcm[i]! * this.gain
       const a = Math.abs(x)
       this.env += (a - this.env) * (a > this.env ? ka : kr)
-      pcm[i] = this.env > this.limit ? x * (this.limit * (this.env / this.limit) ** (1 / LIMIT_RATIO)) / this.env : x
+      pcm[i] = this.env > this.limit ? x * (this.limit * pow(this.env / this.limit, 1 / LIMIT_RATIO)) / this.env : x
     }
   }
 }

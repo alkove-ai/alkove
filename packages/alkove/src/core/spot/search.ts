@@ -1,3 +1,4 @@
+import { exp, ln } from '../../dsp/math'
 import { SAME, SCHWA } from './phones'
 
 export const NEG = -1e9
@@ -77,8 +78,8 @@ export class Search {
       let e: number
       if (s % 2) {
         let p = 0
-        for (const k of this.sets[(s - 1) / 2]!) p += Math.exp(logp[k]!)
-        e = Math.log(Math.max(p, 1e-10)) - best
+        for (const k of this.sets[(s - 1) / 2]!) p += exp(logp[k]!)
+        e = ln(Math.max(p, 1e-10)) - best
       } else e = logp[0]! - best
       nV[s] = sc + e
       nst[s] = st[from]!

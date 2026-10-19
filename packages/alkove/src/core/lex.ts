@@ -1,3 +1,4 @@
+import { exp } from '../dsp/math'
 import { type Lang, LEX } from '../manifest'
 import type { Net } from './engine'
 import { PHONES, SAME, toIds, toIpa } from './spot/phones'
@@ -78,7 +79,7 @@ export class Lex {
     }
     return done.slice(0, B).map(({ ids: s, score }) => {
       const ids = s.slice(1, -1)
-      return { ids, ipa: toIpa(ids), p: Math.exp(score) }
+      return { ids, ipa: toIpa(ids), p: exp(score) }
     })
   }
 

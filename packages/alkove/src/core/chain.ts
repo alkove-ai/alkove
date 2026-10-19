@@ -1,3 +1,4 @@
+import { exp, pow } from '../dsp/math'
 import { CUE, FOCUS, RATE } from '../manifest'
 import { Chunker } from './chunker'
 import type { Cue, SpeechEvent, SpeechParams } from './cue'
@@ -135,7 +136,7 @@ export class Chain {
     this.raw.set(hop)
     this.rawDelay.apply(this.raw)
     this.listen(hop)
-    if (this.asleep && this.micLevel > WAKE_MIN && this.micLevel > this.floor * 10 ** (WAKE_DB / 10)) {
+    if (this.asleep && this.micLevel > WAKE_MIN && this.micLevel > this.floor * pow(10, WAKE_DB / 10)) {
       this.asleep = false
       this.quiet = 0
       // the state is kept across the sleep, as chat's worklet did: a fresh one leaks the first frames of a voice the print refuses
@@ -152,13 +153,13 @@ export class Chain {
     let peak = 0
     for (let i = 0; i < HOP; i++) peak = Math.max(peak, Math.abs(this.focusOut[i]!))
     // with a print the output is also quiet while another voice talks: asleep only when the mic too is at its noise floor
-    const voiced = this.micLevel > WAKE_MIN && this.micLevel > this.floor * 10 ** (WAKE_DB / 10)
+    const voiced = this.micLevel > WAKE_MIN && this.micLevel > this.floor * pow(10, WAKE_DB / 10)
     this.quiet = peak < QUIET && !voiced ? this.quiet + HOP : 0
     if (this.opts.sleep && !this.asleep && this.quiet >= SLEEP_AFTER) {
       this.asleep = true
       emit({ type: 'idle', asleep: true, at })
     }
-    const k = 1 - Math.exp(-1 / (FADE_TAU * RATE))
+    const k = 1 - exp(-1 / (FADE_TAU * RATE))
     for (let i = 0; i < HOP; i++) {
       this.s += (this.strength - this.s) * k
       this.mix[i] = this.s * this.focusOut[i]! + (1 - this.s) * this.raw[i]!

@@ -4,6 +4,7 @@ import type { Engine } from './core/engine'
 import { Focus } from './core/focus'
 import { type Context, Spot, Spotter, type WakeEvent, type Word, type WordJSON, wordOf } from './core/spot/spot'
 import { Voiceprint, type VoiceprintJSON } from './core/timbre'
+import { log10 } from './dsp/math'
 import { encodeWav } from './dsp/wav'
 import { CUE, FOCUS, RATE } from './manifest'
 
@@ -100,7 +101,7 @@ export class Processor {
         if (opts.trace) {
           let s = 0
           for (const x of hop) s += x * x
-          this.trace().focus.push({ t: t / RATE - this.shift, db: +(10 * Math.log10(s / hop.length + 1e-12)).toFixed(2) })
+          this.trace().focus.push({ t: t / RATE - this.shift, db: +(10 * log10(s / hop.length + 1e-12)).toFixed(2) })
         }
       }
     } else if (opts.cue) {

@@ -1,3 +1,5 @@
+import { cos, sin } from './math'
+
 const TAPS = 24
 const PHASES = 128
 
@@ -33,8 +35,8 @@ export class Resampler {
       for (let i = 0; i < TAPS; i++) {
         const d = i - (half - 1) - frac
         const x = cutoff * d
-        const sinc = x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x)
-        const w = 0.42 + 0.5 * Math.cos((Math.PI * d) / half) + 0.08 * Math.cos((2 * Math.PI * d) / half)
+        const sinc = x === 0 ? 1 : sin(Math.PI * x) / (Math.PI * x)
+        const w = 0.42 + 0.5 * cos((Math.PI * d) / half) + 0.08 * cos((2 * Math.PI * d) / half)
         table[p * TAPS + i] = sinc * w
         sum += table[p * TAPS + i]!
       }

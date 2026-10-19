@@ -6,6 +6,7 @@ import { LEARN, rms, VoiceprintLearner } from '../core/learner'
 import { ENROLL, Enroller } from '../core/spot/enroll'
 import { type Context, Spot, Spotter, type WordJSON, wordOf } from '../core/spot/spot'
 import { dot, Timbre as TimbreCore, Voiceprint, type VoiceprintJSON } from '../core/timbre'
+import { log10 } from '../dsp/math'
 import { Resampler } from '../dsp/resample'
 import { encodeWav } from '../dsp/wav'
 import { Alk } from '../engine/alk'
@@ -153,7 +154,7 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
       if (opts.trace && (t / HOP) % TRACE_EVERY === 0) {
         let s = 0
         for (const x of hop) s += x * x
-        emitTo(r, { type: 'trace', primitive: 'focus', t: t / RATE - FOCUS.lag / RATE, db: +(10 * Math.log10(s / HOP + 1e-12)).toFixed(1) })
+        emitTo(r, { type: 'trace', primitive: 'focus', t: t / RATE - FOCUS.lag / RATE, db: +(10 * log10(s / HOP + 1e-12)).toFixed(1) })
       }
     }
   inputs.set(id, r)
@@ -501,7 +502,7 @@ function call({ id, method, args, progress }: Rpc): unknown {
     case 'stats': {
       const s = inputs.get(args[0])?.stats
       if (!s) return null
-      return { speechSeconds: (s.speech * HOP) / RATE, seconds: (s.hops * HOP) / RATE, noiseRemovedDb: s.outQuiet > 0 ? +(10 * Math.log10(s.rawQuiet / s.outQuiet)).toFixed(1) : null }
+      return { speechSeconds: (s.speech * HOP) / RATE, seconds: (s.hops * HOP) / RATE, noiseRemovedDb: s.outQuiet > 0 ? +(10 * log10(s.rawQuiet / s.outQuiet)).toFixed(1) : null }
     }
     default:
       throw new Error(`unknown method ${method}`)

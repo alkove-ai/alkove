@@ -1,3 +1,4 @@
+import { exp } from '../dsp/math'
 import { Resampler } from '../dsp/resample'
 
 // the audio-thread side, kept free of worklet globals so Node can drive it with a fake clock
@@ -112,7 +113,7 @@ export class WorkletCore {
     tapRaw = false,
   ) {
     if (tapRaw) this.tap = { down: new Resampler(rate, RATE16), in16: new Queue(4096), hop: new Float32Array(WIRE) }
-    this.fade = 1 - Math.exp(-1 / ((FADE_MS / 1000) * rate))
+    this.fade = 1 - exp(-1 / ((FADE_MS / 1000) * rate))
     this.floor = Math.round(HOP * (rate / RATE16))
     this.raw = new Float32Array(Math.max(1, this.latency))
   }

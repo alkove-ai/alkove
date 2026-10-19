@@ -47,8 +47,7 @@ test.describe('Alkove.process in the background worker', () => {
       bw.forEach((w: any, i: number) => {
         expect(w.word).toBe(nw[i].word)
         expect(w.start).toBe(nw[i].start)
-        // computed in JavaScript, whose Math.exp and Math.log differ in the last digit between browsers (WebKit)
-        expect(Math.abs(w.score - nw[i].score)).toBeLessThanOrEqual(1e-12)
+        expect(w.score).toBe(nw[i].score)
       })
     }
     expect(maxDiff(fromB64(b.speech.audio), nSpeech.audio)).toBe(0)

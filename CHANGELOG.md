@@ -10,6 +10,7 @@ The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a pa
 - The engine is `alkove-engine.wasm`, 57 KB brotli instead of 1.5 MB, and gives the same result to the bit in every browser.
 - Lex reads a word once, then gives one phoneme per call, keeping what it computed for each beam: a word takes about 5 ms instead of 75 (WebAssembly, Apple M1 Max). Same pronunciations.
 - Focus is 4 % faster and takes half the memory per input.
+- The SDK's own math (word scores, levels, fades, resampling, voiceprint thresholds) no longer goes through `Math.exp`, `Math.log`, `Math.sin` or `**`, whose last digit varies between browsers: the same audio gives the same events, to the bit, in Chrome, Firefox and Safari.
 - `Alkove.configure({ models: { ort } })` becomes `models: { engine }`.
 - Self-hosting: run `npx alkove models <dir>` again. The `.onnx` files and `alkove-ort.wasm` can go; your CSP stays the same.
 - Prints and words are bound to the model file's hash, which changed: `Voiceprint.fromJSON()` returns `null` for a print made by 0.1, and a word compiled or enrolled with 0.1 throws `word.outdated`. Learn prints again, compile or enroll words again.

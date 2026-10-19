@@ -1,3 +1,4 @@
+import { ln } from '../dsp/math'
 import { RATE, TIMBRE } from '../manifest'
 import type { Net } from './engine'
 
@@ -154,7 +155,7 @@ export function threshold(level: Level, seconds: number, printSeconds: number): 
   const at = (xs: number[], x: number): [number, number, number] => {
     const v = Math.min(Math.max(x, xs[0]!), xs[xs.length - 1]!)
     const i = Math.max(1, xs.findIndex((y) => y >= v))
-    return [i - 1, i, Math.log(v / xs[i - 1]!) / Math.log(xs[i]! / xs[i - 1]!)]
+    return [i - 1, i, ln(v / xs[i - 1]!) / ln(xs[i]! / xs[i - 1]!)]
   }
   const [p0, p1, wp] = at(LEVELS.print, printSeconds)
   const [h0, h1, wh] = at(LEVELS.heard, seconds)
