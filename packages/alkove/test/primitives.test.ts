@@ -2,7 +2,6 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { Cue } from '../src/core/cue'
 import { WasmEngine } from '../src/core/engine'
-import { Focus } from '../src/core/focus'
 import { Lex } from '../src/core/lex'
 import { compileWord, Spot } from '../src/core/spot/spot'
 import { dot, Timbre } from '../src/core/timbre'
@@ -17,7 +16,14 @@ beforeAll(async () => {
 // the references come from the engine's native build: its wasm must give the same bits
 describe('primitives against the engine natively (lab)', () => {
   it('focus', () => {
-    const out = new Focus(engine.stream('focus')).push(wav('mix.wav'))
+    const net = engine.stream('focus')
+    const pcm = wav('mix.wav')
+    const out = new Float32Array(Math.floor(pcm.length / 256) * 256)
+    for (let i = 0; i < out.length; i += 256) {
+      net.f32('audio').set(pcm.subarray(i, i + 256))
+      net.run()
+      out.set(net.f32('audio_out'), i)
+    }
     const ref = f32('mix.focus.f32')
     expect(out.length).toBe(ref.length)
     expect(maxDiff(out, ref)).toBe(0)

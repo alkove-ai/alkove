@@ -1,7 +1,6 @@
-import { Chain, type ChainEvent } from './core/chain'
+import type { Chain, ChainEvent } from './core/chain'
 import { Cue, type SpeechParams, SpeechTracker, SPEECH_DEFAULTS } from './core/cue'
 import type { Engine } from './core/engine'
-import { Focus } from './core/focus'
 import { type Context, Spot, Spotter, type WakeEvent, type Word, type WordJSON, wordOf } from './core/spot/spot'
 import { Voiceprint, type VoiceprintJSON } from './core/timbre'
 import { log10 } from './dsp/math'
@@ -62,7 +61,6 @@ export class Processor {
   private tracker: SpeechTracker | null = null
   private spot: Spot | null = null
   private spotter: Spotter | null = null
-  private focus: Focus | null = null
   private shift: number
   private skip: number
   private delay: number
@@ -86,9 +84,7 @@ export class Processor {
     }
     this.shift = useFocus ? FOCUS.lag / RATE : 0
     if (useFocus) {
-      this.focus = new Focus(engine.stream('focus'))
-      this.cue = new Cue(engine.stream('cue'))
-      this.chain = new Chain(this.focus, this.cue, {
+      this.chain = engine.chain({
         gate: false,
         normalize: opts.normalize ?? false,
         strength: focusOpts.strength ?? 1,
@@ -166,7 +162,7 @@ export class Processor {
     const tail = this.run(new Float32Array(this.delay + CUE.chunk * (CUE.lagSteps + 2) + FOCUS.chunk + 480 * 4))
     if (this.open !== null && this.opts.cue !== false && (this.chain || this.cue)) this.part.speech.push({ start: this.open, end: this.pushed / RATE })
     const part = this.take(tail, true)
-    for (const n of [this.focus, this.cue, this.spot]) n?.release()
+    for (const n of [this.chain, this.cue, this.spot]) n?.release()
     return part
   }
 }

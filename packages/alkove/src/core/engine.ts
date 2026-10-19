@@ -1,5 +1,6 @@
 import type { Alk, Model, Session, Tensor } from '../engine/alk'
 import type { ModelName } from '../manifest'
+import { Chain, type ChainOptions } from './chain'
 
 export type StreamModel = 'focus' | 'cue' | 'spot'
 
@@ -19,6 +20,7 @@ export interface Net {
 export interface Engine {
   stream(model: StreamModel): StreamNet
   net(model: 'timbre' | 'lex', plan?: string): Net
+  chain(opts?: ChainOptions): Chain
 }
 
 // one model per name (weights unpacked once), one session per stream: each keeps its own state
@@ -43,6 +45,10 @@ export class WasmEngine implements Engine {
 
   stream(model: StreamModel): StreamNet {
     return this.model(model).session()
+  }
+
+  chain(opts?: ChainOptions): Chain {
+    return new Chain(this.alk, this.model('focus'), this.model('cue'), opts)
   }
 
   net(model: 'timbre' | 'lex', plan?: string): Net {

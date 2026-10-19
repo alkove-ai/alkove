@@ -1,4 +1,4 @@
-// the Alkove engine's wasm (crates/wasm): no imports, synchronous runs, nothing allocated while it runs
+// the Alkove engine and core's wasm (crates/wasm): no imports, synchronous runs, nothing allocated while it runs
 export interface AlkExports {
   memory: WebAssembly.Memory
   alk_alloc(len: number): number
@@ -19,6 +19,17 @@ export interface AlkExports {
   alk_io_count(m: number, plan: number, kind: number): number
   alk_io_name(m: number, plan: number, kind: number, i: number, out: number, cap: number): number
   alk_io_shape(m: number, plan: number, kind: number, i: number, dims: number, cap: number): number
+  alk_chain(focus: number, cue: number, gate: number, normalize: number, sleep: number, strength: number, confidence: number, exitConfidence: number, startSecs: number, stopSecs: number, print: number, printLen: number): number
+  alk_chain_free(c: number): void
+  alk_chain_hop(c: number): number
+  alk_chain_step(c: number): number
+  alk_chain_focus(c: number): number
+  alk_chain_events(c: number): number
+  alk_chain_event_count(c: number): number
+  alk_chain_print(c: number, p: number, len: number): number
+  alk_chain_strength(c: number, s: number): void
+  alk_chain_enabled(c: number, on: number): void
+  alk_chain_get(c: number, what: number): number
 }
 
 export type TypedData = Float32Array | Int32Array

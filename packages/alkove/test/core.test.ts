@@ -1,14 +1,13 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 
-import { Chain, type ChainEvent, type ChainOptions } from '../src/core/chain'
-import { Cue, SPEECH_DEFAULTS } from '../src/core/cue'
+import type { ChainEvent, ChainOptions } from '../src/core/chain'
+import { SPEECH_DEFAULTS } from '../src/core/cue'
 import { WasmEngine } from '../src/core/engine'
-import { Focus } from '../src/core/focus'
 import { Voiceprint } from '../src/core/timbre'
 import { cos, exp, ln, log10, pow, sin } from '../src/dsp/math'
 import { Resampler } from '../src/dsp/resample'
@@ -16,7 +15,7 @@ import { Alk } from '../src/engine/alk'
 import { Processor, type ProcessOptions, type ProcessPart } from '../src/process'
 import { f32, modelBytes, noise, wav } from './helpers'
 
-// the Rust core against the TypeScript it replaces, on the same wasm engine: every output to the bit, every event the same
+// the Rust core against the TypeScript it replaced: side by side where the TypeScript remains, else against digests of what it gave
 
 interface Harness {
   alk_h_math(kind: number, x: number, y: number): number
@@ -30,17 +29,6 @@ interface Harness {
   alk_h_processor_push(p: number, pcm: number, len: number): number
   alk_h_processor_end(p: number): number
   alk_h_processor_free(p: number): void
-  alk_chain(focus: number, cue: number, gate: number, normalize: number, sleep: number, strength: number, confidence: number, exit: number, start: number, stop: number, print: number, printLen: number): number
-  alk_chain_free(c: number): void
-  alk_chain_hop(c: number): number
-  alk_chain_step(c: number): number
-  alk_chain_focus(c: number): number
-  alk_chain_events(c: number): number
-  alk_chain_event_count(c: number): number
-  alk_chain_print(c: number, p: number, len: number): number
-  alk_chain_strength(c: number, s: number): void
-  alk_chain_enabled(c: number, on: number): void
-  alk_chain_get(c: number, what: number): number
 }
 
 const workspace = join(import.meta.dirname, '../../..')
@@ -106,22 +94,6 @@ const WHY = ['silence', 'forced', 'wake']
 
 type Tap = { type: 'focus'; t: number; hop: Buffer } | { type: 'cue'; speech: number; t: number }
 
-// the core's events, back in the shapes the TypeScript emits
-function decode(rec: Float64Array, n: number, focus: () => Float32Array): (ChainEvent | Tap)[] {
-  const out: (ChainEvent | Tap)[] = []
-  for (let i = 0; i < n; i++) {
-    const [k, a, b, c] = [rec[4 * i]!, rec[4 * i + 1]!, rec[4 * i + 2]!, rec[4 * i + 3]!]
-    if (k === 0) out.push({ type: 'speechstart', start: a })
-    else if (k === 1) out.push({ type: 'speechend', start: a, end: b })
-    else if (k === 2) out.push({ type: 'idle', asleep: a === 1, at: b })
-    else if (k === 3) out.push({ type: 'diag', code: 'focus.print', level: 'info', data: { print: a === 1, after: b, why: WHY[c]! } })
-    else if (k === 4) out.push({ type: 'diag', code: 'focus.reset', level: 'info', data: { after: a, why: WHY[b]! } })
-    else if (k === 5) out.push({ type: 'focus', t: a, hop: bits(focus()) })
-    else out.push({ type: 'cue', speech: a, t: b })
-  }
-  return out
-}
-
 interface Control {
   print?: Float32Array | null
   strength?: number
@@ -135,8 +107,9 @@ interface Driven {
   state(): number[]
 }
 
-function tsChain(opts: ChainOptions): Driven {
-  const chain = new Chain(new Focus(engine.stream('focus')), new Cue(engine.stream('cue')), opts)
+// the SDK's chain, on the core
+function sdkChain(opts: ChainOptions): Driven {
+  const chain = engine.chain(opts)
   let events: (ChainEvent | Tap)[] = []
   chain.onFocus = (hop, t) => events.push({ type: 'focus', t, hop: bits(hop.slice()) })
   chain.onCue = (speech, t) => events.push({ type: 'cue', speech, t })
@@ -152,34 +125,6 @@ function tsChain(opts: ChainOptions): Driven {
       if (c.enabled !== undefined) chain.setEnabled(c.enabled)
     },
     state: () => [+chain.speaking, +chain.sleeping, chain.time, chain.gainDb, chain.delay],
-  }
-}
-
-function coreChain(opts: ChainOptions): Driven {
-  const o = { gate: false, normalize: true, strength: 1, sleep: true, ...opts }
-  const s = { ...SPEECH_DEFAULTS, ...opts.speech }
-  const p = opts.print ? Float32Array.from(opts.print) : null
-  const make = (at: number, n: number) =>
-    h.alk_chain(engine.model('focus').ptr, engine.model('cue').ptr, +o.gate, +o.normalize, +o.sleep, o.strength, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, at, n)
-  const c = p ? inWasm(p, (at) => make(at, p.length)) : make(0, 0)
-  expect(c).not.toBe(0)
-  return {
-    step(hop) {
-      new Float32Array(alk.heap, h.alk_chain_hop(c), 256).set(hop)
-      const out = bits(floats(h.alk_chain_step(c), 256))
-      const n = h.alk_chain_event_count(c)
-      const rec = new Float64Array(alk.heap, h.alk_chain_events(c), 4 * n).slice()
-      return { out, events: decode(rec, n, () => floats(h.alk_chain_focus(c), 256)) }
-    },
-    control(x) {
-      if ('print' in x) {
-        if (x.print) inWasm(x.print, (at) => h.alk_chain_print(c, at, x.print!.length))
-        else h.alk_chain_print(c, 0, 0)
-      }
-      if (x.strength !== undefined) h.alk_chain_strength(c, x.strength)
-      if (x.enabled !== undefined) h.alk_chain_enabled(c, +x.enabled)
-    },
-    state: () => [0, 1, 2, 3, 4].map((i) => h.alk_chain_get(c, i)),
   }
 }
 
@@ -256,8 +201,7 @@ describe('resampler, as the TypeScript computed it', () => {
 })
 
 // what a run gave, in one sha256: outputs, events and state at every step, as the TypeScript gave them before the core replaced it
-const GOLDEN: Record<string, string> = existsSync(goldenPath) ? JSON.parse(readFileSync(goldenPath, 'utf8')) : {}
-const made: Record<string, string> = {}
+const GOLDEN: Record<string, string> = JSON.parse(readFileSync(goldenPath, 'utf8'))
 
 function record(e: ChainEvent | Tap): number[] {
   switch (e.type) {
@@ -300,8 +244,7 @@ describe('the chain, hop by hop as in real time', () => {
   for (const [name, seed, seconds, opts, dense, rate] of cases)
     it(name, async () => {
       const pcm = stream(seed, seconds, dense)
-      const ts = tsChain(opts)
-      const core = coreChain(opts)
+      const chain = sdkChain(opts)
       const digest = createHash('sha256')
       const r = rng(seed * 31)
       for (let i = 0; i + 256 <= pcm.length; i += 256) {
@@ -310,27 +253,18 @@ describe('the chain, hop by hop as in real time', () => {
         if (x < 0.375) c.print = r() < 0.5 ? print().map((v, j) => v * (1 + 0.1 * Math.sin(i + j))) : null
         else if (x < 0.75) c.strength = r() * 1.4 - 0.2
         else if (x < 1) c.enabled = r() < 0.5
-        if (Object.keys(c).length) {
-          ts.control(c)
-          core.control(c)
-        }
-        const hop = pcm.subarray(i, i + 256)
-        const a = ts.step(hop)
-        const b = core.step(hop)
-        if (!a.out.equals(b.out)) expect(`hop ${i / 256}: output differs`).toBe('')
-        if (b.events.length || a.events.length) expect(b.events, `hop ${i / 256}`).toEqual(a.events)
-        expect(core.state()).toEqual(ts.state())
+        if (Object.keys(c).length) chain.control(c)
+        const a = chain.step(pcm.subarray(i, i + 256))
         digest.update(a.out)
         for (const e of a.events) {
           digest.update(bits(new Float32Array(Float64Array.from(record(e)).buffer)))
           if (e.type === 'focus') digest.update(e.hop)
           seen.add(e.type === 'idle' ? `idle ${e.asleep}` : e.type === 'diag' ? `${e.code} ${(e.data as { why: string }).why}` : e.type)
         }
-        digest.update(bits(new Float32Array(Float64Array.from(ts.state()).buffer)))
+        digest.update(bits(new Float32Array(Float64Array.from(chain.state()).buffer)))
         if (i % (2000 * 256) === 0) await breathe()
       }
-      made[`chain: ${name}`] = digest.digest('hex')
-      if (GOLDEN[`chain: ${name}`]) expect(made[`chain: ${name}`]).toBe(GOLDEN[`chain: ${name}`])
+      expect(digest.digest('hex')).toBe(GOLDEN[`chain: ${name}`])
     }, 120_000)
 
   it('went through every event', () => {
@@ -377,11 +311,6 @@ describe('process, in blocks of any size', () => {
       }
       compare(ts.end(), h.alk_h_processor_end(core))
       h.alk_h_processor_free(core)
-      made[`process: ${name}`] = digest.digest('hex')
-      if (GOLDEN[`process: ${name}`]) expect(made[`process: ${name}`]).toBe(GOLDEN[`process: ${name}`])
+      expect(digest.digest('hex')).toBe(GOLDEN[`process: ${name}`])
     }, 120_000)
-})
-
-afterAll(() => {
-  if (!existsSync(goldenPath)) writeFileSync(goldenPath, JSON.stringify(made, null, 1) + '\n')
 })

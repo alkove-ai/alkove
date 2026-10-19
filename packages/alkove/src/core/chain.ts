@@ -1,24 +1,11 @@
-import { exp, pow } from '../dsp/math'
-import { CUE, FOCUS, RATE } from '../manifest'
+import type { Alk, Model } from '../engine/alk'
+import { FOCUS } from '../manifest'
 import { Chunker } from './chunker'
-import type { Cue, SpeechEvent, SpeechParams } from './cue'
-import { SPEECH_DEFAULTS, SpeechTracker } from './cue'
-import type { Focus } from './focus'
-import { Delay, Gate, Level } from './level'
+import type { SpeechEvent, SpeechParams } from './cue'
+import { SPEECH_DEFAULTS } from './cue'
 
 const HOP = FOCUS.chunk
-// fresh state after 1 s of silence, every 30 s at most, every 60 s even without silence
-const RESET_SILENCE = 1 * RATE
-const RESET_EVERY = 30 * RATE
-const RESET_FORCE = 60 * RATE
-// asleep once Focus's output stayed under QUIET and the mic near its noise floor for SLEEP_AFTER; woken when the mic rises WAKE_DB over that floor
-const QUIET = 0.005
-const SLEEP_AFTER = 2 * RATE
-const WAKE_DB = 9
-const WAKE_MIN = 1e-8
-const FLOOR_RISE = 1.0006
-const GATE_LOOKAHEAD = 0.1 * RATE
-const FADE_TAU = 0.01
+const WHY = ['silence', 'forced', 'wake']
 
 export type Diag = { type: 'diag'; code: string; level: 'info' | 'warn'; data?: Record<string, unknown> }
 export type ChainEvent = SpeechEvent | Diag | { type: 'idle'; asleep: boolean; at: number }
@@ -32,200 +19,124 @@ export interface ChainOptions {
   sleep?: boolean
 }
 
-// Focus -> Cue -> mix with the raw -> level -> gate, every rule that touches state counted in samples: real time and `process` give the same output
+const bytes = (x: Float32Array) => new Uint8Array(x.buffer, x.byteOffset, x.byteLength)
+
+// Focus -> Cue -> mix with the raw -> level -> gate, in the core (crates/core): real time and `process` give the same output
 export class Chain {
   readonly delay: number
+  private ptr: number
   private hops = new Chunker(HOP)
-  private cueIn = new Chunker(CUE.chunk)
-  private tracker: SpeechTracker
-  private rawDelay = new Delay(FOCUS.lag)
-  private gateDelay: Delay | null
-  private bypassDelay: Delay | null
-  private bypass = new Float32Array(HOP)
-  private on = 1
-  private gate = new Gate()
-  private level = new Level()
-  private focusOut = new Float32Array(HOP)
-  private raw = new Float32Array(HOP)
   private mix = new Float32Array(HOP)
-  private cueFrames = 0
-  private cueSteps = 0
-  private sinceSpeech = RESET_SILENCE
-  private sinceReset = 0
-  private pending: ArrayLike<number> | null | undefined
-  private strength: number
-  private enabled = true
-  private s: number
-  private asleep = false
-  private quiet = 0
-  private micLevel = 0
-  private floor = 1
-  private t = 0
-  private opts: Required<Omit<ChainOptions, 'print' | 'speech'>>
+  private focusOut = new Float32Array(HOP)
   onFocus: ((hop: Float32Array, t: number) => void) | null = null
   onCue: ((speech: number, t: number) => void) | null = null
 
   constructor(
-    private focus: Focus,
-    private cue: Cue,
+    private alk: Alk,
+    focus: Model,
+    cue: Model,
     opts: ChainOptions = {},
   ) {
-    this.opts = { gate: false, normalize: true, strength: 1, sleep: true, ...opts }
-    this.strength = this.s = this.opts.strength
-    this.tracker = new SpeechTracker({ ...SPEECH_DEFAULTS, ...opts.speech })
-    this.gateDelay = this.opts.gate ? new Delay(GATE_LOOKAHEAD) : null
-    this.bypassDelay = this.opts.gate ? new Delay(GATE_LOOKAHEAD) : null
-    this.delay = FOCUS.lag + (this.opts.gate ? GATE_LOOKAHEAD : 0)
-    if (opts.print) focus.setPrint(opts.print)
+    const o = { gate: false, normalize: true, strength: 1, sleep: true, ...opts }
+    const s = { ...SPEECH_DEFAULTS, ...opts.speech }
+    const make = (p: number, n: number) => alk.x.alk_chain(focus.ptr, cue.ptr, +o.gate, +o.normalize, +o.sleep, o.strength, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, p, n)
+    const print = opts.print ? Float32Array.from(opts.print) : null
+    this.ptr = print ? alk.with(bytes(print), (p) => make(p, print.length)) : make(0, 0)
+    if (!this.ptr) alk.fail('chain')
+    this.delay = alk.x.alk_chain_get(this.ptr, 4)
   }
 
   get speaking(): boolean {
-    return this.tracker.active
+    return this.alk.x.alk_chain_get(this.ptr, 0) === 1
   }
 
   get sleeping(): boolean {
-    return this.asleep
+    return this.alk.x.alk_chain_get(this.ptr, 1) === 1
   }
 
   get time(): number {
-    return this.t / RATE
+    return this.alk.x.alk_chain_get(this.ptr, 2)
   }
 
   get gainDb(): number {
-    return this.level.db
+    return this.alk.x.alk_chain_get(this.ptr, 3)
   }
 
   release(): void {
-    this.focus.release()
-    this.cue.release()
+    if (this.ptr) this.alk.x.alk_chain_free(this.ptr)
+    this.ptr = 0
   }
 
   // applied at the next silence, from a fresh state
   setPrint(embedding: ArrayLike<number> | null): void {
-    this.pending = embedding
+    const x = this.alk.x
+    if (!embedding) x.alk_chain_print(this.ptr, 0, 0)
+    else {
+      const p = Float32Array.from(embedding)
+      if (this.alk.with(bytes(p), (at) => x.alk_chain_print(this.ptr, at, p.length)) < 0) this.alk.fail('print')
+    }
   }
 
   setStrength(s: number): void {
-    this.strength = Math.max(0, Math.min(1, s))
+    this.alk.x.alk_chain_strength(this.ptr, s)
   }
 
   setEnabled(on: boolean): void {
-    this.enabled = on
+    this.alk.x.alk_chain_enabled(this.ptr, +on)
   }
 
-  // exactly one hop, no allocation: the real-time worker's path; the result is valid until the next call
+  // exactly one hop: the real-time worker's path; the result is valid until the next call
   step(hop: Float32Array, emit: (e: ChainEvent) => void): Float32Array {
     if (this.hops.pending || hop.length !== HOP) throw new RangeError('step() takes whole hops only')
-    this.hop(hop, emit)
-    return this.mix
+    return this.hop(hop, emit)
   }
 
   push(pcm: Float32Array, emit: (e: ChainEvent) => void): Float32Array {
     const out = new Float32Array(Math.floor((this.hops.pending + pcm.length) / HOP) * HOP)
     let o = 0
     this.hops.push(pcm, (hop) => {
-      this.hop(hop, emit)
-      out.set(this.mix, o)
+      out.set(this.hop(hop, emit), o)
       o += HOP
     })
     return out
   }
 
-  private hop(hop: Float32Array, emit: (e: ChainEvent) => void): void {
-    const at = this.t / RATE
-    this.raw.set(hop)
-    this.rawDelay.apply(this.raw)
-    this.listen(hop)
-    if (this.asleep && this.micLevel > WAKE_MIN && this.micLevel > this.floor * pow(10, WAKE_DB / 10)) {
-      this.asleep = false
-      this.quiet = 0
-      // the state is kept across the sleep, as chat's worklet did: a fresh one leaks the first frames of a voice the print refuses
-      if (this.pending !== undefined) this.fresh(emit, 'wake')
-      emit({ type: 'idle', asleep: false, at })
-    }
-    if (this.asleep) this.focusOut.fill(0)
-    else {
-      this.rules(emit)
-      this.focus.step(hop, this.focusOut)
-    }
-    this.onFocus?.(this.focusOut, this.t)
-    this.cueIn.push(this.focusOut, (c) => this.cueFrame(c, emit))
-    let peak = 0
-    for (let i = 0; i < HOP; i++) peak = Math.max(peak, Math.abs(this.focusOut[i]!))
-    // with a print the output is also quiet while another voice talks: asleep only when the mic too is at its noise floor
-    const voiced = this.micLevel > WAKE_MIN && this.micLevel > this.floor * pow(10, WAKE_DB / 10)
-    this.quiet = peak < QUIET && !voiced ? this.quiet + HOP : 0
-    if (this.opts.sleep && !this.asleep && this.quiet >= SLEEP_AFTER) {
-      this.asleep = true
-      emit({ type: 'idle', asleep: true, at })
-    }
-    const k = 1 - exp(-1 / (FADE_TAU * RATE))
-    for (let i = 0; i < HOP; i++) {
-      this.s += (this.strength - this.s) * k
-      this.mix[i] = this.s * this.focusOut[i]! + (1 - this.s) * this.raw[i]!
-    }
-    this.bypass.set(this.raw)
-    this.bypassDelay?.apply(this.bypass)
-    if (this.opts.normalize) {
-      this.level.frame(this.mix, this.tracker.active)
-      this.level.apply(this.mix)
-    }
-    if (this.gateDelay) {
-      this.gateDelay.apply(this.mix)
-      this.gate.apply(this.mix, this.tracker.active)
-    }
-    const on = this.enabled ? 1 : 0
-    if (on === 0 || this.on < 1) {
-      for (let i = 0; i < HOP; i++) {
-        this.on += (on - this.on) * k
-        this.mix[i] = this.on * this.mix[i]! + (1 - this.on) * this.bypass[i]!
+  private hop(hop: Float32Array, emit: (e: ChainEvent) => void): Float32Array {
+    const { alk, ptr } = this
+    const x = alk.x
+    new Float32Array(alk.heap, x.alk_chain_hop(ptr), HOP).set(hop)
+    const out = x.alk_chain_step(ptr)
+    this.mix.set(new Float32Array(alk.heap, out, HOP))
+    // copied first: a listener may grow the wasm memory, which detaches views
+    const rec = new Float64Array(alk.heap, x.alk_chain_events(ptr), 4 * x.alk_chain_event_count(ptr)).slice()
+    for (let i = 0; i < rec.length; i += 4) {
+      const [a, b, c] = [rec[i + 1]!, rec[i + 2]!, rec[i + 3]!]
+      switch (rec[i]) {
+        case 0:
+          emit({ type: 'speechstart', start: a })
+          break
+        case 1:
+          emit({ type: 'speechend', start: a, end: b })
+          break
+        case 2:
+          emit({ type: 'idle', asleep: a === 1, at: b })
+          break
+        case 3:
+          emit({ type: 'diag', code: 'focus.print', level: 'info', data: { print: a === 1, after: b, why: WHY[c]! } })
+          break
+        case 4:
+          emit({ type: 'diag', code: 'focus.reset', level: 'info', data: { after: a, why: WHY[b]! } })
+          break
+        case 5:
+          if (this.onFocus) {
+            this.focusOut.set(new Float32Array(alk.heap, x.alk_chain_focus(ptr), HOP))
+            this.onFocus(this.focusOut, a)
+          }
+          break
+        case 6:
+          this.onCue?.(a, b)
       }
-      if (on === 1 && this.on > 0.9999) this.on = 1
     }
-    this.sinceSpeech = this.tracker.active ? 0 : this.sinceSpeech + HOP
-    this.sinceReset += HOP
-    this.t += HOP
-  }
-
-  private listen(hop: Float32Array): void {
-    for (let h = 0; h < HOP; h += 128) {
-      let sq = 0
-      for (let i = h; i < h + 128; i++) sq += hop[i]! * hop[i]!
-      this.micLevel += 0.1 * (sq / 128 - this.micLevel)
-      this.floor = Math.min(this.floor * FLOOR_RISE, this.micLevel)
-    }
-  }
-
-  private rules(emit: (e: ChainEvent) => void): void {
-    if (this.sinceSpeech < RESET_SILENCE && this.sinceReset < RESET_FORCE) return
-    if (this.pending !== undefined || this.sinceReset >= RESET_EVERY) this.fresh(emit, this.sinceSpeech >= RESET_SILENCE ? 'silence' : 'forced')
-  }
-
-  private fresh(emit: (e: ChainEvent) => void, why: string): void {
-    const after = +(this.sinceReset / RATE).toFixed(1)
-    if (this.pending !== undefined) {
-      this.focus.setPrint(this.pending)
-      emit({ type: 'diag', code: 'focus.print', level: 'info', data: { print: !!this.pending, after, why } })
-      this.pending = undefined
-    } else {
-      this.focus.reset()
-      emit({ type: 'diag', code: 'focus.reset', level: 'info', data: { after, why } })
-    }
-    this.sinceReset = 0
-  }
-
-  private cueFrame(c: Float32Array, emit: (e: ChainEvent) => void): void {
-    const k = this.cueFrames++
-    let p = 0
-    if (!this.asleep) {
-      const v = this.cue.step(c)
-      if (this.cueSteps++ >= CUE.lagSteps && v !== null) p = v
-    }
-    if (this.onCue && k >= CUE.lagSteps) this.onCue(p, ((k - CUE.lagSteps) * CUE.chunk - FOCUS.lag) / RATE)
-    const e = this.tracker.push(p, k - CUE.lagSteps)
-    if (!e) return
-    const shift = FOCUS.lag / RATE
-    if (e.type === 'speechstart') emit({ ...e, start: Math.max(0, e.start - shift) })
-    else emit({ ...e, start: Math.max(0, e.start - shift), end: Math.max(0, e.end - shift) })
+    return this.mix
   }
 }

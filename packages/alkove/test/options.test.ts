@@ -4,9 +4,6 @@ import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { Alkove, Spot, Timbre, Voiceprint } from '../src/index'
-import { Chain } from '../src/core/chain'
-import { Cue } from '../src/core/cue'
-import { Focus } from '../src/core/focus'
 import { WasmEngine } from '../src/core/engine'
 import { processPcm } from '../src/process'
 import { engineWasm, loadEngine, maxDiff, modelBytes, wav } from './helpers'
@@ -81,7 +78,7 @@ describe('every option does something', () => {
 
   it('setEnabled(false): the raw mic at the chain delay, without level or gate', () => {
     const raw = mix()
-    const chain = new Chain(new Focus(engine.stream('focus')), new Cue(engine.stream('cue')), { gate: true, normalize: true })
+    const chain = engine.chain({ gate: true, normalize: true })
     chain.setEnabled(false)
     const out = chain.push(raw, () => {})
     chain.release()

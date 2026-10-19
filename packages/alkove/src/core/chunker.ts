@@ -29,23 +29,3 @@ export class Chunker {
     this.fill = 0
   }
 }
-
-// a growable list of Float32 samples, for results whose length is not known ahead
-export class Samples {
-  private buf = new Float32Array(16384)
-  length = 0
-
-  push(pcm: ArrayLike<number>): void {
-    if (this.length + pcm.length > this.buf.length) {
-      const next = new Float32Array(Math.max(2 * this.buf.length, this.length + pcm.length))
-      next.set(this.buf.subarray(0, this.length))
-      this.buf = next
-    }
-    this.buf.set(pcm, this.length)
-    this.length += pcm.length
-  }
-
-  take(): Float32Array {
-    return this.buf.slice(0, this.length)
-  }
-}

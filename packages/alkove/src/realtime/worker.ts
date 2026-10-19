@@ -1,7 +1,5 @@
-import { Chain, type ChainOptions } from '../core/chain'
-import { Cue } from '../core/cue'
+import type { Chain, ChainOptions } from '../core/chain'
 import { WasmEngine } from '../core/engine'
-import { Focus } from '../core/focus'
 import { LEARN, rms, VoiceprintLearner } from '../core/learner'
 import { ENROLL, Enroller } from '../core/spot/enroll'
 import { type Context, Spot, Spotter, type WordJSON, wordOf } from '../core/spot/spot'
@@ -95,7 +93,7 @@ function emitTo(r: Realtime, e: Record<string, unknown>): void {
 
 function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out: MessagePort | null): Realtime {
   const e = engine!
-  const chain = opts.pipeline === 'wake' || opts.pipeline === 'enroll' ? null : new Chain(new Focus(e.stream('focus')), new Cue(e.stream('cue')), opts.chain)
+  const chain = opts.pipeline === 'wake' || opts.pipeline === 'enroll' ? null : e.chain(opts.chain)
   const o = opts.output
   const r: Realtime = {
     id,

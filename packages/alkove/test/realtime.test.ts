@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 
-import { Delay } from '../src/core/level'
 import { type CoreMessage, HOP, RAW_HOP, WIRE, WorkletCore } from '../src/realtime/core'
 
 const RATE = 48000
@@ -36,6 +35,20 @@ function rig({ lagMs = 4, delay16 = 0, answer = (h: Float32Array) => h.slice(0, 
 
 const quanta = (ms: number) => Math.ceil(ms / quantumMs)
 
+// in place, each sample `samples` later: the chain's delay as a worker adds it
+function delay(samples: number) {
+  const buf = new Float32Array(samples)
+  let pos = 0
+  return (x: Float32Array) => {
+    for (let i = 0; i < x.length; i++) {
+      const out = buf[pos]!
+      buf[pos] = x[i]!
+      x[i] = out
+      pos = (pos + 1) % samples
+    }
+  }
+}
+
 describe('worklet core with a fake clock', () => {
   it('a worker that gives the hop back: the mic comes out `latency` samples late', () => {
     const r = rig()
@@ -49,12 +62,12 @@ describe('worklet core with a fake clock', () => {
   })
 
   it('a worker whose chain is 1856 samples late (call): the announced latency is the real one', () => {
-    const chain = new Delay(1856)
+    const chain = delay(1856)
     const r = rig({
       delay16: 1856,
       answer: (h) => {
         const w = h.slice(0, WIRE)
-        chain.apply(w.subarray(0, HOP))
+        chain(w.subarray(0, HOP))
         return w
       },
     })

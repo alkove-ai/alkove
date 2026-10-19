@@ -50,7 +50,7 @@ The web SDK (`packages/alkove`) builds the wasm itself (`pnpm build`). It needs 
 
 ## C ABI
 
-`crates/wasm` exports the engine to JavaScript and to other languages. Every name is a byte pointer and a length.
+`crates/wasm` exports the engine to JavaScript and to other languages, next to [the core's functions](../core/README.md#c-abi). Every name is a byte pointer and a length.
 
 | Function | |
 |---|---|
