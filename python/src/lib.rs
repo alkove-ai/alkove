@@ -9,15 +9,15 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyByteArray, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 fn floats(b: &[u8]) -> PyResult<Vec<f32>> {
-    if b.len() % 4 != 0 {
+    if !b.len().is_multiple_of(4) {
         return Err(PyValueError::new_err("float32 samples expected"));
     }
-    Ok(b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+    Ok(b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
 }
 
 fn bytes<'py>(py: Python<'py>, x: &[f32]) -> Bound<'py, PyByteArray> {
     PyByteArray::new_with(py, x.len() * 4, |out| {
-        for (o, v) in out.chunks_exact_mut(4).zip(x) {
+        for (o, v) in out.as_chunks_mut::<4>().0.iter_mut().zip(x) {
             o.copy_from_slice(&v.to_le_bytes());
         }
         Ok(())

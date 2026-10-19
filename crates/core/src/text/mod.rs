@@ -5,7 +5,7 @@ mod tables;
 
 use std::sync::OnceLock;
 
-use tables::{CCC, COVERED, DECOMPOSE, LETTERS, MARKS, UPPER};
+use tables::{CASED, CCC, COVERED, DECOMPOSE, IGNORABLE, LETTERS, LOWER, MARKS, NUMBERS, UPPER};
 
 // a decomposition's second part, its top bit saying the pair composes back
 const COMPOSES: u16 = 0x8000;
@@ -42,7 +42,7 @@ pub fn is_mark(c: char) -> bool {
 
 // \p{N}
 pub fn is_number(c: char) -> bool {
-    c.is_numeric()
+    within(c, &NUMBERS)
 }
 
 // the blocks whose normalization the core knows: Latin, IPA, Greek
@@ -150,9 +150,33 @@ pub fn nfc(s: &str) -> String {
     out.into_iter().collect()
 }
 
-// String.prototype.toLowerCase
+// String.prototype.toLowerCase, on the tables rather than std's, whose Unicode follows the compiler
 pub fn lower(s: &str) -> String {
-    s.to_lowercase()
+    let cs: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    for (i, &c) in cs.iter().enumerate() {
+        match c {
+            '\u{130}' => out.push_str("i\u{307}"),
+            '\u{3a3}' if final_sigma(&cs, i) => out.push('\u{3c2}'),
+            _ => out.push(lower_char(c)),
+        }
+    }
+    out
+}
+
+fn lower_char(c: char) -> char {
+    let u = c as u32;
+    let i = LOWER.partition_point(|&(a, ..)| a <= u);
+    match i.checked_sub(1).map(|i| LOWER[i]) {
+        Some((a, b, delta, step)) if u <= b && (u - a).is_multiple_of(step as u32) => char::from_u32(u.wrapping_add_signed(delta)).unwrap_or(c),
+        _ => c,
+    }
+}
+
+// Σ after a cased letter and not before one, case-ignorable characters skipped both ways
+fn final_sigma(s: &[char], i: usize) -> bool {
+    let next = |c: &&char| !within(**c, &IGNORABLE);
+    s[..i].iter().rev().find(next).is_some_and(|&c| within(c, &CASED)) && !s[i + 1..].iter().find(next).is_some_and(|&c| within(c, &CASED))
 }
 
 // \b between two positions of `s`

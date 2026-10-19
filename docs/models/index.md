@@ -20,7 +20,7 @@ Alkove is five small models, each doing a single job, and one WebAssembly engine
 
 All five together weigh under 8 MB. All take 16 kHz mono audio (Lex takes text). The SDK resamples the microphone or your file for you.
 
-The engine, `alkove-engine.wasm` (503 KB, 143 KB brotli), is Alkove's own: it runs these five models, with [the core](https://github.com/alkove-ai/alkove/tree/main/crates/core) that turns their outputs into features, and gives the same result to the bit on every target. It ships inside the npm package, runs on one thread, and needs WebAssembly SIMD. The engine and the `.alk` format are open: [the engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine), [the format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md).
+The engine, `alkove-engine.wasm` (458 KB, 131 KB brotli), is Alkove's own: it runs these five models, with [the core](https://github.com/alkove-ai/alkove/tree/main/crates/core) that turns their outputs into features, and gives the same result to the bit on every target. It ships inside the npm package, runs on one thread, and needs WebAssembly SIMD. The engine and the `.alk` format are open: [the engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine), [the format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md).
 
 ## Who runs what
 

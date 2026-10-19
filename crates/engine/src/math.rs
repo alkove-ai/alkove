@@ -259,7 +259,7 @@ mod tests {
             xs.push(0.5);
         }
         for (f, f4) in fs {
-            for c in xs.chunks_exact(4) {
+            for c in xs.as_chunks::<4>().0 {
                 let mut out = [0f32; 4];
                 unsafe { f4(F32x4::load(c.as_ptr())).store(out.as_mut_ptr()) };
                 for (i, &v) in c.iter().enumerate() {

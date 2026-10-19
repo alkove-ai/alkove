@@ -207,7 +207,7 @@ fn an_arena_out_of_reach_is_an_error() {
     let n = (1 << 31) - 1;
     let model = Arc::new(Model::load(&p.bytes(n, (0, 1), (1, 1))).expect("load"));
     match Session::new(model) {
-        Ok(_) => assert!(cfg!(target_pointer_width = "64")),
+        Ok(_) => assert_eq!(usize::BITS, 64),
         Err(e) => assert_eq!(e, alkove_engine::Error::Memory(n)),
     }
 }

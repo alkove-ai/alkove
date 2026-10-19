@@ -428,7 +428,7 @@ impl Pipeline {
                         if self.trace {
                             let row = self.cue_rows;
                             self.cue_rows += 1;
-                            if row % 3 == 0 {
+                            if row.is_multiple_of(3) {
                                 self.outs.push(event(vec![("type", "trace".into()), ("primitive", "cue".into()), ("t", t.into()), ("speech", js::to_fixed(speech, 3).into())]));
                             }
                         }

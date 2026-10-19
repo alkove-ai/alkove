@@ -9,7 +9,7 @@ use crate::simd::{madd, F32x4};
 fn sum4(x: &[f32]) -> f32 {
     let mut l = [0f32; 4];
     let body = x.len() & !3;
-    for c in x[..body].chunks_exact(4) {
+    for c in x[..body].as_chunks::<4>().0 {
         for j in 0..4 {
             l[j] += c[j];
         }
@@ -24,7 +24,7 @@ fn sum4(x: &[f32]) -> f32 {
 fn sum4_sq_centered(x: &[f32], mean: f32) -> f32 {
     let mut l = [0f32; 4];
     let body = x.len() & !3;
-    for c in x[..body].chunks_exact(4) {
+    for c in x[..body].as_chunks::<4>().0 {
         for j in 0..4 {
             let d = c[j] - mean;
             l[j] += d * d;
@@ -271,7 +271,7 @@ unsafe fn epilogue_plane(a: *mut f32, c: &Conv, ho: usize, wo: usize, w: &[Vec<f
         }
         return;
     }
-    let lanes = c.out.w == 1 && e.res.map_or(true, |r| r.s0 == 1);
+    let lanes = c.out.w == 1 && e.res.is_none_or(|r| r.s0 == 1);
     for ch in 0..c.c_out {
         let one = |v: f32| F32x4::splat(v);
         let wv = |id: Option<usize>| id.map(|i| one(w[i][ch]));

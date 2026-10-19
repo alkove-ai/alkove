@@ -14,7 +14,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: rustup component add rustfmt clippy
       - run: cargo fmt --check
       - run: cargo clippy --release --all-targets -- -D warnings
       - run: cargo test --release
@@ -39,7 +38,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: rustup target add wasm32-unknown-unknown
       - run: corepack enable && pnpm install --frozen-lockfile
       - run: pnpm --filter alkove build
       - run: pnpm --filter alkove check

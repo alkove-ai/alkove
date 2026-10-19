@@ -129,7 +129,7 @@ impl Plan {
             let rank = r.usize()?;
             let shape = (0..rank).map(|_| r.usize()).collect::<Result<Vec<_>, _>>()?;
             let len = format::size(&shape)?;
-            if off.checked_add(len).map_or(true, |e| e > arena) {
+            if off.checked_add(len).is_none_or(|e| e > arena) {
                 return Err(Error::Format("input or output past the arena"));
             }
             let io = Io { name, shape, off, len };
@@ -143,7 +143,7 @@ impl Plan {
         let mut state_len = 0;
         for _ in 0..r.usize()? {
             let p = Piece { off: r.usize()?, len: r.usize()?, flat: r.usize()? };
-            if p.off.checked_add(p.len).map_or(true, |e| e > arena) {
+            if p.off.checked_add(p.len).is_none_or(|e| e > arena) {
                 return Err(Error::Format("state past the arena"));
             }
             state_len = state_len.max(format::add(p.flat, p.len)?);

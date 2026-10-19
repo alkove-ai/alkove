@@ -74,7 +74,7 @@ pub fn split(bytes: &[u8]) -> Result<Header<'_>, Error> {
         return Err(Error::Version(word(4) as u32));
     }
     let (body, blob) = (word(8), word(12));
-    if body % 4 != 0 || body.checked_add(16).map_or(true, |e| e > blob) || blob > bytes.len() {
+    if body % 4 != 0 || body.checked_add(16).is_none_or(|e| e > blob) || blob > bytes.len() {
         return Err(Error::Format("bad section bounds"));
     }
     Ok(Header { body: &bytes[16..16 + body], blobs: &bytes[blob..] })
@@ -111,7 +111,7 @@ pub fn weight(r: &mut Reader, blobs: &[u8]) -> Result<Vec<f32>, Error> {
     let len = r.usize()?;
     let off = r.usize()?;
     let bytes = |off: usize, n: usize| blobs.get(off..add(off, n)?).ok_or(Error::Format("weight past the end"));
-    let f32s = |off: usize, n: usize| -> Result<Vec<f32>, Error> { Ok(bytes(off, size(&[4, n])?)?.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect()) };
+    let f32s = |off: usize, n: usize| -> Result<Vec<f32>, Error> { Ok(bytes(off, size(&[4, n])?)?.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect()) };
     match dtype {
         Dtype::F32 => f32s(off, len),
         Dtype::I8 => {
@@ -142,7 +142,7 @@ pub fn weight(r: &mut Reader, blobs: &[u8]) -> Result<Vec<f32>, Error> {
             let nb = k / block;
             let codes = bytes(off, len / 2)?;
             let zero = bytes(zeros, size(&[n, nb])?)?;
-            let scale: Vec<f32> = bytes(scales, size(&[2, n, nb])?)?.chunks_exact(2).map(|b| f16(u16::from_le_bytes([b[0], b[1]]))).collect();
+            let scale: Vec<f32> = bytes(scales, size(&[2, n, nb])?)?.as_chunks::<2>().0.iter().map(|b| f16(u16::from_le_bytes(*b))).collect();
             let mut w = vec![0f32; len];
             for col in 0..n {
                 for b in 0..nb {

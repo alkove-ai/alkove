@@ -194,7 +194,7 @@ fn read(b: &[u8], at: &mut usize, depth: usize) -> Result<Value, Error> {
         }
         8 => {
             let n = count(b, at)?;
-            Value::Floats(take(b, at, n.checked_mul(4).ok_or(Error::Value("too long"))?)?.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())
+            Value::Floats(take(b, at, n.checked_mul(4).ok_or(Error::Value("too long"))?)?.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
         }
         _ => return Err(Error::Value("unknown tag")),
     })
