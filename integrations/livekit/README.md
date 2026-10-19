@@ -1,6 +1,6 @@
 # livekit-plugins-alkove
 
-[Alkove](https://alkove.ai) for [LiveKit Agents](https://docs.livekit.io/agents/): Focus keeps the user's voice and removes the others and the noise, Cue finds where they speak. Both run on the agent's CPU, with no server and no key: Focus gives the audio of Alkove's web SDK, Cue its speech times.
+[Alkove](https://alkove.ai) for [LiveKit Agents](https://docs.livekit.io/agents/): Focus keeps the user's voice and removes the others and the noise, Cue finds where they speak. Both run on the agent's CPU, with no server and no key, with the chain and the speech rules of Alkove's web SDK.
 
 ## Install
 

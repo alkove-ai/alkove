@@ -2,7 +2,7 @@
 title: Errors and diagnostics
 description: What can fail, what never fails, and every error, mode reason, status and diag code with what to do about it.
 sidebar:
-  order: 10
+  order: 12
 ---
 
 ## The rule

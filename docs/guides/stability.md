@@ -2,7 +2,7 @@
 title: Stability and versions
 description: What a version of Alkove fixes, what may change from one version to the next, and what 1.0 waits for.
 sidebar:
-  order: 11
+  order: 13
 ---
 
 Alkove is in preview: the package is `0.x` and the models end in `-preview`. This page says what you can count on today, and what can still move.

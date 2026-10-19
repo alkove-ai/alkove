@@ -2,7 +2,7 @@
 title: Self-hosting models
 description: Serve the models, the WebAssembly engine, the worker and the worklet from your own origin, with one CLI command.
 sidebar:
-  order: 6
+  order: 8
 ---
 
 ```sh

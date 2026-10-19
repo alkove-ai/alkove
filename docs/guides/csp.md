@@ -2,7 +2,7 @@
 title: Content Security Policy
 description: The CSP directives Alkove needs, with and without blob URLs, and why it needs no COOP or COEP headers.
 sidebar:
-  order: 7
+  order: 9
 ---
 
 ```http

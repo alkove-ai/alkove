@@ -2,7 +2,7 @@
 title: Phones and Safari
 description: User gestures, interruptions, hidden pages, battery and what the SDK does about each on mobile browsers.
 sidebar:
-  order: 9
+  order: 11
 ---
 
 A phone is the device Alkove is made for: one person, the microphone close to their mouth. Mobile browsers add their own rules about when audio may run. This page lists them and what the SDK does.

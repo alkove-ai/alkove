@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-Alkove turns a microphone into clean voice input, on the device. The `alkove` npm library runs five small models in WebAssembly, in the browser or in Node. No server, no key, no account, no telemetry: audio and voiceprints never leave the device.
+Alkove turns a microphone into clean voice input, on the device. The `alkove` npm library runs five small models in WebAssembly, in the browser or in Node; the `alkove` Python package runs them natively, with plugins for LiveKit Agents and Pipecat. No server, no key, no account, no telemetry: audio and voiceprints never leave the device.
 
 ```ts
 import { createCallInput } from 'alkove'
@@ -47,6 +47,7 @@ Each use has one function. Start from the one that matches your app.
 | A wake word, or commands | `createWakeListener` and `Spot` | [A wake word](/docs/start/wake-word/) |
 | Processing recordings | `Alkove.process`, `Alkove.stream` | [Files](/docs/start/files/) |
 | Your own pipeline | `Timbre`, `Lex`, `Spot`, `Voiceprint` | [Primitives](/docs/guides/primitives/) |
+| A voice agent on a server | `pip install alkove`, or a plugin | [Python](/docs/start/python/), [LiveKit Agents](/docs/guides/livekit/), [Pipecat](/docs/guides/pipecat/) |
 
 A call or agent input can also listen for words behind Focus with `input.spot()`: one microphone, one Focus, no second input.
 

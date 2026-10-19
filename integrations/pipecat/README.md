@@ -1,6 +1,6 @@
 # pipecat-alkove
 
-[Alkove](https://alkove.ai) for [Pipecat](https://github.com/pipecat-ai/pipecat): `AlkoveFilter` keeps the user's voice and removes the others and the noise (Focus), `AlkoveVADAnalyzer` finds where they speak (Cue). Both run on the bot's CPU, with no server and no key: Focus gives the audio of Alkove's web SDK, Cue its speech probabilities (where speech starts and ends is Pipecat's `VADParams`).
+[Alkove](https://alkove.ai) for [Pipecat](https://github.com/pipecat-ai/pipecat): `AlkoveFilter` keeps the user's voice and removes the others and the noise (Focus), `AlkoveVADAnalyzer` finds where they speak (Cue). Both run on the bot's CPU, with no server and no key, with the chain of Alkove's web SDK; where speech starts and ends is Pipecat's `VADParams`.
 
 Maintained by Alkove, not by the Pipecat team.
 
@@ -10,7 +10,7 @@ Maintained by Alkove, not by the Pipecat team.
 pip install pipecat-alkove
 ```
 
-The models (Focus 1.1 MB, Cue 1.1 MB) are downloaded once into the cache on first use and checked by their sha256. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder.
+The models (Focus 1.1 MB, Cue 1.1 MB) are downloaded once into the cache and checked by their sha256: the analyzer loads them when it is created, as Silero's does, the filter when the transport starts. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder.
 
 ## Use
 

@@ -2,7 +2,7 @@
 title: Wake words
 description: Type any word in one of seven languages, enroll it on the user's voice, and decide where it counts.
 sidebar:
-  order: 3
+  order: 5
 ---
 
 :::caution[A near microphone, one person]

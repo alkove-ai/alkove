@@ -2,7 +2,7 @@
 title: Voiceprints
 description: Make, learn, store and compare voiceprints, and give one to Focus so it keeps only that person.
 sidebar:
-  order: 4
+  order: 6
 ---
 
 A voiceprint is a small vector that stands for one voice, made by Timbre from 16 kHz speech. With a print, Focus keeps only that person, even when someone else is louder or closer; a wake listener ignores other voices; and you can ask whether two recordings are the same voice.

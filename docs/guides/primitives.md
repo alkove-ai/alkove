@@ -2,7 +2,7 @@
 title: Primitives
 description: Run Focus, Cue, Spot, Timbre and Lex yourself, on files, streams or your own audio, without the real-time inputs.
 sidebar:
-  order: 5
+  order: 7
 ---
 
 The recipes (`createCallInput`, `createAgentInput`, `createWakeListener`) wire everything for the microphone. When you have your own audio (a file, a recording, a stream from a server), use the primitives directly. They run the same models with the same rules: for the same 16 kHz audio, they give the same output as the real-time inputs.

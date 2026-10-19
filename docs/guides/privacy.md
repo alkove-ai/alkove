@@ -2,7 +2,7 @@
 title: Privacy and network
 description: What Alkove downloads, what it stores, what never leaves the device, and how to check it yourself.
 sidebar:
-  order: 8
+  order: 10
 ---
 
 Alkove runs on the device. Sound is processed in the page, in an AudioWorklet and in workers, and never sent anywhere by the SDK. There is no telemetry, no analytics, no key and no license check.
