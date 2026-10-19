@@ -6,6 +6,7 @@ mod focus;
 pub mod fp;
 pub mod js;
 mod level;
+mod live;
 pub mod math;
 mod process;
 mod resample;
@@ -18,6 +19,7 @@ pub use chain::{Chain, ChainEvent, ChainOptions, Why};
 pub use cue::{Cue, SpeechEvent, SpeechParams, SpeechTracker, SPEECH_DEFAULTS};
 pub use focus::Focus;
 pub use level::{Chunker, Delay, Gate, Level};
+pub use live::Live;
 pub use process::{process, FocusOptions, Models, Part, ProcessOptions, Processor, Speech, Trace, TraceRow};
 pub use resample::Resampler;
 

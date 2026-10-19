@@ -158,6 +158,99 @@ fn models(focus: Option<&Model>, cue: Option<&Model>) -> Models {
     Models { focus: focus.map(|m| m.inner.clone()), cue: cue.map(|m| m.inner.clone()) }
 }
 
+/// The chain on a live stream at any rate: frames in, the processed samples that are ready out, at the same rate.
+#[pyclass(module = "alkove._alkove")]
+struct Live {
+    inner: alkove_core::Live,
+    events: Vec<ChainEvent>,
+}
+
+#[pymethods]
+impl Live {
+    #[new]
+    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(focus: &Model, cue: &Model, rate: f64, gate: bool, normalize: bool, strength: f64, sleep: bool, speech_params: (f64, f64, f64, f64), print: Option<&[u8]>) -> PyResult<Self> {
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep };
+        let inner = alkove_core::Live::new(&focus.inner, &cue.inner, rate, opts).map_err(error)?;
+        Ok(Live { inner, events: Vec::new() })
+    }
+
+    fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<(Bound<'py, PyByteArray>, Records)> {
+        let pcm = floats(pcm)?;
+        let (inner, events) = (&mut self.inner, &mut self.events);
+        events.clear();
+        let out = py.detach(|| {
+            fp::exact(|| {
+                let mut out = Vec::with_capacity(pcm.len() + 1024);
+                inner.push(&pcm, &mut out, events);
+                out
+            })
+        });
+        Ok((bytes(py, &out), self.events.iter().map(record).collect()))
+    }
+
+    #[pyo3(signature = (print=None))]
+    fn set_print(&mut self, print: Option<&[u8]>) -> PyResult<()> {
+        let p = print.map(floats).transpose()?;
+        self.inner.chain_mut().set_print(p.as_deref()).map_err(error)
+    }
+
+    fn set_strength(&mut self, s: f64) {
+        self.inner.chain_mut().set_strength(s);
+    }
+
+    fn set_enabled(&mut self, on: bool) {
+        self.inner.chain_mut().set_enabled(on);
+    }
+
+    #[getter]
+    fn speaking(&self) -> bool {
+        self.inner.chain().speaking()
+    }
+
+    #[getter]
+    fn sleeping(&self) -> bool {
+        self.inner.chain().sleeping()
+    }
+}
+
+/// Cue's state machine on speech probabilities, one per frame of `frame_secs`.
+#[pyclass(module = "alkove._alkove")]
+struct SpeechTracker {
+    inner: alkove_core::SpeechTracker,
+}
+
+#[pymethods]
+impl SpeechTracker {
+    #[new]
+    fn new(speech_params: (f64, f64, f64, f64), frame_secs: f64) -> Self {
+        SpeechTracker { inner: alkove_core::SpeechTracker::new(speech(speech_params), frame_secs) }
+    }
+
+    // frame k's probability: None, (0, start, 0) when speech starts, (1, start, end) when it ends
+    fn push(&mut self, p: f64, k: i64) -> Option<(u8, f64, f64)> {
+        self.inner.push(p, k).map(|e| match e {
+            SpeechEvent::Start { start } => (0, start, 0.0),
+            SpeechEvent::End { start, end } => (1, start, end),
+        })
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    #[getter]
+    fn active(&self) -> bool {
+        self.inner.active
+    }
+
+    #[getter]
+    fn confirmed(&self) -> bool {
+        self.inner.confirmed
+    }
+}
+
 /// Focus and Cue over audio pushed in blocks of any size, the output aligned with the input.
 #[pyclass(module = "alkove._alkove")]
 struct Processor {
@@ -261,6 +354,8 @@ fn _alkove(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Model>()?;
     m.add_class::<Chain>()?;
     m.add_class::<Processor>()?;
+    m.add_class::<Live>()?;
+    m.add_class::<SpeechTracker>()?;
     m.add_class::<Resampler>()?;
     m.add_function(wrap_pyfunction!(process, m)?)?;
     m.add_function(wrap_pyfunction!(resample, m)?)?;

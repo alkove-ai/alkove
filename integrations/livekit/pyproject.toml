@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "livekit-plugins-alkove"
+dynamic = ["version"]
+description = "Alkove for LiveKit Agents: Focus keeps the user's voice (noise cancellation), Cue finds speech (VAD), on the agent's CPU"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+authors = [{ name = "Eddy Bordi" }]
+keywords = ["voice", "livekit", "noise-cancellation", "voice-isolation", "vad", "voice-agent", "on-device"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = ["alkove>=0.1", "livekit-agents>=1.8.8", "numpy>=1.21"]
+
+[project.urls]
+Homepage = "https://alkove.ai"
+Repository = "https://github.com/alkove-ai/alkove"
+
+[tool.hatch.version]
+path = "livekit/plugins/alkove/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["livekit"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/livekit"]

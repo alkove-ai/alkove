@@ -67,3 +67,20 @@ jobs:
       # outside the source tree: the installed wheel, not python/alkove
       - run: cd "$RUNNER_TEMP" && python -m pytest -q -p no:cacheprovider --import-mode=importlib "$GITHUB_WORKSPACE/python/tests"
         shell: bash
+
+  # the LiveKit and Pipecat integrations against the versions they are tested with
+  integrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: python
+          args: --release --out dist
+          manylinux: auto
+      - run: pip install python/dist/*.whl "livekit-agents==1.8.8" "pipecat-ai==1.13.0" pytest
+      - run: pip install --no-deps -e integrations/livekit -e integrations/pipecat
+      - run: python -m pytest -q integrations/livekit/tests integrations/pipecat/tests

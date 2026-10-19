@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pipecat-alkove"
+dynamic = ["version"]
+description = "Alkove for Pipecat: AlkoveFilter keeps the user's voice, AlkoveVADAnalyzer finds speech, on the bot's CPU"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+authors = [{ name = "Eddy Bordi" }]
+keywords = ["voice", "pipecat", "noise-cancellation", "voice-isolation", "vad", "voice-agent", "on-device"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = ["alkove>=0.1", "pipecat-ai>=1.0", "numpy>=1.21"]
+
+[project.urls]
+Homepage = "https://alkove.ai"
+Repository = "https://github.com/alkove-ai/alkove"
+
+[tool.hatch.version]
+path = "pipecat_alkove/__init__.py"

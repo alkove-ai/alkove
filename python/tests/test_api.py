@@ -123,3 +123,33 @@ def test_end_is_the_end(models):
     p.end()
     with pytest.raises(RuntimeError, match="after end"):
         p.push(np.zeros(10, np.float32))
+
+
+def test_live_at_16_khz_is_the_chain_hop_by_hop(models):
+    pcm = stream(31, 6)
+    live = alkove.Live(models, 16000, normalize=True)
+    chain = alkove.Chain(models, normalize=True)
+    a = np.concatenate([live.push(pcm[i : i + 333])[0] for i in range(0, len(pcm), 333)])
+    b = np.concatenate([chain.step(pcm[i : i + 256])[0] for i in range(0, len(pcm) - 255, 256)])
+    assert np.array_equal(a, b[: len(a)]) and len(b) - len(a) < 256
+
+
+def test_live_at_48_khz_gives_out_what_comes_in(models):
+    pcm = alkove.resample(stream(32, 4), 16000, 48000)
+    live = alkove.Live(models, 48000)
+    out = [live.push(pcm[i : i + 1440])[0] for i in range(0, len(pcm), 1440)]
+    assert len(pcm) - 1600 < sum(map(len, out)) <= len(pcm)
+
+
+def test_speech_tracker_decides_as_the_processor(models):
+    pcm = stream(33, 20)
+    p = alkove.Processor(models, cue=True, trace=True)
+    t = alkove.SpeechTracker()
+    parts = [p.push(pcm[i : i + 4000]) for i in range(0, len(pcm), 4000)]
+    ends = [e for x in parts for r in x.trace["cue"] if (e := t.push(r["speech"], round(r["t"] / 0.03))) and e["type"] == "speechend"]
+    assert [(e["start"], e["end"]) for e in ends] == [(s.start, s.end) for x in parts for s in x.speech]
+
+
+def test_to_int16_as_the_web_writes_wav():
+    x = np.array([-1.5, -1, -0.5, -1e-9, 0, 1e-9, 0.5, 1, 1.5])
+    assert alkove.to_int16(x).tolist() == [-32768, -32768, -16384, 0, 0, 0, 16383, 32767, 32767]

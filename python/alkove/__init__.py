@@ -12,7 +12,7 @@ from .errors import AlkoveError
 from .models import MANIFEST, Models, cache_dir, fetch
 
 __version__ = _alkove.VERSION
-__all__ = ["AlkoveError", "Chain", "MANIFEST", "Models", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "cache_dir", "fetch", "process", "resample"]
+__all__ = ["AlkoveError", "Chain", "Live", "MANIFEST", "Models", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "cache_dir", "fetch", "process", "resample", "to_int16"]
 
 RATE = 16000
 WHY = ("silence", "forced", "wake")
@@ -194,6 +194,75 @@ class Chain:
     @property
     def gain_db(self) -> float:
         return self._c.gain_db
+
+
+class Live:
+    """The chain on a live stream at any rate, as the web SDK runs it in real time: frames in, the processed samples that are ready out, at the same rate."""
+
+    def __init__(
+        self,
+        models: Models,
+        rate: int,
+        *,
+        gate: bool = False,
+        normalize: bool = False,
+        strength: float = 1.0,
+        voiceprint: Any = None,
+        speech: Optional[SpeechParams] = None,
+        sleep: bool = True,
+    ):
+        _needs(models, "focus", "cue")
+        print_ = _samples(voiceprint) if voiceprint is not None else None
+        self.rate = rate
+        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_)
+
+    def push(self, pcm: Any) -> Tuple[np.ndarray, List[dict]]:
+        """Samples in (float32, or int16), the ones ready out, and the events (speech, idle, diag), in seconds from the stream's start."""
+        out, events = self._l.push(_samples(pcm))
+        return _audio(out), [_event(*e) for e in events if e[0] < 5]
+
+    def set_voiceprint(self, embedding: Any) -> None:
+        self._l.set_print(_samples(embedding) if embedding is not None else None)
+
+    def set_strength(self, s: float) -> None:
+        self._l.set_strength(s)
+
+    def set_enabled(self, on: bool) -> None:
+        """Off: the raw mic, at the same delay, with a short fade."""
+        self._l.set_enabled(on)
+
+    @property
+    def speaking(self) -> bool:
+        return self._l.speaking
+
+
+class SpeechTracker:
+    """Cue's state machine on its probabilities, frame by frame: what `Processor` and the web SDK decide, for frameworks that want each step."""
+
+    def __init__(self, speech: Optional[SpeechParams] = None, frame_secs: float = 0.03):
+        self._t = _alkove.SpeechTracker((speech or SpeechParams())._tuple(), frame_secs)
+
+    def push(self, p: float, k: int) -> Optional[dict]:
+        """Frame k's probability; a `speechstart` or `speechend` event when speech starts or ends."""
+        e = self._t.push(p, k)
+        return None if e is None else _event(e[0], e[1], e[2], 0.0)
+
+    def reset(self) -> None:
+        self._t.reset()
+
+    @property
+    def active(self) -> bool:
+        return self._t.active
+
+    @property
+    def confirmed(self) -> bool:
+        return self._t.confirmed
+
+
+def to_int16(pcm: Any) -> np.ndarray:
+    """Float samples to int16 as the web SDK writes them: clipped, scaled by 32768 below zero and 32767 above, truncated."""
+    x = np.clip(np.asarray(pcm, dtype=np.float64), -1, 1)
+    return np.where(x < 0, x * 32768, x * 32767).astype(np.int16)
 
 
 class Resampler:
