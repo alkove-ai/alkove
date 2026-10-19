@@ -6,6 +6,7 @@ use crate::chain::{Chain, ChainEvent, ChainOptions};
 use crate::cue::{Cue, SpeechEvent, SpeechParams, SpeechTracker};
 use crate::level::Chunker;
 use crate::math::log10;
+use crate::resample::Resampler;
 use crate::{js, Error, CUE, FOCUS, RATE};
 
 #[derive(Debug, Clone)]
@@ -20,7 +21,7 @@ impl Default for FocusOptions {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ProcessOptions {
     pub focus: Option<FocusOptions>,
     // None: speech found behind Focus, no Cue without it; Some(false): no speech at all
@@ -28,6 +29,14 @@ pub struct ProcessOptions {
     pub speech: SpeechParams,
     pub normalize: bool,
     pub trace: bool,
+    // of what `Processor::push` takes; the parts come out at 16 kHz
+    pub rate: f64,
+}
+
+impl Default for ProcessOptions {
+    fn default() -> Self {
+        ProcessOptions { focus: None, cue: None, speech: SpeechParams::default(), normalize: false, trace: false, rate: RATE }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -82,6 +91,9 @@ pub struct Processor {
     part: Part,
     events: Vec<ChainEvent>,
     closed: bool,
+    input: Option<Resampler>,
+    fed: usize,
+    fed16: usize,
 }
 
 impl Processor {
@@ -96,6 +108,7 @@ impl Processor {
             tracker = Some(SpeechTracker::cue(opts.speech));
         }
         let delay = chain.as_ref().map_or(0, |c| c.delay());
+        let input = (opts.rate != RATE).then(|| Resampler::new(opts.rate, RATE, true));
         Ok(Processor {
             chain,
             hops: Chunker::new(FOCUS.chunk),
@@ -111,6 +124,9 @@ impl Processor {
             part: Part::default(),
             events: Vec::new(),
             closed: false,
+            input,
+            fed: 0,
+            fed16: 0,
         })
     }
 
@@ -195,13 +211,23 @@ impl Processor {
         part
     }
 
+    // audio at the options' rate, in blocks of any size
     pub fn push(&mut self, pcm: &[f32]) -> Result<Part, Error> {
         if self.closed {
             return Err(Error::Ended);
         }
+        let Some(r) = &mut self.input else { return Ok(self.push16(pcm)) };
+        let mut pcm16 = Vec::new();
+        r.push(pcm, &mut pcm16);
+        self.fed += pcm.len();
+        self.fed16 += pcm16.len();
+        Ok(self.push16(&pcm16))
+    }
+
+    fn push16(&mut self, pcm: &[f32]) -> Part {
         self.pushed += pcm.len();
         let out = self.run(pcm);
-        Ok(self.take(&out, false))
+        self.take(&out, false)
     }
 
     // the samples still inside the primitives come out, and the speech still open closes at the end
@@ -209,6 +235,24 @@ impl Processor {
         if self.closed {
             return Err(Error::Ended);
         }
+        // the resampler's last half window, up to the length the input had
+        let mut tail = Vec::new();
+        if let Some(r) = &mut self.input {
+            let want = js::round(self.fed as f64 * RATE / r.input_rate()) as i64 - self.fed16 as i64;
+            if want > 0 {
+                r.push(&[0.0; Resampler::HALF * 2 + 8], &mut tail);
+                tail.truncate(want as usize);
+            }
+        }
+        let first = (!tail.is_empty()).then(|| self.push16(&tail));
+        let last = self.end16();
+        Ok(match first {
+            Some(f) => f.join(last),
+            None => last,
+        })
+    }
+
+    fn end16(&mut self) -> Part {
         self.closed = true;
         let tail = self.run(&vec![0.0; self.delay + CUE.chunk * (CUE.lag_steps + 2) + FOCUS.chunk + 480 * 4]);
         if let Some(start) = self.open {
@@ -219,35 +263,39 @@ impl Processor {
         let part = self.take(&tail, true);
         self.chain = None;
         self.cue = None;
-        Ok(part)
+        part
+    }
+}
+
+impl Part {
+    // this part followed by the next one, as one
+    pub fn join(mut self, next: Part) -> Part {
+        self.audio.extend_from_slice(&next.audio);
+        self.speech.extend(next.speech);
+        self.diag.extend(next.diag);
+        if let Some(t) = next.trace {
+            let into = self.trace.get_or_insert_with(Trace::default);
+            into.focus.extend(t.focus);
+            into.cue.extend(t.cue);
+        }
+        self
     }
 }
 
 const BLOCK: usize = 16000;
 
-// a whole recording, in the blocks real time would give: the audio aligned with the input, and everything found in it
+// a whole recording at 16 kHz, in the blocks real time would give: the audio aligned with the input, and everything found in it
 pub fn process(models: &Models, pcm: &[f32], opts: ProcessOptions) -> Result<Part, Error> {
     let focus = opts.focus.is_some();
+    let opts = ProcessOptions { rate: RATE, ..opts };
     let mut p = Processor::new(models, opts)?;
     let mut parts = Vec::new();
     for block in pcm.chunks(BLOCK) {
         parts.push(p.push(block)?);
     }
     parts.push(p.end()?);
-    let mut all = Part::default();
-    let mut audio = Vec::with_capacity(pcm.len());
-    for part in parts {
-        let room = pcm.len() - audio.len();
-        audio.extend_from_slice(&part.audio[..part.audio.len().min(room)]);
-        all.speech.extend(part.speech);
-        all.diag.extend(part.diag);
-        if let Some(t) = part.trace {
-            let into = all.trace.get_or_insert_with(Trace::default);
-            into.focus.extend(t.focus);
-            into.cue.extend(t.cue);
-        }
-    }
-    audio.resize(pcm.len(), 0.0);
-    all.audio = if focus { audio } else { pcm.to_vec() };
+    let mut all = parts.into_iter().fold(Part::default(), Part::join);
+    all.audio = if focus { all.audio } else { pcm.to_vec() };
+    all.audio.resize(pcm.len(), 0.0);
     Ok(all)
 }

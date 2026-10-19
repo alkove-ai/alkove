@@ -1,5 +1,7 @@
 [workspace]
-members = ["crates/engine", "crates/core", "crates/wasm"]
+members = ["crates/engine", "crates/core", "crates/wasm", "python"]
+# the Python extension builds with maturin, against a Python
+default-members = ["crates/engine", "crates/core", "crates/wasm"]
 resolver = "2"
 
 [workspace.package]

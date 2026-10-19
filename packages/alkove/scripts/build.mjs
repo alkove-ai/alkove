@@ -6,6 +6,8 @@ import { execFileSync } from 'node:child_process'
 
 import { build } from 'esbuild'
 
+import { modelsSource } from './models.mjs'
+
 const root = join(import.meta.dirname, '..')
 const dist = join(root, 'dist')
 const workspace = join(root, '../..')
@@ -26,6 +28,8 @@ export const ENGINE_WASM = {
 `
 const genPath = join(root, 'src/engine.generated.ts')
 if (readFileSync(genPath, 'utf8') !== generated) writeFileSync(genPath, generated)
+const modelsPath = join(root, 'src/models.generated.ts')
+if (readFileSync(modelsPath, 'utf8') !== modelsSource()) writeFileSync(modelsPath, modelsSource())
 
 rmSync(dist, { recursive: true, force: true })
 mkdirSync(dist, { recursive: true })

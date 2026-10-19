@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "alkove"
+description = "On-device voice input: keep the user's voice, detect speech. No server, no key."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Eddy Bordi" }]
+keywords = ["voice", "speech", "noise-suppression", "voice-isolation", "target-speaker-extraction", "voice-activity-detection", "vad", "voice-agent", "on-device"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+]
+dependencies = ["numpy>=1.21"]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://alkove.ai"
+Repository = "https://github.com/alkove-ai/alkove"
+Issues = "https://github.com/alkove-ai/alkove/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.maturin]
+module-name = "alkove._alkove"
+features = ["pyo3/extension-module"]

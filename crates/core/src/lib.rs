@@ -3,6 +3,7 @@
 mod chain;
 mod cue;
 mod focus;
+pub mod fp;
 pub mod js;
 mod level;
 pub mod math;
@@ -21,6 +22,9 @@ pub use process::{process, FocusOptions, Models, Part, ProcessOptions, Processor
 pub use resample::Resampler;
 
 pub const RATE: f64 = 16000.0;
+
+// the models of this version, each by name, file, size and sha256: what every SDK downloads and checks
+pub const MANIFEST: &str = include_str!("../models.json");
 
 pub struct FocusSpec {
     pub chunk: usize,

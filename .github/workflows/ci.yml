@@ -43,3 +43,27 @@ jobs:
       - run: corepack enable && pnpm install --frozen-lockfile
       - run: pnpm --filter alkove build
       - run: pnpm --filter alkove check
+
+  # the wheels on every target; the digests of the web SDK once the models can be downloaded
+  python:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: python
+          args: --release --out dist
+          manylinux: auto
+      - run: cargo clippy --release -p alkove-python -- -D warnings
+        if: matrix.os == 'ubuntu-latest'
+      - run: pip install python/dist/*.whl pytest
+        shell: bash
+      # outside the source tree: the installed wheel, not python/alkove
+      - run: cd "$RUNNER_TEMP" && python -m pytest -q -p no:cacheprovider --import-mode=importlib "$GITHUB_WORKSPACE/python/tests"
+        shell: bash

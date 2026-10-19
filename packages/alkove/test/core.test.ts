@@ -12,6 +12,7 @@ import { Voiceprint } from '../src/core/timbre'
 import { cos, exp, ln, log10, pow, sin } from '../src/dsp/math'
 import { Resampler } from '../src/dsp/resample'
 import { Alk } from '../src/engine/alk'
+import { HF_ORG, MODELS } from '../src/manifest'
 import { Processor, type ProcessOptions, type ProcessPart } from '../src/process'
 import { f32, modelBytes, noise, wav } from './helpers'
 
@@ -128,6 +129,13 @@ function sdkChain(opts: ChainOptions): Driven {
   }
 }
 
+describe('the manifest every SDK reads', () => {
+  it('src/models.generated.ts holds crates/core/models.json (pnpm build writes it)', () => {
+    const { org, models } = JSON.parse(readFileSync(join(workspace, 'crates/core/models.json'), 'utf8'))
+    expect({ org: HF_ORG, models: MODELS }).toEqual({ org, models })
+  })
+})
+
 describe('math, as the TypeScript computed it', () => {
   it('exp, ln, log10, pow, sin, cos: the same doubles', () => {
     const r = rng(7)
@@ -222,6 +230,15 @@ function record(e: ChainEvent | Tap): number[] {
   }
 }
 
+// two parts as one, as the core joins the tail of a resampled stream with its end
+function joined(a: ProcessPart, b: ProcessPart): ProcessPart {
+  const audio = new Float32Array(a.audio.length + b.audio.length)
+  audio.set(a.audio)
+  audio.set(b.audio, a.audio.length)
+  const trace = a.trace || b.trace ? { focus: [...(a.trace?.focus ?? []), ...(b.trace?.focus ?? [])], cue: [...(a.trace?.cue ?? []), ...(b.trace?.cue ?? [])], spot: [] } : undefined
+  return { start: a.start, audio, speech: [...a.speech, ...b.speech], wakes: [], diag: [...a.diag, ...b.diag], ...(trace ? { trace } : {}) }
+}
+
 // the numbers alk_h_processor_push writes
 function partNumbers(p: ProcessPart): Float64Array {
   const n: number[] = [p.start, p.audio.length, ...p.audio, p.speech.length, ...p.speech.flatMap((s) => [s.start, s.end]), p.diag.length, ...p.diag.flatMap((e) => record(e as ChainEvent))]
@@ -274,21 +291,26 @@ describe('the chain, hop by hop as in real time', () => {
 
 describe('process, in blocks of any size', () => {
   const voiceprint = () => new Voiceprint([{ embedding: print(), id: print(), seconds: 3 }])
-  const cases: [string, number, ProcessOptions][] = [
-    ['focus and cue', 5, { focus: true, cue: true }],
-    ['focus with a print, normalize, trace, other speech settings', 6, { focus: { voiceprint: voiceprint(), strength: 0.7 }, cue: { confidence: 0.4, startSecs: 0.1 }, normalize: true, trace: true }],
-    ['focus without speech', 7, { focus: true, cue: false }],
-    ['cue alone, traced', 8, { cue: { stopSecs: 1 }, trace: true }],
-    ['nothing chosen', 9, {}],
+  // name, seed, options, rate of the blocks (resampled to 16 kHz as Alkove.stream does)
+  const cases: [string, number, ProcessOptions, number][] = [
+    ['focus and cue', 5, { focus: true, cue: true }, 16000],
+    ['focus with a print, normalize, trace, other speech settings', 6, { focus: { voiceprint: voiceprint(), strength: 0.7 }, cue: { confidence: 0.4, startSecs: 0.1 }, normalize: true, trace: true }, 16000],
+    ['focus without speech', 7, { focus: true, cue: false }, 16000],
+    ['cue alone, traced', 8, { cue: { stopSecs: 1 }, trace: true }, 16000],
+    ['nothing chosen', 9, {}, 16000],
+    ['focus and cue, blocks at 44.1 kHz', 10, { focus: true, cue: true, trace: true }, 44100],
   ]
-  for (const [name, seed, opts] of cases)
+  for (const [name, seed, opts, rate] of cases)
     it(name, async () => {
-      const pcm = stream(seed, 25)
+      const pcm = rate === 16000 ? stream(seed, 25) : Resampler.all(stream(seed, 25), 16000, rate)
       const ts = new Processor(engine, opts)
+      const resampler = new Resampler(rate, 16000, true)
+      let given = 0
+      let taken = 0
       const focus = opts.focus !== undefined && opts.focus !== false
       const fo = typeof opts.focus === 'object' ? opts.focus : {}
       const s = { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) }
-      const numbers = Float64Array.of(+focus, fo.strength ?? 1, opts.cue === undefined ? -1 : opts.cue === false ? 0 : 1, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, +(opts.normalize ?? false), +(opts.trace ?? false))
+      const numbers = Float64Array.of(+focus, fo.strength ?? 1, opts.cue === undefined ? -1 : opts.cue === false ? 0 : 1, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, +(opts.normalize ?? false), +(opts.trace ?? false), rate)
       const p = fo.voiceprint ? (fo.voiceprint as Voiceprint).embedding : null
       const make = (at: number, n: number) => inWasm(numbers, (o) => h.alk_h_processor(engine.model('focus').ptr, engine.model('cue').ptr, o, at, n))
       const core = p ? inWasm(p, (at) => make(at, p.length)) : make(0, 0)
@@ -301,15 +323,31 @@ describe('process, in blocks of any size', () => {
         if (!bits(new Float32Array(got.buffer)).equals(bits(new Float32Array(want.buffer)))) expect(Array.from(got)).toEqual(Array.from(want))
         digest.update(bits(new Float32Array(want.buffer)))
       }
+      const empty = (n: number) => {
+        const got = new Float64Array(alk.heap, h.alk_h_numbers(), n)
+        // start, then no audio, speech, diag or trace
+        expect(Array.from(got.subarray(1))).toEqual([0, 0, 0, 0])
+      }
       for (let i = 0; i < pcm.length; ) {
         const n = Math.min(pcm.length - i, 1 + Math.floor(r() * 5000))
         const block = pcm.subarray(i, i + n)
-        const a = ts.push(block)
-        compare(a, inWasm(block, (at) => h.alk_h_processor_push(core, at, n)))
+        const out: number[] = []
+        given += n
+        resampler.push(block, (x) => out.push(x))
+        taken += out.length
+        const got = inWasm(block, (at) => h.alk_h_processor_push(core, at, n))
+        if (out.length) compare(ts.push(Float32Array.from(out)), got)
+        else empty(got)
         i += n
         await breathe()
       }
-      compare(ts.end(), h.alk_h_processor_end(core))
+      // Alkove.stream's tail: the last half window, up to the length the input had
+      const tail: number[] = []
+      const want = Math.round((given * 16000) / rate) - taken
+      if (want > 0) resampler.push(new Float32Array(Resampler.HALF * 2 + 8), (x) => tail.length < want && tail.push(x))
+      const first = tail.length ? ts.push(Float32Array.from(tail)) : null
+      const last = ts.end()
+      compare(first ? joined(first, last) : last, h.alk_h_processor_end(core))
       h.alk_h_processor_free(core)
       expect(digest.digest('hex')).toBe(GOLDEN[`process: ${name}`])
     }, 120_000)

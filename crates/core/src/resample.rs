@@ -9,6 +9,7 @@ const PHASES: usize = 128;
 // polyphase windowed sinc at a fractional read position kept across chunks: any ratio (44.1 -> 16 kHz) without drift
 pub struct Resampler {
     pub identity: bool,
+    in_rate: f64,
     ratio: f64,
     table: Vec<f32>,
     work: Vec<f32>,
@@ -23,7 +24,7 @@ impl Resampler {
     // aligned: output k sits exactly on input position k × ratio (files), else half a window late with less latency (real time)
     pub fn new(in_rate: f64, out_rate: f64, aligned: bool) -> Resampler {
         let identity = in_rate == out_rate;
-        let mut r = Resampler { identity, ratio: 1.0, table: Vec::new(), work: Vec::new(), hist_len: TAPS, t: if aligned { TAPS as f64 } else { Self::HALF as f64 } };
+        let mut r = Resampler { identity, in_rate, ratio: 1.0, table: Vec::new(), work: Vec::new(), hist_len: TAPS, t: if aligned { TAPS as f64 } else { Self::HALF as f64 } };
         if identity {
             return r;
         }
@@ -54,6 +55,10 @@ impl Resampler {
 
     pub fn ratio(&self) -> f64 {
         self.ratio
+    }
+
+    pub fn input_rate(&self) -> f64 {
+        self.in_rate
     }
 
     // the samples `chunk` completes, appended to `out`

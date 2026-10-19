@@ -7,5 +7,6 @@
  "process: focus with a print, normalize, trace, other speech settings": "c1e50ab94188444a6eb3e8baf2caaf0451140ce9fd996b309bf827a6097837c7",
  "process: focus without speech": "d85ba636fddc59849f124cfe4e4d6c77732577cb3d7953fdb656c34dcb39af49",
  "process: cue alone, traced": "242a1a7abf33a608415335357941cc3f8f0d095f8d5da033326b02e184ca0c5d",
- "process: nothing chosen": "28bd17b42e29543f2b8da19b0a878e57c1b2711d970df9018ed66ff14b783b8e"
+ "process: nothing chosen": "28bd17b42e29543f2b8da19b0a878e57c1b2711d970df9018ed66ff14b783b8e",
+ "process: focus and cue, blocks at 44.1 kHz": "2561074fb09a86edec28c945b081d66de665c280701ba28180233cc6041a14b1"
 }

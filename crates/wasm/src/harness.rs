@@ -70,11 +70,11 @@ pub unsafe extern "C" fn alk_h_resample_all(p: *const f32, len: usize, in_rate: 
     })
 }
 
-// Safety: models live or null, `o` the 9 numbers below, `print` null or `print_len` floats.
+// Safety: models live or null, `o` the 10 numbers below, `print` null or `print_len` floats.
 #[no_mangle]
 pub unsafe extern "C" fn alk_h_processor(focus: *const Model, cue: *const Model, o: *const f64, print: *const f32, print_len: usize) -> *mut Processor {
-    // focus, strength, cue (-1 unset, 0, 1), confidence, exit, start, stop, normalize, trace
-    let o = std::slice::from_raw_parts(o, 9);
+    // focus, strength, cue (-1 unset, 0, 1), confidence, exit, start, stop, normalize, trace, rate
+    let o = std::slice::from_raw_parts(o, 10);
     let models = Models { focus: (!focus.is_null()).then(|| shared(focus)), cue: (!cue.is_null()).then(|| shared(cue)) };
     let opts = ProcessOptions {
         focus: (o[0] != 0.0).then(|| FocusOptions { print: (!print.is_null()).then(|| std::slice::from_raw_parts(print, print_len).to_vec()), strength: o[1] }),
@@ -82,6 +82,7 @@ pub unsafe extern "C" fn alk_h_processor(focus: *const Model, cue: *const Model,
         speech: SpeechParams { confidence: o[3], exit_confidence: o[4], start_secs: o[5], stop_secs: o[6] },
         normalize: o[7] != 0.0,
         trace: o[8] != 0.0,
+        rate: o[9],
     };
     match Processor::new(&models, opts) {
         Ok(p) => Box::into_raw(Box::new(p)),
