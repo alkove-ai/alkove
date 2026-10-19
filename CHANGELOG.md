@@ -2,7 +2,7 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## Unreleased
+## 0.2.0
 
 **The SDK runs on Alkove's own engine instead of onnxruntime.** Breaking: stored prints and words must be made again.
 
