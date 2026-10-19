@@ -1,0 +1,74 @@
+name: release
+
+# a tag python-vX.Y.Z: the alkove wheels on every target, its sdist and the two plugins, to PyPI by trusted publishing (no token here)
+on:
+  push:
+    tags: ['python-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: python
+          args: --profile python --out dist
+          manylinux: auto
+      - run: pip install python/dist/*.whl pytest
+        shell: bash
+      - run: cd "$RUNNER_TEMP" && python -m pytest -q -p no:cacheprovider --import-mode=importlib "$GITHUB_WORKSPACE/python/tests"
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: python/dist/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: python
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: python/dist/*.tar.gz
+
+  plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install build && python -m build integrations/livekit -o dist && python -m build integrations/pipecat -o dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugins
+          path: dist/*
+
+  pypi:
+    needs: [wheels, sdist, plugins]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
