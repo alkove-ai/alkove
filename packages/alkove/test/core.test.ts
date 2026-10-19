@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -13,40 +12,27 @@ import { cos, exp, ln, log10, pow, sin } from '../src/dsp/math'
 import { Resampler } from '../src/dsp/resample'
 import { Alk } from '../src/engine/alk'
 import { HF_ORG, MODELS } from '../src/manifest'
-import { Processor, type ProcessOptions, type ProcessPart } from '../src/process'
-import { f32, modelBytes, noise, wav } from './helpers'
+import { coreOptions, Processor, type ProcessOptions, type ProcessPart } from '../src/process'
+import { f32, loadHarness, modelBytes, noise, wav, workspace } from './helpers'
 
 // the Rust core against the TypeScript it replaced: side by side where the TypeScript remains, else against digests of what it gave
 
 interface Harness {
   alk_h_math(kind: number, x: number, y: number): number
   alk_h_out(): number
-  alk_h_numbers(): number
   alk_h_resampler(inRate: number, outRate: number, aligned: number): number
   alk_h_resampler_push(r: number, p: number, len: number): number
   alk_h_resampler_free(r: number): void
   alk_h_resample_all(p: number, len: number, inRate: number, outRate: number): number
-  alk_h_processor(focus: number, cue: number, opts: number, print: number, printLen: number): number
-  alk_h_processor_push(p: number, pcm: number, len: number): number
-  alk_h_processor_end(p: number): number
-  alk_h_processor_free(p: number): void
 }
 
-const workspace = join(import.meta.dirname, '../../..')
 const goldenPath = join(import.meta.dirname, 'fixtures/core.json')
-
-// the core with its test exports, apart from the SDK's wasm
-function harnessWasm(): Buffer {
-  const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: ['-C', 'target-feature=+simd128,+bulk-memory'].join('\x1f') }
-  execFileSync('cargo', ['build', '-q', '--release', '-p', 'alkove-wasm', '--features', 'harness', '--target', 'wasm32-unknown-unknown', '--target-dir', 'target/harness'], { cwd: workspace, env, stdio: 'inherit' })
-  return readFileSync(join(workspace, 'target/harness/wasm32-unknown-unknown/release/alkove_wasm.wasm'))
-}
 
 let alk: Alk
 let h: Harness
 let engine: WasmEngine
 beforeAll(async () => {
-  alk = await Alk.create(await WebAssembly.compile(new Uint8Array(harnessWasm())))
+  alk = await loadHarness()
   h = alk.x as unknown as Harness
   engine = new WasmEngine(alk, modelBytes)
 }, 300_000)
@@ -239,7 +225,7 @@ function joined(a: ProcessPart, b: ProcessPart): ProcessPart {
   return { start: a.start, audio, speech: [...a.speech, ...b.speech], wakes: [], diag: [...a.diag, ...b.diag], ...(trace ? { trace } : {}) }
 }
 
-// the numbers alk_h_processor_push writes
+// a part as numbers, for its digest
 function partNumbers(p: ProcessPart): Float64Array {
   const n: number[] = [p.start, p.audio.length, ...p.audio, p.speech.length, ...p.speech.flatMap((s) => [s.start, s.end]), p.diag.length, ...p.diag.flatMap((e) => record(e as ChainEvent))]
   if (!p.trace) n.push(0)
@@ -307,27 +293,14 @@ describe('process, in blocks of any size', () => {
       const resampler = new Resampler(rate, 16000, true)
       let given = 0
       let taken = 0
-      const focus = opts.focus !== undefined && opts.focus !== false
-      const fo = typeof opts.focus === 'object' ? opts.focus : {}
-      const s = { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) }
-      const numbers = Float64Array.of(+focus, fo.strength ?? 1, opts.cue === undefined ? -1 : opts.cue === false ? 0 : 1, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, +(opts.normalize ?? false), +(opts.trace ?? false), rate)
-      const p = fo.voiceprint ? (fo.voiceprint as Voiceprint).embedding : null
-      const make = (at: number, n: number) => inWasm(numbers, (o) => h.alk_h_processor(engine.model('focus').ptr, engine.model('cue').ptr, o, at, n))
-      const core = p ? inWasm(p, (at) => make(at, p.length)) : make(0, 0)
-      expect(core).not.toBe(0)
+      const core = engine.processor(coreOptions(opts, rate))
       const digest = createHash('sha256')
       const r = rng(seed * 17)
-      const compare = (a: ProcessPart, n: number) => {
-        const want = partNumbers(a)
-        const got = new Float64Array(alk.heap, h.alk_h_numbers(), n).slice()
-        if (!bits(new Float32Array(got.buffer)).equals(bits(new Float32Array(want.buffer)))) expect(Array.from(got)).toEqual(Array.from(want))
-        digest.update(bits(new Float32Array(want.buffer)))
+      const compare = (a: ProcessPart, b: Record<string, unknown>) => {
+        expect({ ...b, audio: bits(b.audio as Float32Array) }).toEqual({ ...a, audio: bits(a.audio) })
+        digest.update(bits(new Float32Array(partNumbers(a).buffer)))
       }
-      const empty = (n: number) => {
-        const got = new Float64Array(alk.heap, h.alk_h_numbers(), n)
-        // start, then no audio, speech, diag or trace
-        expect(Array.from(got.subarray(1))).toEqual([0, 0, 0, 0])
-      }
+      const empty = (b: Record<string, unknown>) => expect({ ...b, start: 0, audio: (b.audio as Float32Array).length }).toEqual({ start: 0, audio: 0, speech: [], wakes: [], diag: [] })
       for (let i = 0; i < pcm.length; ) {
         const n = Math.min(pcm.length - i, 1 + Math.floor(r() * 5000))
         const block = pcm.subarray(i, i + n)
@@ -335,7 +308,7 @@ describe('process, in blocks of any size', () => {
         given += n
         resampler.push(block, (x) => out.push(x))
         taken += out.length
-        const got = inWasm(block, (at) => h.alk_h_processor_push(core, at, n))
+        const got = core.push(block)
         if (out.length) compare(ts.push(Float32Array.from(out)), got)
         else empty(got)
         i += n
@@ -347,8 +320,8 @@ describe('process, in blocks of any size', () => {
       if (want > 0) resampler.push(new Float32Array(Resampler.HALF * 2 + 8), (x) => tail.length < want && tail.push(x))
       const first = tail.length ? ts.push(Float32Array.from(tail)) : null
       const last = ts.end()
-      compare(first ? joined(first, last) : last, h.alk_h_processor_end(core))
-      h.alk_h_processor_free(core)
+      compare(first ? joined(first, last) : last, core.end())
+      core.release()
       expect(digest.digest('hex')).toBe(GOLDEN[`process: ${name}`])
     }, 120_000)
 })

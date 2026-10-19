@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 
-use alkove_core::{js, math, FocusOptions, Models, Part, ProcessOptions, Processor, Resampler, SpeechParams};
-use alkove_engine::Model;
+use alkove_core::spot::phones::{distance, to_ids, to_ipa};
+use alkove_core::spot::search::Search;
+use alkove_core::{js, lex, math, text, Resampler, Value};
 
-use crate::core::record;
-use crate::{fail, shared};
+use crate::core::{answer, input};
 
 thread_local! {
     static OUT: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
@@ -31,11 +31,6 @@ pub extern "C" fn alk_h_math(kind: u32, x: f64, y: f64) -> f64 {
 #[no_mangle]
 pub extern "C" fn alk_h_out() -> *const f32 {
     OUT.with(|o| o.borrow().as_ptr())
-}
-
-#[no_mangle]
-pub extern "C" fn alk_h_numbers() -> *const f64 {
-    NUMBERS.with(|o| o.borrow().as_ptr())
 }
 
 #[no_mangle]
@@ -70,87 +65,51 @@ pub unsafe extern "C" fn alk_h_resample_all(p: *const f32, len: usize, in_rate: 
     })
 }
 
-// Safety: models live or null, `o` the 10 numbers below, `print` null or `print_len` floats.
-#[no_mangle]
-pub unsafe extern "C" fn alk_h_processor(focus: *const Model, cue: *const Model, o: *const f64, print: *const f32, print_len: usize) -> *mut Processor {
-    // focus, strength, cue (-1 unset, 0, 1), confidence, exit, start, stop, normalize, trace, rate
-    let o = std::slice::from_raw_parts(o, 10);
-    let models = Models { focus: (!focus.is_null()).then(|| shared(focus)), cue: (!cue.is_null()).then(|| shared(cue)) };
-    let opts = ProcessOptions {
-        focus: (o[0] != 0.0).then(|| FocusOptions { print: (!print.is_null()).then(|| std::slice::from_raw_parts(print, print_len).to_vec()), strength: o[1] }),
-        cue: if o[2] < 0.0 { None } else { Some(o[2] != 0.0) },
-        speech: SpeechParams { confidence: o[3], exit_confidence: o[4], start_secs: o[5], stop_secs: o[6] },
-        normalize: o[7] != 0.0,
-        trace: o[8] != 0.0,
-        rate: o[9],
-    };
-    match Processor::new(&models, opts) {
-        Ok(p) => Box::into_raw(Box::new(p)),
-        Err(e) => {
-            fail(e);
-            std::ptr::null_mut()
-        }
-    }
+fn strings(v: Vec<String>) -> Value {
+    v.into()
 }
 
-// start, audio, speech, diag, trace: each list after its length, in `alk_h_numbers`
-fn numbers(part: &Part) -> isize {
-    NUMBERS.with(|n| {
-        let mut n = n.borrow_mut();
-        n.clear();
-        n.push(part.start);
-        n.push(part.audio.len() as f64);
-        n.extend(part.audio.iter().map(|&x| x as f64));
-        n.push(part.speech.len() as f64);
-        for s in &part.speech {
-            n.extend([s.start, s.end]);
-        }
-        n.push(part.diag.len() as f64);
-        for e in &part.diag {
-            n.extend(record(e));
-        }
-        match &part.trace {
-            None => n.push(0.0),
-            Some(t) => {
-                n.push(1.0);
-                for rows in [&t.focus, &t.cue] {
-                    n.push(rows.len() as f64);
-                    for r in rows {
-                        n.extend([r.t, r.value]);
-                    }
+// the core's text and phoneme rules on one input value { op, s, … }, for the comparison with the TypeScript
+#[no_mangle]
+pub extern "C" fn alk_h_value() -> i32 {
+    answer((|| {
+        let v = input()?;
+        let s = v.get("s").and_then(Value::str).unwrap_or("").to_string();
+        let lang = v.get("lang").and_then(Value::str).unwrap_or("").to_string();
+        let ids = |k: &str| v.get(k).and_then(Value::arr).unwrap_or(&[]).iter().map(|x| x.num().unwrap_or(0.0) as u32).collect::<Vec<u32>>();
+        let cps = || v.get("cps").and_then(Value::arr).unwrap_or(&[]).iter().filter_map(|x| char::from_u32(x.num().unwrap_or(0.0) as u32)).collect::<Vec<char>>();
+        let flags = |f: fn(char) -> bool| Value::Arr(cps().into_iter().map(|c| f(c).into()).collect());
+        Ok(match v.get("op").and_then(Value::str).unwrap_or("") {
+            "nfd" => text::nfd(&s).into(),
+            "nfc" => text::nfc(&s).into(),
+            "lower" => text::lower(&s).into(),
+            "letter" => flags(text::is_letter),
+            "upper" => flags(text::is_upper),
+            "mark" => flags(text::is_mark),
+            "number" => flags(text::is_number),
+            "space" => flags(text::is_space),
+            "acronyms" => strings(text::acronyms(&s)),
+            "abbreviations" => strings(text::abbreviations(&s)),
+            "split" => strings(lex::split_words(&s)),
+            "clean" => lex::clean(&s).into(),
+            "slashed" => text::slashed(&s).map_or(Value::Null, Value::from),
+            "check" => Value::Arr(lex::check_text(&s)),
+            "toIds" => to_ids(&s, &lang).map_or(Value::Null, |x| x.into_iter().map(|i| i as f64).collect::<Vec<_>>().into()),
+            "toIpa" => to_ipa(&ids("ids")).into(),
+            "distance" => distance(&ids("a"), &ids("b")).into(),
+            "distanceIpa" => lex::distance_ipa(&s, v.get("t").and_then(Value::str).unwrap_or("")).into(),
+            "search" => {
+                let mut search = Search::new(&ids("ids"), &lang, 0.03);
+                let frames = v.get("frames").and_then(Value::arr).unwrap_or(&[]);
+                let mut out = Vec::new();
+                for (t, f) in frames.iter().enumerate() {
+                    let logp: Vec<f32> = f.arr().unwrap_or(&[]).iter().map(|x| x.num().unwrap_or(0.0) as f32).collect();
+                    let r = search.step(&logp, t as i64);
+                    out.push(Value::Arr(vec![r.score.into(), (r.start as f64).into()]));
                 }
+                Value::Arr(out)
             }
-        }
-        n.len() as isize
-    })
-}
-
-// Safety: `p` is live, `pcm` holds `len` floats; -1 after the end.
-#[no_mangle]
-pub unsafe extern "C" fn alk_h_processor_push(p: *mut Processor, pcm: *const f32, len: usize) -> isize {
-    match (*p).push(std::slice::from_raw_parts(pcm, len)) {
-        Ok(part) => numbers(&part),
-        Err(e) => {
-            fail(e);
-            -1
-        }
-    }
-}
-
-// Safety: `p` is live.
-#[no_mangle]
-pub unsafe extern "C" fn alk_h_processor_end(p: *mut Processor) -> isize {
-    match (*p).end() {
-        Ok(part) => numbers(&part),
-        Err(e) => {
-            fail(e);
-            -1
-        }
-    }
-}
-
-// Safety: `p` comes from `alk_h_processor`.
-#[no_mangle]
-pub unsafe extern "C" fn alk_h_processor_free(p: *mut Processor) {
-    drop(Box::from_raw(p));
+            _ => Value::Null,
+        })
+    })())
 }

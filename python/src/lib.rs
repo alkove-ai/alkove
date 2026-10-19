@@ -155,7 +155,7 @@ fn options(focus: bool, strength: f64, print: Option<&[u8]>, cue: Option<bool>, 
 }
 
 fn models(focus: Option<&Model>, cue: Option<&Model>) -> Models {
-    Models { focus: focus.map(|m| m.inner.clone()), cue: cue.map(|m| m.inner.clone()) }
+    Models { focus: focus.map(|m| m.inner.clone()), cue: cue.map(|m| m.inner.clone()), spot: None }
 }
 
 /// The chain on a live stream at any rate: frames in, the processed samples that are ready out, at the same rate.

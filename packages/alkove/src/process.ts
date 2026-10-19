@@ -48,6 +48,24 @@ export interface ProcessPart {
   trace?: Trace
 }
 
+// the core's options for these: { focus, cue, speech, normalize, trace, rate, spot }
+export function coreOptions(opts: Omit<ProcessOptions, 'onProgress' | 'signal'>, rate = RATE) {
+  const focus = opts.focus !== undefined && opts.focus !== false
+  const f = typeof opts.focus === 'object' ? opts.focus : {}
+  const print = printOf(f.voiceprint)?.embedding
+  const words = opts.spot?.words.map(wordOf) ?? []
+  return {
+    focus: focus ? { print: print ? Array.from(print) : null, strength: f.strength ?? 1 } : null,
+    // an object of settings turns Cue on, as true does
+    cue: opts.cue === undefined || opts.cue === null ? null : opts.cue !== false,
+    speech: { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) },
+    normalize: opts.normalize ?? false,
+    trace: !!opts.trace,
+    rate,
+    spot: words.length ? { words: words.map((w) => w.toJSON()), context: opts.spot?.context ?? 'anywhere' } : null,
+  }
+}
+
 export function printOf(p: Voiceprint | VoiceprintJSON | string | null | undefined): Voiceprint | null {
   if (!p) return null
   if (p instanceof Voiceprint) return p

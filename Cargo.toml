@@ -15,3 +15,8 @@ opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+strip = true
+
+# the core runs light loops around the engine: built for size
+[profile.release.package.alkove-core]
+opt-level = "s"

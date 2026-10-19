@@ -8,5 +8,14 @@
  "process: focus without speech": "d85ba636fddc59849f124cfe4e4d6c77732577cb3d7953fdb656c34dcb39af49",
  "process: cue alone, traced": "242a1a7abf33a608415335357941cc3f8f0d095f8d5da033326b02e184ca0c5d",
  "process: nothing chosen": "28bd17b42e29543f2b8da19b0a878e57c1b2711d970df9018ed66ff14b783b8e",
- "process: focus and cue, blocks at 44.1 kHz": "2561074fb09a86edec28c945b081d66de665c280701ba28180233cc6041a14b1"
+ "process: focus and cue, blocks at 44.1 kHz": "2561074fb09a86edec28c945b081d66de665c280701ba28180233cc6041a14b1",
+ "spot: the keyword search": "66ee06898aa94831736f273f9cadbbbba468059a61ab3dfbaee9e8daf13eac12",
+ "lex: phonemize in the seven languages": "c7476a0fd4aac6b03187eaccd61677462ca31e246ae82e66426e3c4dded392bb",
+ "lex: compile": "6c67daf5617d767d62633740f9a123c54a1da8ff1806c9bb4fa06361726b12c2",
+ "spot: process, raw, anywhere, traced": "6199ba1f929257cdd4c13f9d0ef2234059fc120ce295082206ada06c937d297b",
+ "spot: process, raw, after a pause": "1a8438815dd04bca323ae22af2b36b9a97f24e85166defbff49ca5ed4b7f62c6",
+ "spot: process, behind Focus, both, traced": "4c9c11be8bcc50e8f026d7fdfdc4f7f014b0d579b34aa7078abcdeb13f204ca0",
+ "spot: process, behind Focus with Cue, pause, normalize": "745dd850643fcaa9f02a2dc85f0f7cb7a66c1be6af57daf4af7845eaab52bcc7",
+ "spot: listening frame by frame": "02ee62f88f8a860f82ed1528b684b772bca6573955f92beff6b3a9df644908e6",
+ "spot: enrolling": "8189b651c9410d91c915b02aee333370465f0a81ad81d0550d5db817af2b09be"
 }

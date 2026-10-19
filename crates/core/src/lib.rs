@@ -6,10 +6,14 @@ mod focus;
 pub mod fp;
 pub mod js;
 mod level;
+pub mod lex;
 mod live;
 pub mod math;
 mod process;
 mod resample;
+pub mod spot;
+pub mod text;
+pub mod value;
 
 use std::fmt;
 
@@ -22,6 +26,9 @@ pub use level::{Chunker, Delay, Gate, Level};
 pub use live::Live;
 pub use process::{process, FocusOptions, Models, Part, ProcessOptions, Processor, Speech, Trace, TraceRow};
 pub use resample::Resampler;
+pub use value::Value;
+
+include!(concat!(env!("OUT_DIR"), "/manifest.rs"));
 
 pub const RATE: f64 = 16000.0;
 
@@ -49,6 +56,11 @@ pub enum Error {
     Print(usize),
     Missing(&'static str),
     Ended,
+    Value(&'static str),
+    // what the TypeScript threw: a TypeError, a RangeError, an AlkoveError with its code
+    Type(String),
+    Range(String),
+    Alkove(&'static str, String),
 }
 
 impl fmt::Display for Error {
@@ -59,6 +71,8 @@ impl fmt::Display for Error {
             Error::Print(n) => write!(f, "a print of {n} values: Focus takes {}", FOCUS.print),
             Error::Missing(m) => write!(f, "model {m} not given"),
             Error::Ended => write!(f, "push after end"),
+            Error::Value(m) => write!(f, "bad value: {m}"),
+            Error::Type(m) | Error::Range(m) | Error::Alkove(_, m) => f.write_str(m),
         }
     }
 }

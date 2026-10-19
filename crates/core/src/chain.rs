@@ -333,3 +333,25 @@ fn check_print(p: &[f32]) -> Result<(), Error> {
     }
     Ok(())
 }
+
+impl ChainEvent {
+    // the web SDK's event object; None for the taps
+    pub fn to_value(&self) -> Option<crate::Value> {
+        use crate::value::obj;
+        Some(match *self {
+            ChainEvent::Speech(SpeechEvent::Start { start }) => obj([("type", "speechstart".into()), ("start", start.into())]),
+            ChainEvent::Speech(SpeechEvent::End { start, end }) => obj([("type", "speechend".into()), ("start", start.into()), ("end", end.into())]),
+            ChainEvent::Idle { asleep, at } => obj([("type", "idle".into()), ("asleep", asleep.into()), ("at", at.into())]),
+            ChainEvent::Print { print, after, why } => obj([
+                ("type", "diag".into()),
+                ("code", "focus.print".into()),
+                ("level", "info".into()),
+                ("data", obj([("print", print.into()), ("after", after.into()), ("why", why.as_str().into())])),
+            ]),
+            ChainEvent::Reset { after, why } => {
+                obj([("type", "diag".into()), ("code", "focus.reset".into()), ("level", "info".into()), ("data", obj([("after", after.into()), ("why", why.as_str().into())]))])
+            }
+            ChainEvent::Focus { .. } | ChainEvent::Cue { .. } => return None,
+        })
+    }
+}

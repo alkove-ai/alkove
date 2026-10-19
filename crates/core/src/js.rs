@@ -35,6 +35,17 @@ pub fn min(a: f64, b: f64) -> f64 {
     }
 }
 
+// Array.prototype.sort: stable, `before(a, b)` when a goes strictly first; an insertion sort, small in code and fine for the short lists the core sorts
+pub fn sort<T>(v: &mut [T], before: impl Fn(&T, &T) -> bool) {
+    for i in 1..v.len() {
+        let mut j = i;
+        while j > 0 && before(&v[j], &v[j - 1]) {
+            v.swap(j, j - 1);
+            j -= 1;
+        }
+    }
+}
+
 const POW10: [u128; 11] = [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000];
 
 // +x.toFixed(digits): the exact value rounded half up at `digits` decimals, read back as a number

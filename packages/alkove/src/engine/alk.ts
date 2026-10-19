@@ -30,6 +30,27 @@ export interface AlkExports {
   alk_chain_strength(c: number, s: number): void
   alk_chain_enabled(c: number, on: number): void
   alk_chain_get(c: number, what: number): number
+  alk_value_in(len: number): number
+  alk_value_out(): number
+  alk_value_len(): number
+  alk_lex(m: number): number
+  alk_lex_free(l: number): void
+  alk_lex_phonemize(l: number): number
+  alk_compile(l: number): number
+  alk_processor(focus: number, cue: number, spot: number): number
+  alk_processor_free(p: number): void
+  alk_processor_push(p: number, pcm: number, len: number): number
+  alk_processor_end(p: number): number
+  alk_processor_audio(p: number): number
+  alk_processor_audio_len(p: number): number
+  alk_listener(m: number): number
+  alk_listener_free(l: number): void
+  alk_listener_words(l: number): number
+  alk_listener_push(l: number, pcm: number, len: number): number
+  alk_enroller(m: number): number
+  alk_enroller_free(e: number): void
+  alk_enroller_push(e: number, pcm: number, len: number): number
+  alk_enroller_result(e: number): number
 }
 
 export type TypedData = Float32Array | Int32Array

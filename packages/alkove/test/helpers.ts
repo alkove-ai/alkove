@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -10,6 +11,17 @@ const root = join(import.meta.dirname, '..')
 export const engineWasm = () => readFileSync(join(root, '../../target/wasm32-unknown-unknown/release/alkove_wasm.wasm'))
 
 export const loadEngine = async (): Promise<Alk> => Alk.create(await WebAssembly.compile(engineWasm()))
+
+export const workspace = join(root, '../..')
+
+// the core with its test exports (crates/wasm, feature harness), apart from the SDK's wasm
+export function harnessWasm(): Uint8Array<ArrayBuffer> {
+  const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: ['-C', 'target-feature=+simd128,+bulk-memory'].join('\x1f') }
+  execFileSync('cargo', ['build', '-q', '--release', '-p', 'alkove-wasm', '--features', 'harness', '--target', 'wasm32-unknown-unknown', '--target-dir', 'target/harness'], { cwd: workspace, env, stdio: 'inherit' })
+  return Uint8Array.from(readFileSync(join(workspace, 'target/harness/wasm32-unknown-unknown/release/alkove_wasm.wasm')))
+}
+
+export const loadHarness = async (): Promise<Alk> => Alk.create(await WebAssembly.compile(harnessWasm()))
 
 export const modelBytes = (name: ModelName) => new Uint8Array(readFileSync(join(root, '.cache/models', MODELS[name].file)))
 

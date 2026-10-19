@@ -1,6 +1,7 @@
 import type { Alk, Model, Session, Tensor } from '../engine/alk'
 import type { ModelName } from '../manifest'
 import { Chain, type ChainOptions } from './chain'
+import { NativeEnroller, NativeLex, NativeListener, NativeProcessor, type Value } from './native'
 
 export type StreamModel = 'focus' | 'cue' | 'spot'
 
@@ -21,12 +22,18 @@ export interface Engine {
   stream(model: StreamModel): StreamNet
   net(model: 'timbre' | 'lex', plan?: string): Net
   chain(opts?: ChainOptions): Chain
+  // the core's processor, on the models its options need
+  processor(options: { focus: unknown; cue: boolean | null; spot: unknown }): NativeProcessor
+  listener(words: Value[], context: string): NativeListener
+  enroller(word: Value, takes: number, chain: string): NativeEnroller
+  lex(): NativeLex
 }
 
 // one model per name (weights unpacked once), one session per stream: each keeps its own state
 export class WasmEngine implements Engine {
   private models = new Map<ModelName, Model>()
   private calls = new Map<string, Session>()
+  private lexer: NativeLex | null = null
 
   constructor(
     readonly alk: Alk,
@@ -51,6 +58,25 @@ export class WasmEngine implements Engine {
     return new Chain(this.alk, this.model('focus'), this.model('cue'), opts)
   }
 
+  processor(options: { focus: unknown; cue: boolean | null; spot: unknown }): NativeProcessor {
+    const focus = !!options.focus
+    const models = { focus: focus ? this.model('focus') : undefined, cue: focus || options.cue ? this.model('cue') : undefined, spot: options.spot ? this.model('spot') : undefined }
+    return new NativeProcessor(this.alk, models, options as Value)
+  }
+
+  listener(words: Value[], context: string): NativeListener {
+    return new NativeListener(this.alk, this.model('spot'), words, context)
+  }
+
+  enroller(word: Value, takes: number, chain: string): NativeEnroller {
+    return new NativeEnroller(this.alk, this.model('spot'), word, takes, chain)
+  }
+
+  // one per engine: its sessions are reused from word to word
+  lex(): NativeLex {
+    return (this.lexer ??= new NativeLex(this.alk, this.model('lex')))
+  }
+
   net(model: 'timbre' | 'lex', plan?: string): Net {
     const key = `${model} ${plan ?? ''}`
     let s = this.calls.get(key)
@@ -60,6 +86,8 @@ export class WasmEngine implements Engine {
   }
 
   release(): void {
+    this.lexer?.release()
+    this.lexer = null
     for (const s of this.calls.values()) s.release()
     for (const m of this.models.values()) m.release()
     this.calls.clear()
