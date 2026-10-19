@@ -1,6 +1,6 @@
 # alkove-core
 
-What turns the outputs of the [Alkove engine](../engine) into features: the chain that keeps the user's voice, the speech events, and, to come, wake words, pronunciations and voiceprints. It is written once, in Rust, for every Alkove SDK: the web package runs it as WebAssembly, and the Python and Android packages will run it natively.
+What turns the outputs of the [Alkove engine](../engine) into features: the chain that keeps the user's voice, the speech events, wake words, pronunciations and voiceprints. It is written once, in Rust, for every Alkove SDK: the web package runs it as WebAssembly, the Python package natively, as the Android and iOS packages will.
 
 Rust, no dependencies beyond the engine, Apache-2.0.
 

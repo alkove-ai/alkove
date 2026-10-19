@@ -121,8 +121,8 @@ await input.setEnabled(false) // mode raw, reason off
 ## Stats, recordings and traces
 
 - `stats: true`, then `await input.stats()`: `{ speechSeconds, seconds, noiseRemovedDb }`, the noise removed being measured where Cue hears no speech.
-- `await input.record(10)`: the next 10 seconds as a stereo WAV `Blob` at 16 kHz, the microphone on the left and the output on the right. It throws `engine.failed` before the models run.
-- `keepRecent: 20`, then `await input.recent()`: the last 20 seconds in the same format, for a "report a problem" button.
+- `await input.record(10)`: the next 10 seconds as a stereo WAV `Blob` at 16 kHz, the microphone on the left and the output on the right, up to 600 seconds. It throws `engine.failed` before the models run.
+- `keepRecent: 20`, then `await input.recent()`: the last 20 seconds in the same format, up to 600, for a "report a problem" button.
 - `trace: true`: `trace` events with Focus's level, Cue's speech probability and Spot's scores, to plot.
 
 ## Words on the call

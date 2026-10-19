@@ -12,7 +12,7 @@ beforeAll(async () => {
 })
 
 // the references come from the engine's native build: its wasm must give the same bits
-describe('primitives against the engine natively (lab)', () => {
+describe('primitives against the engine natively', () => {
   it('focus', () => {
     const net = engine.stream('focus')
     const pcm = wav('mix.wav')
