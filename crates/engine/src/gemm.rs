@@ -91,7 +91,7 @@ unsafe fn tile4<const P: usize>(k: usize, row: Row, b: [*const f32; P], acc: &mu
     }
 }
 
-const SEGS: usize = 16;
+pub const SEGS: usize = 16;
 
 #[inline(always)]
 unsafe fn panels<const R: usize, const P: usize>(segs: &[(usize, usize, [Row; R])], i0: usize, q0: usize, b: *const f32, k: usize, n: usize, out: &mut impl FnMut(usize, usize, f32)) {
@@ -104,7 +104,7 @@ unsafe fn panels<const R: usize, const P: usize>(segs: &[(usize, usize, [Row; R]
         for (p, x) in bp.iter_mut().enumerate() {
             *x = b.add(((q0 + p) * k + k0) * PANEL);
         }
-        if R == 4 && (1..4).all(|r| rows[r].p == rows[0].p.add(r) && rows[r].s == rows[0].s) {
+        if R == 4 && (1..4).all(|r| rows[r].p == rows[0].p.wrapping_add(r) && rows[r].s == rows[0].s) {
             tile4::<P>(*len, rows[0], bp, &mut *(&mut acc as *mut [[[F32x4; 2]; P]; R] as *mut [[[F32x4; 2]; P]; 4]));
         } else {
             tile::<R, P>(*len, rows, bp, &mut acc);

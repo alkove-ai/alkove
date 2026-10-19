@@ -213,7 +213,7 @@ impl Source for ConvRows<'_> {
         let [hi, wi, wo] = self.hw;
         let mut any = false;
         for (r, row) in rows.iter_mut().enumerate() {
-            let (y, x) = if wo == 1 || self.hw_one { (0, self.order.pos(i0 + r)) } else { ((i0 + r) / wo, (i0 + r) % wo) };
+            let (y, x) = if self.hw_one { (0, self.order.pos(i0 + r)) } else { ((i0 + r) / wo, (i0 + r) % wo) };
             *row = match (tap(y, ky, c.stride[0], c.dil[0], c.pad[0], hi, c.transposed), tap(x, kx, c.stride[1], c.dil[1], c.pad[1], wi, c.transposed)) {
                 (Some(iy), Some(ix)) => {
                     any = true;
@@ -325,7 +325,6 @@ unsafe fn depthwise(a: *mut f32, c: &Conv, [hi, wi, ho, wo]: [usize; 4], w: &[Ve
     let zero = [0f32; 4];
     for y in 0..ho {
         for x in 0..wo {
-            let i = y * wo + x;
             let o = a.add(c.out.off + y * c.out.h + x * c.out.w);
             let mut ch = 0;
             while ch < lanes {
@@ -360,7 +359,6 @@ unsafe fn depthwise(a: *mut f32, c: &Conv, [hi, wi, ho, wo]: [usize; 4], w: &[Ve
                 *o.add(ch * c.out.c) = acc;
                 ch += 1;
             }
-            let _ = i;
         }
     }
     epilogue_plane(a, c, ho, wo, w);

@@ -58,8 +58,9 @@ pub struct Frames {
 }
 
 impl Frames {
+    // clamped in i64: cast to a 32-bit usize, a count past 2^32 would wrap below the one checked at load
     fn of(&self, len: usize) -> usize {
-        ((len as i64 + self.add).div_euclid(self.div) + self.plus).max(0) as usize
+        ((len as i64 + self.add).div_euclid(self.div) + self.plus).clamp(0, i32::MAX as i64) as usize
     }
 }
 
@@ -94,9 +95,10 @@ impl Model {
         let r = &mut Reader::new(h.body);
         let name = r.str()?;
         let weights = (0..r.usize()?).map(|_| format::weight(r, h.blobs)).collect::<Result<Vec<_>, _>>()?;
+        let mut ffts = vec![None; weights.len()];
         let mut plans: Vec<Plan> = Vec::new();
         for _ in 0..r.usize()? {
-            let p = Plan::read(r, &weights)?;
+            let p = Plan::read(r, &weights, &mut ffts)?;
             if plans.iter().any(|q| q.name == p.name) {
                 return Err(Error::Format("two plans of the same name"));
             }
@@ -118,7 +120,7 @@ impl Model {
 }
 
 impl Plan {
-    fn read(r: &mut Reader, weights: &[Vec<f32>]) -> Result<Plan, Error> {
+    fn read(r: &mut Reader, weights: &[Vec<f32>], ffts: &mut [Option<Arc<ops::Fft>>]) -> Result<Plan, Error> {
         let name = r.str()?;
         let arena = r.usize()?;
         let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
@@ -166,7 +168,7 @@ impl Plan {
             let code = r.u32()?;
             let len = r.usize()?;
             let words = r.take(format::size(&[4, len])?)?;
-            ops.push(ops::decode(code, words, arena, weights, most).map_err(|e| match e {
+            ops.push(ops::decode(code, words, arena, weights, ffts, most).map_err(|e| match e {
                 Error::Format(m) => Error::Op(i, m),
                 e => e,
             })?);
@@ -285,7 +287,7 @@ impl Session {
                 Ok(())
             }
             Some(_) => Err(Error::Length(len)),
-            None => Err(Error::Format("no variable input")),
+            None => Err(Error::Length(len)),
         }
     }
 

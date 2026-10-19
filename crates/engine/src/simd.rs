@@ -51,10 +51,6 @@ mod imp {
             Self(f32x4_ne(self.0, o.0))
         }
         #[inline(always)]
-        pub fn not(self) -> Self {
-            Self(v128_not(self.0))
-        }
-        #[inline(always)]
         pub fn select(self, a: Self, b: Self) -> Self {
             Self(v128_bitselect(a.0, b.0, self.0))
         }
@@ -175,10 +171,6 @@ mod imp {
             unsafe { Self(f(vmvnq_u32(vceqq_f32(self.0, o.0)))) }
         }
         #[inline(always)]
-        pub fn not(self) -> Self {
-            unsafe { Self(f(vmvnq_u32(u(self.0)))) }
-        }
-        #[inline(always)]
         pub fn select(self, a: Self, b: Self) -> Self {
             unsafe { Self(vbslq_f32(u(self.0), a.0, b.0)) }
         }
@@ -290,10 +282,6 @@ mod imp {
         #[inline(always)]
         pub fn ne(self, o: Self) -> Self {
             unsafe { Self(_mm_cmpneq_ps(self.0, o.0)) }
-        }
-        #[inline(always)]
-        pub fn not(self) -> Self {
-            unsafe { Self(_mm_xor_ps(self.0, _mm_castsi128_ps(_mm_set1_epi32(-1)))) }
         }
         #[inline(always)]
         pub fn select(self, a: Self, b: Self) -> Self {
@@ -427,10 +415,6 @@ mod imp {
             Self(map(self.0, o.0, |a, b| mask(a != b)))
         }
         #[inline(always)]
-        pub fn not(self) -> Self {
-            Self(bits(self.0, self.0, |a, _| !a))
-        }
-        #[inline(always)]
         pub fn select(self, a: Self, b: Self) -> Self {
             let m = self.0;
             Self([0, 1, 2, 3].map(|i| f32::from_bits((m[i].to_bits() & a.0[i].to_bits()) | (!m[i].to_bits() & b.0[i].to_bits()))))
@@ -515,9 +499,12 @@ impl F32x4 {
     }
 }
 
+// fused only where the lanes' `fma` is: wasm simd128 and x86 without the fma feature add after rounding
+const FUSED: bool = cfg!(feature = "fma") && !cfg!(all(target_arch = "wasm32", target_feature = "simd128")) && !cfg!(all(target_arch = "x86_64", not(target_feature = "fma")));
+
 #[inline(always)]
 pub fn madd(a: f32, b: f32, c: f32) -> f32 {
-    if cfg!(feature = "fma") {
+    if FUSED {
         a.mul_add(b, c)
     } else {
         a * b + c

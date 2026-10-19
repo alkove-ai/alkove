@@ -143,7 +143,7 @@ These rules make the result the same to the bit on every target. An engine that 
 |---|---|
 | `x` | where the audio starts |
 | `frames` (Dim) | `F`, the number of frames |
-| `len` | samples per frame |
+| `len` | samples per frame, ≥ 2 |
 | `hop` | samples between frame starts |
 | `out` (matrix) | `F` rows, one column per mel band |
 | `mels` | number of mel bands |
@@ -215,7 +215,7 @@ Each step applies only when its field is given.
 - `groups`, `transposed` (`u32`);
 - `w` (weight id), then an epilogue (per output channel; `i` = `y × w_out + x`).
 
-`groups` divides `c_in` and `c_out`. Kernel sizes, strides and dilations are not 0.
+`groups` divides `c_in` and `c_out`. Kernel sizes, strides and dilations are not 0. Unless the conv is depthwise (`groups = c_in = c_out`), it has at most 16 taps: `k0 × k1 ≤ 16`.
 
 The weight holds `k0 × k1 × (c_in / groups) × c_out` values. With `cig = c_in / groups` and the tap `t = ky × k1 + kx`, the weight of tap `t`, input channel `ci` of the group, output channel `co` is `w[(t × cig + ci) × c_out + co]`.
 
@@ -224,7 +224,7 @@ Output `(co, y, x)`, in group `g = co / (c_out / groups)`, sums over `ky`, then 
 - **plain:** `i = o × s + k × d − p`;
 - **transposed:** `i = (o + p − k × d) / s`, only when `o + p − k × d ≥ 0` and divisible by `s`.
 
-A tap whose `i` falls outside the input reads `0`.
+A tap whose `i` falls outside the input reads `0`. Weights are finite: where a weight is infinite or NaN, the output at such a tap is unspecified.
 
 ### 4, `LAYER_NORM`
 

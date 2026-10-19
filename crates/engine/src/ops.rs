@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use crate::format::{add, size, Reader, NONE};
-use crate::gemm::PANEL;
+use crate::gemm::{PANEL, SEGS};
 use crate::Error;
 
 pub const FBANK: u32 = 1;
@@ -96,7 +98,7 @@ pub struct Fbank {
     pub bins: usize,
     pub window: usize,
     pub fft: usize,
-    pub plan: Fft,
+    pub plan: Arc<Fft>,
     pub mel: usize,
     pub spans: Vec<(usize, usize, usize)>,
     pub mean: Option<usize>,
@@ -209,8 +211,8 @@ pub enum Op {
     Binary { op: Bin, dims: [Dim; 4], a: Operand, b: Operand, out: View4 },
     Unary { op: Un, p: [f32; 2], dims: [Dim; 4], a: Operand, out: View4 },
     Reduce { op: Red, rows: Dim, n: Dim, x: View4, out: View4 },
-    Rfft { x: usize, n: usize, fft: usize, plan: Fft, out: usize, s: usize, si: usize, scratch: usize },
-    Irfft { x: usize, s: usize, si: usize, n: usize, fft: usize, plan: Fft, out: usize, scratch: usize },
+    Rfft { x: usize, n: usize, fft: usize, plan: Arc<Fft>, out: usize, s: usize, si: usize, scratch: usize },
+    Irfft { x: usize, s: usize, si: usize, n: usize, fft: usize, plan: Arc<Fft>, out: usize, scratch: usize },
     Where { dims: [Dim; 4], c: Operand, a: Operand, b: Operand, out: View4 },
     Gather(Gather),
     Matmul(Matmul),
@@ -390,6 +392,9 @@ impl Check<'_> {
 
     fn span_in(&self, len: usize, off: isize, dims: &[(usize, isize)]) -> Result<Span, Error> {
         if dims.iter().any(|&(d, _)| d == 0) {
+            if off < 0 || off > len as isize {
+                return Err(Error::Format("view out of bounds"));
+            }
             return Ok(Span(off, off));
         }
         let (mut lo, mut hi) = (off, off);
@@ -499,7 +504,12 @@ fn elementwise(out: (&View4, Span), ins: &[(&Operand, Option<Span>)]) -> Result<
     Ok(())
 }
 
-pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], frames: usize) -> Result<Op, Error> {
+// a table's length fixes its FFT's size: one plan per table, however many instructions read it
+fn fft(ffts: &mut [Option<Arc<Fft>>], weights: &[Vec<f32>], w: usize, m: usize) -> Arc<Fft> {
+    ffts[w].get_or_insert_with(|| Arc::new(Fft::new(m, &weights[w]))).clone()
+}
+
+pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], ffts: &mut [Option<Arc<Fft>>], frames: usize) -> Result<Op, Error> {
     let c = Check { arena, weights, frames };
     let r = &mut Reader::new(words);
     let op = match code {
@@ -537,7 +547,7 @@ pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], frame
             let s = c.span(scratch, &[(add(size(&[2, nfft])?, bins)?, 1)])?;
             apart(o, &[Some(input), Some(s)])?;
             apart(s, &[Some(input)])?;
-            let plan = Fft::new(nfft / 2, &weights[fft]);
+            let plan = self::fft(ffts, weights, fft, nfft / 2);
             Op::Fbank(Fbank { x, frames, len, hop, out, nfft, bins, window, fft, plan, mel, spans, mean, std, preemph, first, floor, dc, cmn, scratch })
         }
         LINEAR => {
@@ -565,6 +575,9 @@ pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], frame
             let (groups, transposed) = (r.usize()?, r.u32()? != 0);
             if groups == 0 || c_in % groups != 0 || c_out % groups != 0 || k.contains(&0) || stride.contains(&0) || dil.contains(&0) {
                 return Err(Error::Format("bad conv"));
+            }
+            if !(c_in == groups && c_out == groups) && k[0].saturating_mul(k[1]) > SEGS {
+                return Err(Error::Format("conv of more than 16 taps"));
             }
             let w = c.weight(r.u32()?, size(&[k[0], k[1], c_in / groups, c_out])?)?;
             size(&[(c_out / groups).div_ceil(PANEL), PANEL, k[0], k[1], c_in / groups])?;
@@ -710,7 +723,7 @@ pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], frame
             let sc = c.span(scratch, &[(n, 1)])?;
             apart(o, &[Some(i), Some(sc)])?;
             apart(sc, &[Some(i)])?;
-            Op::Rfft { x, n, fft, plan: Fft::new(n / 2, &weights[fft]), out, s, si, scratch }
+            Op::Rfft { x, n, fft, plan: self::fft(ffts, weights, fft, n / 2), out, s, si, scratch }
         }
         IRFFT => {
             let (x, s, si, n) = (r.usize()?, r.usize()?, r.usize()?, r.usize()?);
@@ -724,7 +737,7 @@ pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], frame
             let sc = c.span(scratch, &[(n, 1)])?;
             apart(o, &[Some(i), Some(sc)])?;
             apart(sc, &[Some(i)])?;
-            Op::Irfft { x, s, si, n, fft, plan: Fft::new(n / 2, &weights[fft]), out, scratch }
+            Op::Irfft { x, s, si, n, fft, plan: self::fft(ffts, weights, fft, n / 2), out, scratch }
         }
         WHERE => {
             let (dims, d) = c.dims4(r)?;

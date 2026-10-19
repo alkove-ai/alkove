@@ -82,7 +82,7 @@ cargo test --release
 ./crates/engine/fingerprints.sh model.alk …
 ```
 
-- **`cargo test`** builds small plans in memory and compares them, to the bit, with plain loops summing in the same order: linear, grouped, dilated, depthwise and transposed convolutions, sizes that do not fall on multiples of 4. It also checks the four-lane functions against the scalar ones, and that crafted files are refused. CI runs it on Linux x86-64, macOS arm64 and wasm32 (with and without SIMD).
+- **`cargo test`** builds small plans in memory and compares them, to the bit, with plain loops summing in the same order: linear, convolutions in 1D and 2D (grouped, dilated, depthwise, transposed), sizes that do not fall on multiples of 4. It also checks the four-lane functions against the scalar ones, and that crafted files are refused. CI runs it on Linux x86-64, macOS arm64 and wasm32 (with and without SIMD).
 - **`fingerprints.sh`** hashes the outputs of 200 runs of each plan on fixed inputs, natively, on x86-64 through Rosetta, and in Node. The three hashes must be equal.
 
 ## Files
