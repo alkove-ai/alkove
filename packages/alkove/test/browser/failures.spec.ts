@@ -1,5 +1,6 @@
 import type { ConsoleMessage } from '@playwright/test'
 
+import { MODELS } from '../../src/manifest'
 import { expect, fromB64, locate, open, test, wavPcm } from './fixtures'
 
 const FOCUS_FILE = 'alkove-focus-1-preview.alk'
@@ -118,7 +119,7 @@ test.describe('failures', () => {
     expect(r.mode).toEqual({ mode: 'raw', last: { mode: 'raw', reason: 'failed' } })
     expect(r.failed.error).toContain('sha256')
     expect(r.error).toMatchObject({ name: 'AlkoveError', code: 'models.hash' })
-    expect(r.error.message).toMatch(/alkove-cue-1-preview: sha256 [0-9a-f]{64}, expected 00a8a49b/)
+    expect(r.error.message).toMatch(new RegExp(`alkove-cue-1-preview: sha256 [0-9a-f]{64}, expected ${MODELS.cue.sha256}`))
     expect(r.cached).toBe(false)
   })
 
@@ -189,7 +190,7 @@ test.describe('failures', () => {
     expect(r.after).toEqual({ call: true, print: false, wake: false })
     expect(r.wake).toEqual({ plain: true, typed: true, print: false })
     // Focus and Cue, in bytes
-    expect(r.progress.at(-1)).toEqual({ loaded: 931249 + 1156915, total: 931249 + 1156915 })
+    expect(r.progress.at(-1)).toEqual({ loaded: MODELS.focus.bytes + MODELS.cue.bytes, total: MODELS.focus.bytes + MODELS.cue.bytes })
   })
 
   test('status "blocked" when the page has had no user gesture, "running" after resume() in a click (Safari)', async ({ page, origin, browserName }) => {

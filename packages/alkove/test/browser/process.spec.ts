@@ -36,8 +36,8 @@ test.describe('Alkove.process in the background worker', () => {
 
     expect(b.word).toEqual(JSON.parse(JSON.stringify(word.toJSON())))
     expect(nSpeech.speech.length).toBe(1)
-    close(b.speech.speech, nSpeech.speech, 1e-6)
-    close(b.mix.speech, nMix.speech, 1e-6)
+    close(b.speech.speech, nSpeech.speech, 0)
+    close(b.mix.speech, nMix.speech, 0)
     expect(b.speech.wakes.map((w: any) => w.word)).toEqual(['amendement'])
     for (const [bw, nw] of [
       [b.speech.wakes, nSpeech.wakes],
@@ -46,14 +46,15 @@ test.describe('Alkove.process in the background worker', () => {
       expect(bw.length).toBe(nw.length)
       bw.forEach((w: any, i: number) => {
         expect(w.word).toBe(nw[i].word)
-        expect(Math.abs(w.start - nw[i].start)).toBeLessThanOrEqual(1e-6)
-        expect(Math.abs(w.score - nw[i].score)).toBeLessThanOrEqual(1e-4)
+        expect(w.start).toBe(nw[i].start)
+        // computed in JavaScript, whose Math.exp and Math.log differ in the last digit between browsers (WebKit)
+        expect(Math.abs(w.score - nw[i].score)).toBeLessThanOrEqual(1e-12)
       })
     }
     expect(maxDiff(fromB64(b.speech.audio), nSpeech.audio)).toBe(0)
     expect(maxDiff(fromB64(b.mix.raw), wavPcm('mix.wav'))).toBeLessThan(1e-6)
-    // the same wasm engine: the processed audio within float noise of Node's
-    expect(maxDiff(fromB64(b.mix.audio), nMix.audio)).toBeLessThan(1e-4)
+    // the same wasm engine: the processed audio to the bit of Node's
+    expect(maxDiff(fromB64(b.mix.audio), nMix.audio)).toBe(0)
     expect(maxDiff(nMix.audio, nMix.raw)).toBeGreaterThan(0.05)
   })
 
@@ -245,8 +246,8 @@ test.describe('Alkove.process in the background worker', () => {
     })
     expect(r.ipa).toEqual(nodeIpa)
     expect(r.ipa[0].ipa).toBe('amɑ̃dmɑ̃')
-    const cos = (x: number[], y: number[]) => x.reduce((s, v, i) => s + v * y[i]!, 0) / Math.sqrt(x.reduce((s, v) => s + v * v, 0) * y.reduce((s, v) => s + v * v, 0))
-    expect(cos(r.print.centers[0].embedding, nodePrint.centers[0].embedding)).toBeGreaterThan(0.9999)
+    expect(r.print.centers[0].embedding).toEqual(nodePrint.centers[0].embedding)
+    expect(r.print.centers[0].id).toEqual(nodePrint.centers[0].id)
     expect(r.same.same).toBe(true)
     expect(r.other.same).toBe(false)
     expect(r.who?.who).toBe('me')

@@ -64,8 +64,9 @@ test.describe('network guarantee', () => {
       return { error, diags }
     })
     expect(r.error).toBe('AlkoveError models.fetch')
-    expect(r.diags).toContain('models.default-host')
     const lex = MODELS.lex
+    // before the files are on Hugging Face (no revision), the SDK refuses at once and asks for modelBaseUrl
+    expect(r.diags.includes('models.default-host')).toBe(!!lex.revision)
     expect(foreign).toEqual(lex.revision ? [`https://huggingface.co/alkove-ai/${lex.name}/resolve/${lex.revision}/${lex.file}`] : [])
     // seen and expected: the fixture's check is for requests nobody asked for
     foreign.length = 0
