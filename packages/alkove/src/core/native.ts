@@ -136,6 +136,12 @@ export function receive<T = Value>(alk: Alk, n: number): T {
   throw new Error(e.message)
 }
 
+// a released handle is 0: a call with it would reach whatever the core keeps at address 0
+const live = (ptr: number): number => {
+  if (!ptr) throw new Error('used after release')
+  return ptr
+}
+
 const floats = (alk: Alk, pcm: Float32Array, fn: (p: number, n: number) => number) => alk.with(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength), (p) => fn(p, pcm.length))
 
 export interface NativePronunciation {
@@ -162,7 +168,7 @@ export class NativeLex {
 
   phonemize(texts: string[], lang: string): NativePronunciation[][] {
     send(this.alk, { texts, lang })
-    return receive(this.alk, this.alk.x.alk_lex_phonemize(this.ptr))
+    return receive(this.alk, this.alk.x.alk_lex_phonemize(live(this.ptr)))
   }
 
   release(): void {
@@ -194,17 +200,17 @@ export class NativeProcessor {
   private part(n: number): Record<string, unknown> {
     const { x } = this.alk
     const v = receive<Record<string, unknown>>(this.alk, n)
-    const audio = new Float32Array(this.alk.heap, x.alk_processor_audio(this.ptr), x.alk_processor_audio_len(this.ptr)).slice()
+    const audio = new Float32Array(this.alk.heap, x.alk_processor_audio(live(this.ptr)), x.alk_processor_audio_len(live(this.ptr))).slice()
     const { start, ...rest } = v
     return { start, audio, ...rest }
   }
 
   push(pcm: Float32Array): Record<string, unknown> {
-    return this.part(floats(this.alk, pcm, (p, n) => this.alk.x.alk_processor_push(this.ptr, p, n)))
+    return this.part(floats(this.alk, pcm, (p, n) => this.alk.x.alk_processor_push(live(this.ptr), p, n)))
   }
 
   end(): Record<string, unknown> {
-    return this.part(this.alk.x.alk_processor_end(this.ptr))
+    return this.part(this.alk.x.alk_processor_end(live(this.ptr)))
   }
 
   release(): void {
@@ -233,11 +239,11 @@ export class NativeListener {
 
   setWords(words: Value[], context: string): void {
     send(this.alk, { words, context })
-    receive(this.alk, this.alk.x.alk_listener_words(this.ptr))
+    receive(this.alk, this.alk.x.alk_listener_words(live(this.ptr)))
   }
 
   push(pcm: Float32Array): HeardFrame[] {
-    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_listener_push(this.ptr, p, n)))
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_listener_push(live(this.ptr), p, n)))
   }
 
   release(): void {
@@ -263,11 +269,11 @@ export class NativeEnroller {
   }
 
   push(pcm: Float32Array): { takes: Record<string, unknown>[]; done: boolean } {
-    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_enroller_push(this.ptr, p, n)))
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_enroller_push(live(this.ptr), p, n)))
   }
 
   result(): { word: Value; takes: Record<string, unknown>[]; warnings: Value[] } {
-    return receive(this.alk, this.alk.x.alk_enroller_result(this.ptr))
+    return receive(this.alk, this.alk.x.alk_enroller_result(live(this.ptr)))
   }
 
   release(): void {
@@ -299,12 +305,12 @@ export class NativeTimbre {
   }
 
   windows(pcm: Float32Array): NativeCenter[] {
-    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_timbre_windows(this.ptr, p, n)))
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_timbre_windows(live(this.ptr), p, n)))
   }
 
   embed(pcm: Float32Array, source: string): Value {
     send(this.alk, { source })
-    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_timbre_embed(this.ptr, p, n)))
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_timbre_embed(live(this.ptr), p, n)))
   }
 
   release(): void {
@@ -340,11 +346,11 @@ export class NativeLearner {
   }
 
   learn(timbre: NativeTimbre, pcm: Float32Array): LearnerState & { accepted: boolean; score: number; restarted: boolean } {
-    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_learner_learn(this.ptr, timbre.handle, p, n)))
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_learner_learn(live(this.ptr), timbre.handle, p, n)))
   }
 
   offer(timbre: NativeTimbre, pcm: Float32Array): LearnerState & { accepted: number; rejected: number; restarted: boolean } {
-    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_learner_offer(this.ptr, timbre.handle, p, n)))
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_learner_offer(live(this.ptr), timbre.handle, p, n)))
   }
 
   progress(): number {
@@ -356,16 +362,16 @@ export class NativeLearner {
   }
 
   private state(): number {
-    return this.alk.x.alk_learner_state(this.ptr)
+    return this.alk.x.alk_learner_state(live(this.ptr))
   }
 
   // JSON, or raw: its float32 as they are and its windows unpacked
   voiceprint(raw = false): Value {
-    return receive(this.alk, this.alk.x.alk_learner_voiceprint(this.ptr, +raw))
+    return receive(this.alk, this.alk.x.alk_learner_voiceprint(live(this.ptr), +raw))
   }
 
   forget(): void {
-    this.alk.x.alk_learner_forget(this.ptr)
+    this.alk.x.alk_learner_forget(live(this.ptr))
   }
 
   release(): void {
@@ -393,7 +399,8 @@ export class NativePipeline {
 
   // one hop; the result is valid until the next call
   step(hop: Float32Array, farQuietMs: number): Float32Array {
-    const { alk, ptr } = this
+    const { alk } = this
+    const ptr = live(this.ptr)
     new Float32Array(alk.heap, alk.x.alk_pipeline_hop(ptr), 256).set(hop)
     const out = alk.x.alk_pipeline_step(ptr, farQuietMs)
     this.out.set(new Float32Array(alk.heap, out, 256))
@@ -401,58 +408,58 @@ export class NativePipeline {
   }
 
   spot(model: Model): void {
-    this.alk.x.alk_pipeline_spot(this.ptr, model.ptr)
+    this.alk.x.alk_pipeline_spot(live(this.ptr), model.ptr)
   }
 
   raw(hop: Float32Array): void {
-    new Float32Array(this.alk.heap, this.alk.x.alk_pipeline_hop(this.ptr), 256).set(hop)
-    this.alk.x.alk_pipeline_raw(this.ptr)
+    new Float32Array(this.alk.heap, this.alk.x.alk_pipeline_hop(live(this.ptr)), 256).set(hop)
+    this.alk.x.alk_pipeline_raw(live(this.ptr))
   }
 
   outs(): PipelineOut[] {
-    if (!this.alk.x.alk_pipeline_pending(this.ptr)) return []
-    return receive(this.alk, this.alk.x.alk_pipeline_outs(this.ptr))
+    if (!this.alk.x.alk_pipeline_pending(live(this.ptr))) return []
+    return receive(this.alk, this.alk.x.alk_pipeline_outs(live(this.ptr)))
   }
 
   verified(key: number, same: boolean, score: number): void {
-    this.alk.x.alk_pipeline_verified(this.ptr, key, +same, score)
+    this.alk.x.alk_pipeline_verified(live(this.ptr), key, +same, score)
   }
 
   set(change: Record<string, unknown>): void {
     send(this.alk, change)
-    receive(this.alk, this.alk.x.alk_pipeline_set(this.ptr))
+    receive(this.alk, this.alk.x.alk_pipeline_set(live(this.ptr)))
   }
 
   record(seconds: number): void {
-    this.alk.x.alk_pipeline_record(this.ptr, seconds)
+    this.alk.x.alk_pipeline_record(live(this.ptr), seconds)
   }
 
   recent(): Uint8Array | null {
-    return receive(this.alk, this.alk.x.alk_pipeline_recent(this.ptr))
+    return receive(this.alk, this.alk.x.alk_pipeline_recent(live(this.ptr)))
   }
 
   stats(): Value {
-    return receive(this.alk, this.alk.x.alk_pipeline_stats(this.ptr))
+    return receive(this.alk, this.alk.x.alk_pipeline_stats(live(this.ptr)))
   }
 
   get time(): number {
-    return this.alk.x.alk_pipeline_get(this.ptr, 0)
+    return this.alk.x.alk_pipeline_get(live(this.ptr), 0)
   }
 
   get sleeping(): boolean {
-    return this.alk.x.alk_pipeline_get(this.ptr, 1) === 1
+    return this.alk.x.alk_pipeline_get(live(this.ptr), 1) === 1
   }
 
   get gainDb(): number {
-    return this.alk.x.alk_pipeline_get(this.ptr, 2)
+    return this.alk.x.alk_pipeline_get(live(this.ptr), 2)
   }
 
   get hops(): number {
-    return this.alk.x.alk_pipeline_get(this.ptr, 3)
+    return this.alk.x.alk_pipeline_get(live(this.ptr), 3)
   }
 
   get chained(): boolean {
-    return this.alk.x.alk_pipeline_get(this.ptr, 4) === 1
+    return this.alk.x.alk_pipeline_get(live(this.ptr), 4) === 1
   }
 
   release(): void {
@@ -478,19 +485,19 @@ export class NativeCoach {
 
   learner(start: Value): number {
     send(this.alk, { start })
-    return receive(this.alk, this.alk.x.alk_coach_learner(this.ptr))
+    return receive(this.alk, this.alk.x.alk_coach_learner(live(this.ptr)))
   }
 
   forget(): void {
-    this.alk.x.alk_coach_forget(this.ptr)
+    this.alk.x.alk_coach_forget(live(this.ptr))
   }
 
   window(timbre: NativeTimbre, pcm: Float32Array, farQuietMs: number, t: number): CoachOut[] {
-    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_coach_window(this.ptr, timbre.handle, p, n, farQuietMs, t)))
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_coach_window(live(this.ptr), timbre.handle, p, n, farQuietMs, t)))
   }
 
   verify(timbre: NativeTimbre, pcm: Float32Array): { same: boolean; score: number } {
-    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_coach_verify(this.ptr, timbre.handle, p, n)))
+    return receive(this.alk, floats(this.alk, pcm, (p, n) => this.alk.x.alk_coach_verify(live(this.ptr), timbre.handle, p, n)))
   }
 
   release(): void {

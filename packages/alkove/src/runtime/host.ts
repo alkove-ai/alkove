@@ -89,6 +89,8 @@ export class Host {
   private static current: Host | null = null
   private sent = { realtime: new Set<ModelName>(), background: new Set<ModelName>() }
   private links: Partial<Record<'realtime' | 'background', Promise<WorkerLink>>> = {}
+  // learners and streams whose state lives in the background worker: it stays while they do
+  private holds = 0
 
   static get(): Host {
     lockConfig()
@@ -123,12 +125,21 @@ export class Host {
     link.worker.terminate()
   }
 
-  // no input left: the workers and their sessions go (the background one only when no call is waiting); the next use starts them again
+  hold(): () => void {
+    this.holds++
+    let held = true
+    return () => {
+      if (held) this.holds--
+      held = false
+    }
+  }
+
+  // no input left: the workers and their sessions go (the background one only when no call waits and nothing is held); the next use starts them again
   async idle(): Promise<void> {
     for (const role of ['realtime', 'background'] as const) {
       const p = this.links[role]
       const link = p && (await p.catch(() => null))
-      if (link && this.links[role] === p && (role === 'realtime' || !link.busy)) this.drop(role, link)
+      if (link && this.links[role] === p && (role === 'realtime' || (!link.busy && !this.holds))) this.drop(role, link)
     }
   }
 

@@ -17,7 +17,11 @@ const isNode = () => typeof process !== 'undefined' && !!process.versions?.node 
 
 interface Backend {
   call<T>(name: CallName, args: unknown[], transfer?: Transferable[], onProgress?: (p: { done: number; total: number }) => void): Promise<T>
+  // keeps the worker that holds a learner's or a stream's state; what it returns lets it go
+  hold(): () => void
 }
+
+let ids = 0
 
 let node: Promise<import('./runtime/node').NodeBackend> | null = null
 
@@ -26,12 +30,12 @@ async function backend(models: ModelName[], onProgress?: (p: Progress) => void):
   if (isNode()) {
     const nb = await (node ??= import('./runtime/node').then((m) => new m.NodeBackend()))
     await nb.ready(models)
-    return { call: async <T>(name: CallName, args: unknown[], _t?: Transferable[], progress?: (p: { done: number; total: number }) => void) => (nb.calls[name] as (...a: unknown[]) => T)(...args, progress) }
+    return { call: async <T>(name: CallName, args: unknown[], _t?: Transferable[], progress?: (p: { done: number; total: number }) => void) => (nb.calls[name] as (...a: unknown[]) => T)(...args, progress), hold: () => () => {} }
   }
   const host = Host.get()
   await host.models('background', models, onProgress)
   // asked again at each call: the worker is closed once no input is left, and comes back on the next call
-  return { call: async <T>(name: CallName, args: unknown[], transfer: Transferable[] = [], progress?: (p: { done: number; total: number }) => void) => (await host.models('background', models)).call<T>(name, args, transfer, progress) }
+  return { call: async <T>(name: CallName, args: unknown[], transfer: Transferable[] = [], progress?: (p: { done: number; total: number }) => void) => (await host.models('background', models)).call<T>(name, args, transfer, progress), hold: () => host.hold() }
 }
 
 export type Usage = 'call' | 'agent' | 'wake'
@@ -143,7 +147,12 @@ export type StreamSource = AsyncIterable<Float32Array> | ReadableStream<Float32A
 // long files (an hour) without keeping them in memory: blocks in, parts out, the same as process() on the whole
 async function* stream(source: StreamSource, opts: ProcessOptions & { rate?: number } = {}): AsyncGenerator<ProcessPart> {
   const b = await backend(modelsOf(opts))
-  const id = await b.call<number>('streamOpen', [wireOf(opts)])
+  const id = ++ids
+  const release = b.hold()
+  await b.call('streamOpen', [id, wireOf(opts)]).catch((e) => {
+    release()
+    throw e
+  })
   const rate = opts.rate ?? RATE
   const resampler = new Resampler(rate, RATE, true)
   let given = 0
@@ -164,7 +173,11 @@ async function* stream(source: StreamSource, opts: ProcessOptions & { rate?: num
     if (want > 0) resampler.push(new Float32Array(Resampler.HALF * 2 + 8), (x) => tail.length < want && tail.push(x))
     if (tail.length) yield await b.call<ProcessPart>('streamPush', [id, Float32Array.from(tail)])
   } finally {
-    yield await b.call<ProcessPart>('streamEnd', [id])
+    try {
+      yield await b.call<ProcessPart>('streamEnd', [id])
+    } finally {
+      release()
+    }
   }
 }
 
@@ -261,15 +274,23 @@ export class VoiceprintLearner {
     private b: Backend,
     private id: number,
     s: LearnerState,
+    release: () => void,
   ) {
     this.state = { progress: s.progress, ready: s.ready, voiceprint: fromRaw(s.voiceprint) }
-    closing?.register(this, () => void b.call('learnerClose', [id]).catch(() => {}))
+    closing?.register(this, () => void b.call('learnerClose', [id]).catch(() => {}).finally(release))
   }
 
   static async create(opts: { voiceprint?: Voiceprint | null } = {}): Promise<VoiceprintLearner> {
     const b = await backend(['timbre'])
-    const s = await b.call<LearnerState & { id: number }>('learnerOpen', [opts.voiceprint ? toRaw(opts.voiceprint) : null])
-    return new VoiceprintLearner(b, s.id, s)
+    const id = ++ids
+    const release = b.hold()
+    try {
+      const s = await b.call<LearnerState>('learnerOpen', [id, opts.voiceprint ? toRaw(opts.voiceprint) : null])
+      return new VoiceprintLearner(b, id, s, release)
+    } catch (e) {
+      release()
+      throw e
+    }
   }
 
   get progress(): number {

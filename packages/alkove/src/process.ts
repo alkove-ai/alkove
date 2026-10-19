@@ -85,6 +85,7 @@ export class Processor {
   }
 
   push(pcm: Float32Array): ProcessPart {
+    if (this.closed) throw new Error('push after end')
     return this.core.push(pcm) as unknown as ProcessPart
   }
 
@@ -92,9 +93,16 @@ export class Processor {
   end(): ProcessPart {
     if (this.closed) throw new Error('push after end')
     this.closed = true
-    const part = this.core.end() as unknown as ProcessPart
+    try {
+      return this.core.end() as unknown as ProcessPart
+    } finally {
+      this.core.release()
+    }
+  }
+
+  release(): void {
+    this.closed = true
     this.core.release()
-    return part
   }
 }
 
@@ -104,12 +112,16 @@ export function processPcm(engine: Engine, pcm: Float32Array, opts: ProcessOptio
   const { onProgress, signal, ...rest } = opts
   const p = new Processor(engine, rest)
   const parts: ProcessPart[] = []
-  for (let i = 0; i < pcm.length; i += BLOCK) {
-    signal?.throwIfAborted()
-    parts.push(p.push(pcm.subarray(i, Math.min(pcm.length, i + BLOCK))))
-    onProgress?.({ done: Math.min(pcm.length, i + BLOCK), total: pcm.length })
+  try {
+    for (let i = 0; i < pcm.length; i += BLOCK) {
+      signal?.throwIfAborted()
+      parts.push(p.push(pcm.subarray(i, Math.min(pcm.length, i + BLOCK))))
+      onProgress?.({ done: Math.min(pcm.length, i + BLOCK), total: pcm.length })
+    }
+    parts.push(p.end())
+  } finally {
+    p.release()
   }
-  parts.push(p.end())
   const audio = new Float32Array(pcm.length)
   let o = 0
   for (const part of parts) {

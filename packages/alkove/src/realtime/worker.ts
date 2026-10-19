@@ -248,6 +248,7 @@ function dispose(input: number): void {
   if (r) {
     r.closed = true
     r.port?.close()
+    r.bg?.close()
     clearInterval(r.timer)
     r.p.release()
     inputs.delete(input)
@@ -274,7 +275,7 @@ self.onmessage = async (e: MessageEvent) => {
         const r = realtime(m.input, m.opts, m.bg ?? null, m.out ?? null)
         if (m.bg)
           (m.bg as MessagePort).onmessage = (ev: MessageEvent) => {
-            if (ev.data.type === 'print') r.p.set({ print: ev.data.embedding })
+            if (ev.data.type === 'print' && !r.closed) r.p.set({ print: ev.data.embedding })
           }
         post({ type: 'reply', id: m.id, result: true })
         break
@@ -293,6 +294,7 @@ self.onmessage = async (e: MessageEvent) => {
         break
       }
       case 'rt-port': {
+        dispose(m.input)
         const l: Learning = { coach: engine!.coach(m.ref ?? null), port: m.port }
         learning.set(m.input, l)
         l.port.onmessage = (ev: MessageEvent) => {

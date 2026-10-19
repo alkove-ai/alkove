@@ -6,19 +6,24 @@ import { type ProcessOptions, processPcm, Processor } from '../process'
 
 // what the background worker (or Node, in its own thread) answers, without state of its own beyond the loaded models
 export function makeCalls(engine: () => Engine) {
+  // ids come from the page: a worker started again never hands out one still held by an older object
   const learners = new Map<number, NativeLearner>()
   const streams = new Map<number, Processor>()
-  let next = 0
+  const held = <T>(map: Map<number, T>, id: number, what: string): T => {
+    const x = map.get(id)
+    if (!x) throw new Error(`${what} ${id} is closed, or its worker was started again`)
+    return x
+  }
   return {
     embed: (pcm: Float32Array, source?: 'raw' | 'focus') => engine().timbre().embed(pcm, source ?? 'raw') as unknown as VoiceprintJSON,
     // a learner for a page's own screen (VoiceprintLearner): its print comes back raw, float32 as they are
-    learnerOpen: (start: Value) => {
+    learnerOpen: (id: number, start: Value) => {
       const l = engine().learner('raw', start)
-      learners.set(++next, l)
-      return { id: next, progress: l.progress(), ready: l.ready(), voiceprint: l.voiceprint(true) }
+      learners.set(id, l)
+      return { progress: l.progress(), ready: l.ready(), voiceprint: l.voiceprint(true) }
     },
     learnerOffer: (id: number, pcm: Float32Array) => {
-      const l = learners.get(id)!
+      const l = held(learners, id, 'learner')
       return { ...l.offer(engine().timbre(), pcm), voiceprint: l.voiceprint(true) }
     },
     learnerForget: (id: number) => {
@@ -37,15 +42,15 @@ export function makeCalls(engine: () => Engine) {
       const r = processPcm(engine(), pcm, { ...opts, onProgress })
       return { audio: r.audio, raw: r.raw, speech: r.speech, wakes: r.wakes, diag: r.diag, trace: r.trace }
     },
-    streamOpen: (opts: Omit<ProcessOptions, 'onProgress' | 'signal'>) => {
-      streams.set(++next, new Processor(engine(), opts))
-      return next
+    streamOpen: (id: number, opts: Omit<ProcessOptions, 'onProgress' | 'signal'>) => {
+      streams.set(id, new Processor(engine(), opts))
+      return null
     },
-    streamPush: (id: number, pcm: Float32Array) => streams.get(id)!.push(pcm),
+    streamPush: (id: number, pcm: Float32Array) => held(streams, id, 'stream').push(pcm),
     streamEnd: (id: number) => {
-      const part = streams.get(id)!.end()
+      const s = held(streams, id, 'stream')
       streams.delete(id)
-      return part
+      return s.end()
     },
   }
 }

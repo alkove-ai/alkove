@@ -229,6 +229,17 @@ describe('the workers, before the core and on it', () => {
       'enrolling a word on the raw mic': expect.arrayContaining(['take', 'enrolled']),
     })
   }, 600_000)
+
+  it('a print that comes back after its input closed is dropped', async () => {
+    const rt = worker(join(root, 'dist/alkove-worker.js'), { now: 0 })
+    await rt.send({ type: 'boot', module })
+    await rt.send({ type: 'models', id: 1, models: bytes(['focus', 'cue']) })
+    const [rtSide, bgSide] = channel()
+    await rt.send({ type: 'realtime', id: 2, input: 1, opts: { pipeline: 'call', chain: { gate: false, normalize: true, strength: 1, print: null }, learn: true }, bg: rtSide, out: null })
+    await rt.send({ type: 'dispose', input: 1 })
+    bgSide.postMessage({ type: 'print', embedding: new Float32Array(256) })
+    expect(() => rtSide.deliver()).not.toThrow()
+  })
 })
 
 export { MODELS }
