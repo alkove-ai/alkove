@@ -16,4 +16,4 @@ doctest = false
 [dependencies]
 alkove-core = { path = "../crates/core" }
 alkove-engine = { path = "../crates/engine" }
-pyo3 = { version = "0.29", features = ["extension-module", "abi3-py39"] }
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py39"] }
