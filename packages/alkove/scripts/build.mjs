@@ -12,8 +12,8 @@ const workspace = join(root, '../..')
 const sysroot = execFileSync('rustc', ['--print', 'sysroot'], { encoding: 'utf8' }).trim()
 // every browser with SIMD has bulk memory (without it, the engine's copies go through a loop); paths of panic locations remapped: no home directory in the package, the same bytes on every machine
 const flags = ['-C', 'target-feature=+simd128,+bulk-memory', `--remap-path-prefix=${sysroot}=/rust`, `--remap-path-prefix=${workspace}=/alkove`]
-execFileSync('cargo', ['build', '--release', '-p', 'alkove-engine-wasm', '--target', 'wasm32-unknown-unknown'], { cwd: workspace, stdio: 'inherit', env: { ...process.env, CARGO_ENCODED_RUSTFLAGS: flags.join('\x1f') } })
-const wasm = join(workspace, 'target/wasm32-unknown-unknown/release/alkove_engine_wasm.wasm')
+execFileSync('cargo', ['build', '--release', '-p', 'alkove-wasm', '--target', 'wasm32-unknown-unknown'], { cwd: workspace, stdio: 'inherit', env: { ...process.env, CARGO_ENCODED_RUSTFLAGS: flags.join('\x1f') } })
+const wasm = join(workspace, 'target/wasm32-unknown-unknown/release/alkove_wasm.wasm')
 
 const bytes = readFileSync(wasm)
 const generated = `// written by scripts/build.mjs from the engine's wasm it packs

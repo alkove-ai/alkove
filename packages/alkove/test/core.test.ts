@@ -1,0 +1,387 @@
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+import { Chain, type ChainEvent, type ChainOptions } from '../src/core/chain'
+import { Cue, SPEECH_DEFAULTS } from '../src/core/cue'
+import { WasmEngine } from '../src/core/engine'
+import { Focus } from '../src/core/focus'
+import { Voiceprint } from '../src/core/timbre'
+import { cos, exp, ln, log10, pow, sin } from '../src/dsp/math'
+import { Resampler } from '../src/dsp/resample'
+import { Alk } from '../src/engine/alk'
+import { Processor, type ProcessOptions, type ProcessPart } from '../src/process'
+import { f32, modelBytes, noise, wav } from './helpers'
+
+// the Rust core against the TypeScript it replaces, on the same wasm engine: every output to the bit, every event the same
+
+interface Harness {
+  alk_h_math(kind: number, x: number, y: number): number
+  alk_h_out(): number
+  alk_h_numbers(): number
+  alk_h_resampler(inRate: number, outRate: number, aligned: number): number
+  alk_h_resampler_push(r: number, p: number, len: number): number
+  alk_h_resampler_free(r: number): void
+  alk_h_resample_all(p: number, len: number, inRate: number, outRate: number): number
+  alk_h_processor(focus: number, cue: number, opts: number, print: number, printLen: number): number
+  alk_h_processor_push(p: number, pcm: number, len: number): number
+  alk_h_processor_end(p: number): number
+  alk_h_processor_free(p: number): void
+  alk_chain(focus: number, cue: number, gate: number, normalize: number, sleep: number, strength: number, confidence: number, exit: number, start: number, stop: number, print: number, printLen: number): number
+  alk_chain_free(c: number): void
+  alk_chain_hop(c: number): number
+  alk_chain_step(c: number): number
+  alk_chain_focus(c: number): number
+  alk_chain_events(c: number): number
+  alk_chain_event_count(c: number): number
+  alk_chain_print(c: number, p: number, len: number): number
+  alk_chain_strength(c: number, s: number): void
+  alk_chain_enabled(c: number, on: number): void
+  alk_chain_get(c: number, what: number): number
+}
+
+const workspace = join(import.meta.dirname, '../../..')
+const goldenPath = join(import.meta.dirname, 'fixtures/core.json')
+
+// the core with its test exports, apart from the SDK's wasm
+function harnessWasm(): Buffer {
+  const env = { ...process.env, CARGO_ENCODED_RUSTFLAGS: ['-C', 'target-feature=+simd128,+bulk-memory'].join('\x1f') }
+  execFileSync('cargo', ['build', '-q', '--release', '-p', 'alkove-wasm', '--features', 'harness', '--target', 'wasm32-unknown-unknown', '--target-dir', 'target/harness'], { cwd: workspace, env, stdio: 'inherit' })
+  return readFileSync(join(workspace, 'target/harness/wasm32-unknown-unknown/release/alkove_wasm.wasm'))
+}
+
+let alk: Alk
+let h: Harness
+let engine: WasmEngine
+beforeAll(async () => {
+  alk = await Alk.create(await WebAssembly.compile(new Uint8Array(harnessWasm())))
+  h = alk.x as unknown as Harness
+  engine = new WasmEngine(alk, modelBytes)
+}, 300_000)
+
+const rng = (seed: number) => {
+  let s = seed >>> 0
+  return () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32
+}
+
+// floats into the wasm for the length of `fn`
+function inWasm<T>(x: Float32Array | Float64Array, fn: (p: number) => T): T {
+  const bytes = new Uint8Array(x.buffer, x.byteOffset, x.byteLength)
+  return alk.with(bytes, (p) => fn(p))
+}
+
+const floats = (p: number, n: number) => new Float32Array(alk.heap, p, n).slice()
+const bits = (x: Float32Array) => Buffer.from(x.buffer, x.byteOffset, x.byteLength)
+
+// voices at any level, silences, noise: what a mic gives over a few minutes
+function stream(seed: number, seconds: number, dense = false): Float32Array {
+  const r = rng(seed)
+  const voices = [wav('speech.wav'), wav('mix.wav'), wav('enroll.wav')]
+  const out = new Float32Array(Math.round(seconds * 16000))
+  let o = 0
+  while (o < out.length) {
+    const kind = dense ? 0 : r()
+    const len = Math.min(out.length - o, Math.floor((0.3 + r() * 4) * 16000))
+    if (kind < 0.5) {
+      const v = voices[Math.floor(r() * voices.length)]!
+      const from = Math.floor(r() * v.length)
+      const gain = 0.05 + r() * 2
+      for (let i = 0; i < len; i++) out[o + i] = v[(from + i) % v.length]! * gain
+    } else if (kind < 0.75) {
+      const n = r() < 0.5 ? null : noise(len, seed + o, 1e-6)
+      if (n) out.set(n, o)
+    } else out.set(noise(len, seed + o, 0.002 + r() * 0.05), o)
+    o += len
+  }
+  return out
+}
+
+const print = () => f32('enroll.timbre.f32').slice(0, 192)
+// long synchronous loops starve vitest's own messages
+const breathe = () => new Promise((r) => setImmediate(r))
+const WHY = ['silence', 'forced', 'wake']
+
+type Tap = { type: 'focus'; t: number; hop: Buffer } | { type: 'cue'; speech: number; t: number }
+
+// the core's events, back in the shapes the TypeScript emits
+function decode(rec: Float64Array, n: number, focus: () => Float32Array): (ChainEvent | Tap)[] {
+  const out: (ChainEvent | Tap)[] = []
+  for (let i = 0; i < n; i++) {
+    const [k, a, b, c] = [rec[4 * i]!, rec[4 * i + 1]!, rec[4 * i + 2]!, rec[4 * i + 3]!]
+    if (k === 0) out.push({ type: 'speechstart', start: a })
+    else if (k === 1) out.push({ type: 'speechend', start: a, end: b })
+    else if (k === 2) out.push({ type: 'idle', asleep: a === 1, at: b })
+    else if (k === 3) out.push({ type: 'diag', code: 'focus.print', level: 'info', data: { print: a === 1, after: b, why: WHY[c]! } })
+    else if (k === 4) out.push({ type: 'diag', code: 'focus.reset', level: 'info', data: { after: a, why: WHY[b]! } })
+    else if (k === 5) out.push({ type: 'focus', t: a, hop: bits(focus()) })
+    else out.push({ type: 'cue', speech: a, t: b })
+  }
+  return out
+}
+
+interface Control {
+  print?: Float32Array | null
+  strength?: number
+  enabled?: boolean
+}
+
+// a chain driven hop by hop, as the real-time worker does
+interface Driven {
+  step(hop: Float32Array): { out: Buffer; events: (ChainEvent | Tap)[] }
+  control(c: Control): void
+  state(): number[]
+}
+
+function tsChain(opts: ChainOptions): Driven {
+  const chain = new Chain(new Focus(engine.stream('focus')), new Cue(engine.stream('cue')), opts)
+  let events: (ChainEvent | Tap)[] = []
+  chain.onFocus = (hop, t) => events.push({ type: 'focus', t, hop: bits(hop.slice()) })
+  chain.onCue = (speech, t) => events.push({ type: 'cue', speech, t })
+  return {
+    step(hop) {
+      events = []
+      const out = bits(chain.step(hop, (e) => events.push(e)).slice())
+      return { out, events }
+    },
+    control(c) {
+      if ('print' in c) chain.setPrint(c.print ?? null)
+      if (c.strength !== undefined) chain.setStrength(c.strength)
+      if (c.enabled !== undefined) chain.setEnabled(c.enabled)
+    },
+    state: () => [+chain.speaking, +chain.sleeping, chain.time, chain.gainDb, chain.delay],
+  }
+}
+
+function coreChain(opts: ChainOptions): Driven {
+  const o = { gate: false, normalize: true, strength: 1, sleep: true, ...opts }
+  const s = { ...SPEECH_DEFAULTS, ...opts.speech }
+  const p = opts.print ? Float32Array.from(opts.print) : null
+  const make = (at: number, n: number) =>
+    h.alk_chain(engine.model('focus').ptr, engine.model('cue').ptr, +o.gate, +o.normalize, +o.sleep, o.strength, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, at, n)
+  const c = p ? inWasm(p, (at) => make(at, p.length)) : make(0, 0)
+  expect(c).not.toBe(0)
+  return {
+    step(hop) {
+      new Float32Array(alk.heap, h.alk_chain_hop(c), 256).set(hop)
+      const out = bits(floats(h.alk_chain_step(c), 256))
+      const n = h.alk_chain_event_count(c)
+      const rec = new Float64Array(alk.heap, h.alk_chain_events(c), 4 * n).slice()
+      return { out, events: decode(rec, n, () => floats(h.alk_chain_focus(c), 256)) }
+    },
+    control(x) {
+      if ('print' in x) {
+        if (x.print) inWasm(x.print, (at) => h.alk_chain_print(c, at, x.print!.length))
+        else h.alk_chain_print(c, 0, 0)
+      }
+      if (x.strength !== undefined) h.alk_chain_strength(c, x.strength)
+      if (x.enabled !== undefined) h.alk_chain_enabled(c, +x.enabled)
+    },
+    state: () => [0, 1, 2, 3, 4].map((i) => h.alk_chain_get(c, i)),
+  }
+}
+
+describe('math, as the TypeScript computed it', () => {
+  it('exp, ln, log10, pow, sin, cos: the same doubles', () => {
+    const r = rng(7)
+    const fns = [(x: number) => exp(x), ln, log10, (x: number, y: number) => pow(x, y), sin, cos]
+    for (let i = 0; i < 200_000; i++) {
+      const k = i % 6
+      const x = k === 0 ? (r() - 0.5) * 1500 : k === 4 || k === 5 ? (r() - 0.5) * 2e5 : k === 3 ? 10 ** ((r() - 0.5) * 8) : 10 ** ((r() - 0.5) * 640)
+      const y = (r() - 0.5) * 20
+      const ts = fns[k]!(x, y)
+      const rs = h.alk_h_math(k, x, y)
+      if (!Object.is(ts, rs)) expect([k, x, y, rs]).toEqual([k, x, y, ts])
+    }
+  })
+
+  it('Math.round, toFixed, Math.max and Math.min', () => {
+    const r = rng(11)
+    const special = [0.5, -0.5, 1.5, -1.5, 2.5, -2.5, 0.49999999999999994, -0, 0, 0.25, 0.015625, 1.005, 2.675, -0.04, 1e21, 9.99e20, 123456789012.34567, -9.87654321e17, 5e-324, 1e-7, NaN, Infinity, -Infinity]
+    const xs = [...special, ...Array.from({ length: 60_000 }, (_, i) => (i % 3 === 0 ? (r() - 0.5) * 100 : i % 3 === 1 ? Math.round((r() - 0.5) * 1e6) / 2 ** Math.floor(r() * 12) : (r() - 0.5) * 10 ** (r() * 21)))]
+    for (const x of xs) {
+      expect(Object.is(h.alk_h_math(6, x, 0), Math.round(x)), `round ${x}`).toBe(true)
+      for (const d of [0, 1, 2, 3, 4, 5]) expect(Object.is(h.alk_h_math(7, x, d), +x.toFixed(d)), `toFixed ${x} ${d}`).toBe(true)
+      for (const y of [0, -0, NaN, 1, -1, x / 2]) {
+        expect(Object.is(h.alk_h_math(8, x, y), Math.max(x, y)), `max ${x} ${y}`).toBe(true)
+        expect(Object.is(h.alk_h_math(9, x, y), Math.min(x, y)), `min ${x} ${y}`).toBe(true)
+      }
+    }
+  })
+})
+
+describe('resampler, as the TypeScript computed it', () => {
+  const pairs = [
+    [48000, 16000],
+    [44100, 16000],
+    [16000, 48000],
+    [16000, 44100],
+    [22050, 16000],
+    [8000, 16000],
+    [96000, 16000],
+  ] as const
+
+  it('in chunks of any size, aligned or not', () => {
+    const pcm = stream(3, 6)
+    for (const [a, b] of pairs)
+      for (const aligned of [false, true]) {
+        const r = rng(a + b + +aligned)
+        const ts = new Resampler(a, b, aligned)
+        const core = h.alk_h_resampler(a, b, +aligned)
+        const want: number[] = []
+        const got: number[] = []
+        for (let i = 0; i < pcm.length; ) {
+          const n = Math.min(pcm.length - i, 1 + Math.floor(r() * 3000))
+          const chunk = pcm.subarray(i, i + n)
+          ts.push(chunk, (x) => want.push(x))
+          const k = inWasm(chunk, (p) => h.alk_h_resampler_push(core, p, n))
+          got.push(...floats(h.alk_h_out(), k))
+          i += n
+        }
+        h.alk_h_resampler_free(core)
+        expect(bits(Float32Array.from(got)).equals(bits(Float32Array.from(want))), `${a} -> ${b} ${aligned}`).toBe(true)
+      }
+  })
+
+  it('a whole signal', () => {
+    const pcm = stream(4, 3)
+    for (const [a, b] of pairs) {
+      const want = Resampler.all(pcm, a, b)
+      const n = inWasm(pcm, (p) => h.alk_h_resample_all(p, pcm.length, a, b))
+      expect(bits(floats(h.alk_h_out(), n)).equals(bits(want)), `${a} -> ${b}`).toBe(true)
+    }
+  })
+})
+
+// what a run gave, in one sha256: outputs, events and state at every step, as the TypeScript gave them before the core replaced it
+const GOLDEN: Record<string, string> = existsSync(goldenPath) ? JSON.parse(readFileSync(goldenPath, 'utf8')) : {}
+const made: Record<string, string> = {}
+
+function record(e: ChainEvent | Tap): number[] {
+  switch (e.type) {
+    case 'speechstart':
+      return [0, e.start, 0, 0]
+    case 'speechend':
+      return [1, e.start, e.end, 0]
+    case 'idle':
+      return [2, +e.asleep, e.at, 0]
+    case 'diag': {
+      const d = e.data as { print?: boolean; after: number; why: string }
+      return e.code === 'focus.print' ? [3, +d.print!, d.after, WHY.indexOf(d.why)] : [4, d.after, WHY.indexOf(d.why), 0]
+    }
+    case 'focus':
+      return [5, e.t, 0, 0]
+    case 'cue':
+      return [6, e.speech, e.t, 0]
+  }
+}
+
+// the numbers alk_h_processor_push writes
+function partNumbers(p: ProcessPart): Float64Array {
+  const n: number[] = [p.start, p.audio.length, ...p.audio, p.speech.length, ...p.speech.flatMap((s) => [s.start, s.end]), p.diag.length, ...p.diag.flatMap((e) => record(e as ChainEvent))]
+  if (!p.trace) n.push(0)
+  else {
+    n.push(1, p.trace.focus.length, ...p.trace.focus.flatMap((r) => [r.t, r.db!]), p.trace.cue.length, ...p.trace.cue.flatMap((r) => [r.t, r.speech!]))
+  }
+  return Float64Array.from(n)
+}
+
+describe('the chain, hop by hop as in real time', () => {
+  // name, seed, seconds, options, speech without pauses, settings changed (per hop)
+  const cases: [string, number, number, ChainOptions, boolean, number][] = [
+    ['defaults, left alone past the 30 s reset', 1, 40, {}, false, 0],
+    ['gate, a print, other speech settings, settings changed often', 2, 40, { gate: true, print: print(), speech: { confidence: 0.6, stopSecs: 0.3 } }, false, 0.008],
+    ['no normalize, no sleep, half strength', 3, 30, { normalize: false, sleep: false, strength: 0.5 }, false, 0.002],
+    ['speech that never stops, past the forced reset', 4, 75, { speech: { stopSecs: 5 } }, true, 0],
+  ]
+  const seen = new Set<string>()
+  for (const [name, seed, seconds, opts, dense, rate] of cases)
+    it(name, async () => {
+      const pcm = stream(seed, seconds, dense)
+      const ts = tsChain(opts)
+      const core = coreChain(opts)
+      const digest = createHash('sha256')
+      const r = rng(seed * 31)
+      for (let i = 0; i + 256 <= pcm.length; i += 256) {
+        const c: Control = {}
+        const x = r() / rate
+        if (x < 0.375) c.print = r() < 0.5 ? print().map((v, j) => v * (1 + 0.1 * Math.sin(i + j))) : null
+        else if (x < 0.75) c.strength = r() * 1.4 - 0.2
+        else if (x < 1) c.enabled = r() < 0.5
+        if (Object.keys(c).length) {
+          ts.control(c)
+          core.control(c)
+        }
+        const hop = pcm.subarray(i, i + 256)
+        const a = ts.step(hop)
+        const b = core.step(hop)
+        if (!a.out.equals(b.out)) expect(`hop ${i / 256}: output differs`).toBe('')
+        if (b.events.length || a.events.length) expect(b.events, `hop ${i / 256}`).toEqual(a.events)
+        expect(core.state()).toEqual(ts.state())
+        digest.update(a.out)
+        for (const e of a.events) {
+          digest.update(bits(new Float32Array(Float64Array.from(record(e)).buffer)))
+          if (e.type === 'focus') digest.update(e.hop)
+          seen.add(e.type === 'idle' ? `idle ${e.asleep}` : e.type === 'diag' ? `${e.code} ${(e.data as { why: string }).why}` : e.type)
+        }
+        digest.update(bits(new Float32Array(Float64Array.from(ts.state()).buffer)))
+        if (i % (2000 * 256) === 0) await breathe()
+      }
+      made[`chain: ${name}`] = digest.digest('hex')
+      if (GOLDEN[`chain: ${name}`]) expect(made[`chain: ${name}`]).toBe(GOLDEN[`chain: ${name}`])
+    }, 120_000)
+
+  it('went through every event', () => {
+    expect([...seen].sort()).toEqual(['cue', 'focus', 'focus.print silence', 'focus.print wake', 'focus.reset forced', 'focus.reset silence', 'idle false', 'idle true', 'speechend', 'speechstart'])
+  })
+})
+
+describe('process, in blocks of any size', () => {
+  const voiceprint = () => new Voiceprint([{ embedding: print(), id: print(), seconds: 3 }])
+  const cases: [string, number, ProcessOptions][] = [
+    ['focus and cue', 5, { focus: true, cue: true }],
+    ['focus with a print, normalize, trace, other speech settings', 6, { focus: { voiceprint: voiceprint(), strength: 0.7 }, cue: { confidence: 0.4, startSecs: 0.1 }, normalize: true, trace: true }],
+    ['focus without speech', 7, { focus: true, cue: false }],
+    ['cue alone, traced', 8, { cue: { stopSecs: 1 }, trace: true }],
+    ['nothing chosen', 9, {}],
+  ]
+  for (const [name, seed, opts] of cases)
+    it(name, async () => {
+      const pcm = stream(seed, 25)
+      const ts = new Processor(engine, opts)
+      const focus = opts.focus !== undefined && opts.focus !== false
+      const fo = typeof opts.focus === 'object' ? opts.focus : {}
+      const s = { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) }
+      const numbers = Float64Array.of(+focus, fo.strength ?? 1, opts.cue === undefined ? -1 : opts.cue === false ? 0 : 1, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, +(opts.normalize ?? false), +(opts.trace ?? false))
+      const p = fo.voiceprint ? (fo.voiceprint as Voiceprint).embedding : null
+      const make = (at: number, n: number) => inWasm(numbers, (o) => h.alk_h_processor(engine.model('focus').ptr, engine.model('cue').ptr, o, at, n))
+      const core = p ? inWasm(p, (at) => make(at, p.length)) : make(0, 0)
+      expect(core).not.toBe(0)
+      const digest = createHash('sha256')
+      const r = rng(seed * 17)
+      const compare = (a: ProcessPart, n: number) => {
+        const want = partNumbers(a)
+        const got = new Float64Array(alk.heap, h.alk_h_numbers(), n).slice()
+        if (!bits(new Float32Array(got.buffer)).equals(bits(new Float32Array(want.buffer)))) expect(Array.from(got)).toEqual(Array.from(want))
+        digest.update(bits(new Float32Array(want.buffer)))
+      }
+      for (let i = 0; i < pcm.length; ) {
+        const n = Math.min(pcm.length - i, 1 + Math.floor(r() * 5000))
+        const block = pcm.subarray(i, i + n)
+        const a = ts.push(block)
+        compare(a, inWasm(block, (at) => h.alk_h_processor_push(core, at, n)))
+        i += n
+        await breathe()
+      }
+      compare(ts.end(), h.alk_h_processor_end(core))
+      h.alk_h_processor_free(core)
+      made[`process: ${name}`] = digest.digest('hex')
+      if (GOLDEN[`process: ${name}`]) expect(made[`process: ${name}`]).toBe(GOLDEN[`process: ${name}`])
+    }, 120_000)
+})
+
+afterAll(() => {
+  if (!existsSync(goldenPath)) writeFileSync(goldenPath, JSON.stringify(made, null, 1) + '\n')
+})

@@ -1,5 +1,9 @@
-//! The engine behind a C ABI: what the web SDK calls in the wasm module, and what other languages load natively.
+//! The engine and the core behind a C ABI: what the web SDK calls in the wasm module, and what other languages load natively.
 #![allow(clippy::missing_safety_doc)]
+
+mod core;
+#[cfg(feature = "harness")]
+mod harness;
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -8,6 +12,16 @@ use alkove_engine::{Model, Plan, Session};
 
 thread_local! {
     static ERROR: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+fn fail(e: impl ToString) {
+    ERROR.with(|s| *s.borrow_mut() = e.to_string());
+}
+
+// a model the caller still holds, shared with what is built on it
+unsafe fn shared(m: *const Model) -> Arc<Model> {
+    Arc::increment_strong_count(m);
+    Arc::from_raw(m)
 }
 
 unsafe fn name<'a>(p: *const u8, len: usize) -> &'a str {
@@ -44,7 +58,7 @@ pub unsafe extern "C" fn alk_model(bytes: *const u8, len: usize) -> *const Model
     match Model::load(std::slice::from_raw_parts(bytes, len)) {
         Ok(m) => Arc::into_raw(Arc::new(m)),
         Err(e) => {
-            ERROR.with(|s| *s.borrow_mut() = e.to_string());
+            fail(e);
             std::ptr::null()
         }
     }
@@ -82,11 +96,10 @@ pub unsafe extern "C" fn alk_plan_name(m: *const Model, i: usize, out: *mut u8, 
 // Safety: `m` comes from `alk_model` and is still alive; null past the last plan or when its arena cannot be had (`alk_error` says why).
 #[no_mangle]
 pub unsafe extern "C" fn alk_session(m: *const Model, plan: usize) -> *mut Session {
-    Arc::increment_strong_count(m);
-    match Session::of(Arc::from_raw(m), plan) {
+    match Session::of(shared(m), plan) {
         Ok(s) => Box::into_raw(Box::new(s)),
         Err(e) => {
-            ERROR.with(|s| *s.borrow_mut() = e.to_string());
+            fail(e);
             std::ptr::null_mut()
         }
     }
@@ -217,7 +230,7 @@ pub unsafe extern "C" fn alk_set_len(s: *mut Session, len: usize) -> i32 {
     match (*s).set_len(len) {
         Ok(()) => 0,
         Err(e) => {
-            ERROR.with(|m| *m.borrow_mut() = e.to_string());
+            fail(e);
             -1
         }
     }

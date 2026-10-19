@@ -1,14 +1,11 @@
 [package]
-name = "alkove-engine-wasm"
-description = "C ABI of the Alkove engine: the wasm module of the web SDK, and a native library for other languages"
+name = "alkove-core"
+description = "Alkove's core: what turns the models' outputs into features (chain, speech, wake words, voiceprints), the same to the bit on every platform"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
-
-[lib]
-crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 alkove-engine = { path = "../engine" }

@@ -1,0 +1,335 @@
+use std::sync::Arc;
+
+use alkove_engine::Model;
+
+use crate::cue::{Cue, SpeechEvent, SpeechParams, SpeechTracker};
+use crate::focus::Focus;
+use crate::level::{coef, Chunker, Delay, Gate, Level};
+use crate::math::pow;
+use crate::{js, Error, CUE, FOCUS, RATE};
+
+const HOP: usize = FOCUS.chunk;
+// fresh state after 1 s of silence, every 30 s at most, every 60 s even without silence
+const RESET_SILENCE: usize = 16000;
+const RESET_EVERY: usize = 30 * 16000;
+const RESET_FORCE: usize = 60 * 16000;
+// asleep once Focus's output stayed under QUIET and the mic near its noise floor for SLEEP_AFTER; woken when the mic rises WAKE_DB over that floor
+const QUIET: f64 = 0.005;
+const SLEEP_AFTER: usize = 2 * 16000;
+const WAKE_DB: f64 = 9.0;
+const WAKE_MIN: f64 = 1e-8;
+const FLOOR_RISE: f64 = 1.0006;
+const GATE_LOOKAHEAD: usize = 1600;
+const FADE_TAU: f64 = 0.01;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Why {
+    Silence,
+    Forced,
+    Wake,
+}
+
+impl Why {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Why::Silence => "silence",
+            Why::Forced => "forced",
+            Why::Wake => "wake",
+        }
+    }
+}
+
+// in the order they happen within a hop; `Focus` and `Cue` are taps on the models' outputs
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChainEvent {
+    Speech(SpeechEvent),
+    Idle { asleep: bool, at: f64 },
+    // diag `focus.print`
+    Print { print: bool, after: f64, why: Why },
+    // diag `focus.reset`
+    Reset { after: f64, why: Why },
+    // Focus's output for the hop is in `Chain::focus_out`; `t` in samples
+    Focus { t: f64 },
+    Cue { speech: f64, t: f64 },
+}
+
+#[derive(Debug, Clone)]
+pub struct ChainOptions {
+    pub gate: bool,
+    pub normalize: bool,
+    pub strength: f64,
+    pub print: Option<Vec<f32>>,
+    pub speech: SpeechParams,
+    pub sleep: bool,
+}
+
+impl Default for ChainOptions {
+    fn default() -> Self {
+        ChainOptions { gate: false, normalize: true, strength: 1.0, print: None, speech: SpeechParams::default(), sleep: true }
+    }
+}
+
+// Focus -> Cue -> mix with the raw -> level -> gate, every rule that touches state counted in samples: real time and `process` give the same output
+pub struct Chain {
+    focus: Focus,
+    cue: Cue,
+    opts: ChainOptions,
+    cue_in: Chunker,
+    tracker: SpeechTracker,
+    raw_delay: Delay,
+    gate_delay: Option<Delay>,
+    bypass_delay: Option<Delay>,
+    bypass: Vec<f32>,
+    on: f64,
+    gate: Gate,
+    level: Level,
+    focus_out: Vec<f32>,
+    raw: Vec<f32>,
+    mix: Vec<f32>,
+    cue_chunk: Vec<f32>,
+    cue_frames: i64,
+    cue_steps: usize,
+    since_speech: usize,
+    since_reset: usize,
+    // Some(None): back to no print at the next silence
+    pending: Option<Option<Vec<f32>>>,
+    strength: f64,
+    enabled: bool,
+    s: f64,
+    asleep: bool,
+    quiet: usize,
+    mic_level: f64,
+    floor: f64,
+    t: usize,
+}
+
+impl Chain {
+    pub fn new(focus: &Arc<Model>, cue: &Arc<Model>, opts: ChainOptions) -> Result<Chain, Error> {
+        let mut focus = Focus::new(focus)?;
+        if let Some(p) = &opts.print {
+            check_print(p)?;
+            focus.set_print(Some(p));
+        }
+        Ok(Chain {
+            focus,
+            cue: Cue::new(cue)?,
+            cue_in: Chunker::new(CUE.chunk),
+            tracker: SpeechTracker::cue(opts.speech),
+            raw_delay: Delay::new(FOCUS.lag),
+            gate_delay: opts.gate.then(|| Delay::new(GATE_LOOKAHEAD)),
+            bypass_delay: opts.gate.then(|| Delay::new(GATE_LOOKAHEAD)),
+            bypass: vec![0.0; HOP],
+            on: 1.0,
+            gate: Gate::default(),
+            level: Level::default(),
+            focus_out: vec![0.0; HOP],
+            raw: vec![0.0; HOP],
+            mix: vec![0.0; HOP],
+            cue_chunk: vec![0.0; CUE.chunk],
+            cue_frames: 0,
+            cue_steps: 0,
+            since_speech: RESET_SILENCE,
+            since_reset: 0,
+            pending: None,
+            strength: opts.strength,
+            enabled: true,
+            s: opts.strength,
+            asleep: false,
+            quiet: 0,
+            mic_level: 0.0,
+            floor: 1.0,
+            t: 0,
+            opts,
+        })
+    }
+
+    // samples between a sample going in and coming out
+    pub fn delay(&self) -> usize {
+        FOCUS.lag + if self.opts.gate { GATE_LOOKAHEAD } else { 0 }
+    }
+
+    pub fn speaking(&self) -> bool {
+        self.tracker.active
+    }
+
+    pub fn sleeping(&self) -> bool {
+        self.asleep
+    }
+
+    // seconds of input so far
+    pub fn time(&self) -> f64 {
+        self.t as f64 / RATE
+    }
+
+    pub fn gain_db(&self) -> f64 {
+        self.level.db()
+    }
+
+    // Focus's output of the last hop
+    pub fn focus_out(&self) -> &[f32] {
+        &self.focus_out
+    }
+
+    // applied at the next silence, from a fresh state
+    pub fn set_print(&mut self, embedding: Option<&[f32]>) -> Result<(), Error> {
+        if let Some(e) = embedding {
+            check_print(e)?;
+        }
+        self.pending = Some(embedding.map(|e| e.to_vec()));
+        Ok(())
+    }
+
+    pub fn set_strength(&mut self, s: f64) {
+        self.strength = js::max(0.0, js::min(1.0, s));
+    }
+
+    pub fn set_enabled(&mut self, on: bool) {
+        self.enabled = on;
+    }
+
+    // exactly one hop of 256 samples; the result is valid until the next call
+    pub fn step(&mut self, hop: &[f32], events: &mut Vec<ChainEvent>) -> &[f32] {
+        assert_eq!(hop.len(), HOP, "step() takes whole hops only");
+        self.hop(hop, events);
+        &self.mix
+    }
+
+    fn woken(&self) -> bool {
+        self.mic_level > WAKE_MIN && self.mic_level > self.floor * pow(10.0, WAKE_DB / 10.0)
+    }
+
+    fn hop(&mut self, hop: &[f32], events: &mut Vec<ChainEvent>) {
+        let at = self.t as f64 / RATE;
+        self.raw.copy_from_slice(hop);
+        self.raw_delay.apply(&mut self.raw);
+        self.listen(hop);
+        if self.asleep && self.woken() {
+            self.asleep = false;
+            self.quiet = 0;
+            // the state is kept across the sleep, as chat's worklet did: a fresh one leaks the first frames of a voice the print refuses
+            if self.pending.is_some() {
+                self.fresh(events, Why::Wake);
+            }
+            events.push(ChainEvent::Idle { asleep: false, at });
+        }
+        if self.asleep {
+            self.focus_out.fill(0.0);
+        } else {
+            self.rules(events);
+            self.focus.step(hop, &mut self.focus_out);
+        }
+        events.push(ChainEvent::Focus { t: self.t as f64 });
+        let mut at_cue = 0;
+        while let Some(c) = self.cue_in.next(&self.focus_out, &mut at_cue) {
+            self.cue_chunk.copy_from_slice(c);
+            self.cue_frame(events);
+        }
+        let mut peak = 0.0;
+        for &x in &self.focus_out {
+            peak = js::max(peak, (x as f64).abs());
+        }
+        // with a print the output is also quiet while another voice talks: asleep only when the mic too is at its noise floor
+        let voiced = self.woken();
+        self.quiet = if peak < QUIET && !voiced { self.quiet + HOP } else { 0 };
+        if self.opts.sleep && !self.asleep && self.quiet >= SLEEP_AFTER {
+            self.asleep = true;
+            events.push(ChainEvent::Idle { asleep: true, at });
+        }
+        let k = coef(FADE_TAU);
+        for i in 0..HOP {
+            self.s += (self.strength - self.s) * k;
+            self.mix[i] = (self.s * self.focus_out[i] as f64 + (1.0 - self.s) * self.raw[i] as f64) as f32;
+        }
+        self.bypass.copy_from_slice(&self.raw);
+        if let Some(d) = &mut self.bypass_delay {
+            d.apply(&mut self.bypass);
+        }
+        if self.opts.normalize {
+            self.level.frame(&self.mix, self.tracker.active);
+            self.level.apply(&mut self.mix);
+        }
+        if let Some(d) = &mut self.gate_delay {
+            d.apply(&mut self.mix);
+            self.gate.apply(&mut self.mix, self.tracker.active);
+        }
+        let on = if self.enabled { 1.0 } else { 0.0 };
+        if on == 0.0 || self.on < 1.0 {
+            for i in 0..HOP {
+                self.on += (on - self.on) * k;
+                self.mix[i] = (self.on * self.mix[i] as f64 + (1.0 - self.on) * self.bypass[i] as f64) as f32;
+            }
+            if on == 1.0 && self.on > 0.9999 {
+                self.on = 1.0;
+            }
+        }
+        self.since_speech = if self.tracker.active { 0 } else { self.since_speech + HOP };
+        self.since_reset += HOP;
+        self.t += HOP;
+    }
+
+    fn listen(&mut self, hop: &[f32]) {
+        for h in (0..HOP).step_by(128) {
+            let mut sq = 0.0;
+            for &x in &hop[h..h + 128] {
+                sq += x as f64 * x as f64;
+            }
+            self.mic_level += 0.1 * (sq / 128.0 - self.mic_level);
+            self.floor = js::min(self.floor * FLOOR_RISE, self.mic_level);
+        }
+    }
+
+    fn rules(&mut self, events: &mut Vec<ChainEvent>) {
+        if self.since_speech < RESET_SILENCE && self.since_reset < RESET_FORCE {
+            return;
+        }
+        if self.pending.is_some() || self.since_reset >= RESET_EVERY {
+            self.fresh(events, if self.since_speech >= RESET_SILENCE { Why::Silence } else { Why::Forced });
+        }
+    }
+
+    fn fresh(&mut self, events: &mut Vec<ChainEvent>, why: Why) {
+        let after = js::to_fixed(self.since_reset as f64 / RATE, 1);
+        match self.pending.take() {
+            Some(print) => {
+                self.focus.set_print(print.as_deref());
+                events.push(ChainEvent::Print { print: print.is_some(), after, why });
+            }
+            None => {
+                self.focus.reset();
+                events.push(ChainEvent::Reset { after, why });
+            }
+        }
+        self.since_reset = 0;
+    }
+
+    fn cue_frame(&mut self, events: &mut Vec<ChainEvent>) {
+        let k = self.cue_frames;
+        self.cue_frames += 1;
+        let lag = CUE.lag_steps as i64;
+        let mut p = 0.0;
+        if !self.asleep {
+            let v = self.cue.step(&self.cue_chunk);
+            let s = self.cue_steps;
+            self.cue_steps += 1;
+            if let (true, Some(v)) = (s >= CUE.lag_steps, v) {
+                p = v as f64;
+            }
+        }
+        if k >= lag {
+            events.push(ChainEvent::Cue { speech: p, t: ((k - lag) as f64 * CUE.chunk as f64 - FOCUS.lag as f64) / RATE });
+        }
+        let Some(e) = self.tracker.push(p, k - lag) else { return };
+        let shift = FOCUS.lag as f64 / RATE;
+        events.push(ChainEvent::Speech(match e {
+            SpeechEvent::Start { start } => SpeechEvent::Start { start: js::max(0.0, start - shift) },
+            SpeechEvent::End { start, end } => SpeechEvent::End { start: js::max(0.0, start - shift), end: js::max(0.0, end - shift) },
+        }));
+    }
+}
+
+fn check_print(p: &[f32]) -> Result<(), Error> {
+    if p.len() > FOCUS.print {
+        return Err(Error::Print(p.len()));
+    }
+    Ok(())
+}

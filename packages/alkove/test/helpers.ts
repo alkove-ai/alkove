@@ -6,8 +6,8 @@ import { MODELS, type ModelName } from '../src/manifest'
 
 const root = join(import.meta.dirname, '..')
 
-// the wasm `pnpm build` makes (crates/engine-wasm)
-export const engineWasm = () => readFileSync(join(root, '../../target/wasm32-unknown-unknown/release/alkove_engine_wasm.wasm'))
+// the wasm `pnpm build` makes (crates/wasm)
+export const engineWasm = () => readFileSync(join(root, '../../target/wasm32-unknown-unknown/release/alkove_wasm.wasm'))
 
 export const loadEngine = async (): Promise<Alk> => Alk.create(await WebAssembly.compile(engineWasm()))
 

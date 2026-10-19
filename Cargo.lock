@@ -3,12 +3,20 @@
 version = 4
 
 [[package]]
+name = "alkove-core"
+version = "0.1.0"
+dependencies = [
+ "alkove-engine",
+]
+
+[[package]]
 name = "alkove-engine"
 version = "0.1.0"
 
 [[package]]
-name = "alkove-engine-wasm"
+name = "alkove-wasm"
 version = "0.1.0"
 dependencies = [
+ "alkove-core",
  "alkove-engine",
 ]

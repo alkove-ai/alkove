@@ -1,4 +1,4 @@
-// the Alkove engine's wasm (crates/engine-wasm): no imports, synchronous runs, nothing allocated while it runs
+// the Alkove engine's wasm (crates/wasm): no imports, synchronous runs, nothing allocated while it runs
 export interface AlkExports {
   memory: WebAssembly.Memory
   alk_alloc(len: number): number

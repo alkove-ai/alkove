@@ -1,0 +1,11 @@
+{
+ "chain: defaults, left alone past the 30 s reset": "cefdb81327535669af81beae7dba2029c9714705a892a9901306ebb4a24cc114",
+ "chain: gate, a print, other speech settings, settings changed often": "05892d44a2bed65dc46500d859312530c1ebb7ec76b43ae85c27df43883906b2",
+ "chain: no normalize, no sleep, half strength": "770e393b5860cb7fe0c0d11c4f44e105adfb7ae6ad28b5f8ec324f3bdca6b3b7",
+ "chain: speech that never stops, past the forced reset": "74edb4e7943361b39864d45f340bc0fc5d2a60d79ee3051bd5ade727194c4302",
+ "process: focus and cue": "6661ff88530ebffd7a8cf0f7ea91e767edc2c4edd63c43d5760d1c52035b896e",
+ "process: focus with a print, normalize, trace, other speech settings": "c1e50ab94188444a6eb3e8baf2caaf0451140ce9fd996b309bf827a6097837c7",
+ "process: focus without speech": "d85ba636fddc59849f124cfe4e4d6c77732577cb3d7953fdb656c34dcb39af49",
+ "process: cue alone, traced": "242a1a7abf33a608415335357941cc3f8f0d095f8d5da033326b02e184ca0c5d",
+ "process: nothing chosen": "28bd17b42e29543f2b8da19b0a878e57c1b2711d970df9018ed66ff14b783b8e"
+}

@@ -41,16 +41,16 @@ A model run in several steps holds one plan per step, over the same weights. Lex
 ## Build
 
 ```sh
-cargo build --release                                     # the native library (crates/engine-wasm, a C ABI)
+cargo build --release                                     # the native library (crates/wasm, a C ABI)
 RUSTFLAGS="-C target-feature=+simd128,+bulk-memory" \
-  cargo build --release -p alkove-engine-wasm --target wasm32-unknown-unknown
+  cargo build --release -p alkove-wasm --target wasm32-unknown-unknown
 ```
 
 The web SDK (`packages/alkove`) builds the wasm itself (`pnpm build`). It needs no imports, and every browser with WebAssembly SIMD runs it.
 
 ## C ABI
 
-`crates/engine-wasm` exports the engine to JavaScript and to other languages. Every name is a byte pointer and a length.
+`crates/wasm` exports the engine to JavaScript and to other languages. Every name is a byte pointer and a length.
 
 | Function | |
 |---|---|
