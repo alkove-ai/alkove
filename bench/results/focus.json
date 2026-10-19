@@ -1,8 +1,8 @@
 {
  "model": "alkove-focus-1-preview",
- "file": "alkove-focus-1-preview.onnx",
- "bytes": 931249,
- "sha256": "67753cbc5b1da4292e118782f5d77e39c4bf7d26e3421ac28905369b4559937d",
+ "file": "alkove-focus-1-preview.alk",
+ "bytes": 1105296,
+ "sha256": "f0c174ef38d2060c6e7129bf18900a90e1848a3c14e4b9f6d397e119bf900d90",
  "benchmarks": [
   {
    "id": "another-voice",
@@ -29,7 +29,7 @@
      },
      "alkove-focus, print": {
       "sisdr": 7.14,
-      "other_db": -22.54
+      "other_db": -22.56
      },
      "alkove-focus, no print": {
       "sisdr": 4.46,
@@ -58,7 +58,7 @@
       "other_db": 0.0
      },
      "alkove-focus, print": {
-      "sisdr": 4.99,
+      "sisdr": 4.98,
       "other_db": -18.05
      },
      "alkove-focus, no print": {

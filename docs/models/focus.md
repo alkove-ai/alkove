@@ -17,7 +17,7 @@ input.on('voiceprint', (p) => localStorage.setItem('print', JSON.stringify(p.toJ
 
 | | |
 |---|---|
-| Size | 0.93 MB (int8 weights) |
+| Size | 1.1 MB (int8 weights) |
 | Input | 16 kHz mono, 256 samples (16 ms) per step, plus an optional 192-value print |
 | Output | the isolated voice, 16 kHz, one step (16 ms) late |
 | License | Apache-2.0 |
@@ -66,8 +66,8 @@ Focus adds 16 ms (one step) on top of its 16 ms step. A live input reports its t
 
 | | |
 |---|---|
-| Galaxy Z Fold8, Chrome, WebAssembly, 1 thread | about 107 ms per second of audio (about 11 % of one core) |
-| Apple silicon Mac, onnxruntime, 1 thread | about 81 ms per second of audio |
+| WebAssembly, 1 thread, Apple M1 Max (Node 22) | about 70 ms per second of audio (about 7 % of one core) |
+| WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | about 60 ms per second of audio |
 
 Between sentences, a live input lets Focus sleep: when its output and the microphone stay quiet, the engine stops running until the microphone rises again. It saves battery and heat on phones.
 
@@ -78,7 +78,7 @@ Measured with the published file. The model card gives the full tables, with ope
 | Test | alkove-focus | Reference |
 |---|---|---|
 | Another voice in the room, Common Voice test sets, 7 languages: SI-SDR of the target, with a print | 7.1 dB (no print: 4.5) | raw microphone 3.4 dB |
-| Same scenes: level of the other voice speaking alone, with a print | -22.5 dB (no print: -7.8) | raw 0 dB |
+| Same scenes: level of the other voice speaking alone, with a print | -22.6 dB (no print: -7.8) | raw 0 dB |
 | Same with DEMAND noise at 10 dB: SI-SDR, with a print | 5.0 dB | raw 2.4 dB |
 | AMI meetings, headset microphone (Whisper large-v3 turbo): word error rate, with a print | 16.1 % (no print: 16.7 %) | raw headset 20.8 % |
 | AMI: words of other voices that get through, per minute, with a print | 0.5 | raw headset 17.0 |
@@ -101,14 +101,12 @@ Apache-2.0, for the weights. Focus started from the GTCRN checkpoint trained on 
 
 ## Running it without the SDK
 
-The model is a plain ONNX file (opset 17), so you can run it with onnxruntime or onnxruntime-web 1.30 or later. One call per 256 samples:
+The model is an `.alk` file for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [its format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. One call per 256 samples:
 
 | Name | Type | |
 |---|---|---|
 | `audio` (in) | float32 `[1, 256]` | 16 kHz mono, -1 to 1 |
 | `print` (in) | float32 `[1, 192]` | Timbre's `embedding`, or zeros to keep the closest voice |
-| `state` (in) | float32 `[126848]` | zeros at the start, then the previous `next_state` |
 | `audio_out` (out) | float32 `[1, 256]` | the isolated voice, 256 samples late |
-| `next_state` (out) | float32 `[126848]` | passed back on the next call |
 
-Reset `state` to zeros when you change the print. The SDK does all of this for you, plus resampling, the audio queue, sleep between sentences and the fallback to the raw microphone.
+The engine keeps Focus's state from one call to the next; clear it when you change the print. The SDK does all of this for you, plus resampling, the audio queue, sleep between sentences and the fallback to the raw microphone.

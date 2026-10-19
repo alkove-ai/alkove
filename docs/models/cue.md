@@ -17,7 +17,7 @@ input.on('speechend', ({ start, end }) => agent.userStopped(end))
 
 | | |
 |---|---|
-| Size | 1.2 MB (int8) |
+| Size | 1.1 MB (int8 weights) |
 | Input | 16 kHz mono, 480 samples (30 ms) per step |
 | Output | probability of speech, one step (30 ms) late |
 | License | Apache-2.0 |
@@ -78,7 +78,8 @@ With `focus`, Cue runs on the cleaned audio, as in a live input. With `cue` alon
 
 | | |
 |---|---|
-| Galaxy Z Fold8, Chrome, WebAssembly, 1 thread | 11 ms per second of audio (about 1 % of one core) |
+| WebAssembly, 1 thread, Apple M1 Max (Node 22) | 2.6 ms per second of audio (about 0.3 % of one core) |
+| WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | 3.7 ms per second of audio |
 
 ## Benchmarks
 
@@ -86,7 +87,7 @@ With `focus`, Cue runs on the cleaned audio, as in a live input. With `cue` alon
 
 | | Cue | Silero VAD v6 |
 |---|---|---|
-| Missed speech | 2.89 % | 2.96 % |
+| Missed speech | 2.93 % | 2.96 % |
 | False starts (24 min) | 4 | 4 |
 | Open during the speaker's silences | 6.4 % | 5.9 % |
 | Speech onset | 10 ms after Silero | |
@@ -104,11 +105,11 @@ Out of scope: telling who is speaking (use Focus with a print first), predicting
 
 ## Running it without the SDK
 
-A plain ONNX file (opset 17), for onnxruntime or onnxruntime-web 1.30 or later. One call per 480 samples:
+The model is an `.alk` file for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [its format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. One call per 480 samples:
 
 | Name | Type | |
 |---|---|---|
 | `audio` (in) | float32 `[1, 480]` | 16 kHz mono, -1 to 1 |
-| `state` (in) | float32 `[5848]` | zeros at the start, then the previous `next_state` |
 | `speech` (out) | float32 `[1, 1]` | probability of speech, one step late |
-| `next_state` (out) | float32 `[5848]` | passed back on the next call |
+
+The engine keeps Cue's state from one call to the next; it starts at zeros.

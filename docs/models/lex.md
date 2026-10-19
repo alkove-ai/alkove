@@ -17,7 +17,7 @@ await lex.phonemize('Camille', 'fr')
 
 | | |
 |---|---|
-| Size | 1.8 MB (int8) |
+| Size | 1.9 MB (int8 weights) |
 | Languages | French, English, Spanish, Portuguese, Italian, Catalan, Romanian |
 | Input | a word of up to 33 characters, and its language |
 | Output | up to 3 pronunciations, in Spot's 58 phonemes, each with its probability |
@@ -83,7 +83,8 @@ When it compiles a word, the SDK warns about text that will not be read the way 
 
 | | |
 |---|---|
-| Galaxy Z Fold8, Chrome, WebAssembly, 1 thread | 6.2 ms per beam step (one step per phoneme of the longest pronunciation, plus one) |
+| WebAssembly, 1 thread, Apple M1 Max (Node 22) | 8.4 ms per beam step (one step per phoneme of the longest pronunciation, plus one) |
+| WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | 5.4 ms per beam step |
 
 A typical word takes a few dozen milliseconds. Lex runs in the background worker, never on the audio path.
 
@@ -100,14 +101,14 @@ Out of scope: phonetizing whole sentences for speech synthesis (it works word by
 
 ## Running it without the SDK
 
-A plain ONNX file (opset 17), for onnxruntime or onnxruntime-web 1.30 or later. One call gives, for each of 3 beams, the probabilities of the next phoneme; you run a beam search around it.
+The model is an `.alk` file for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [its format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. One call gives, for each of 3 beams, the probabilities of the next phoneme; you run a beam search around it. The inputs are whole numbers held as floats.
 
 | Name | Type | |
 |---|---|---|
-| `word` (in) | int32 `[1, 33]` | the word's Unicode code points after NFC, lowercase and `’` → `'`, zeros after |
-| `lang` (in) | int32 `[1]` | index of the language in the manifest's `langs` |
-| `prefix` (in) | int32 `[3, 39]` | each beam's phonemes so far, starting with `bos`, zeros after |
-| `pos` (in) | int32 `[1]` | the position whose next phoneme is wanted |
+| `word` (in) | float32 `[1, 33]` | the word's Unicode code points after NFC, lowercase and `’` → `'`, zeros after |
+| `lang` (in) | float32 `[1]` | index of the language in the manifest's `langs` |
+| `prefix` (in) | float32 `[3, 39]` | each beam's phonemes so far, starting with `bos`, zeros after |
+| `pos` (in) | float32 `[1]` | the position whose next phoneme is wanted |
 | `logp` (out) | float32 `[3, 61]` | log-probabilities of the next phoneme for each beam |
 
 The SDK runs the beam search, combines the words of a phrase and merges duplicate pronunciations for you.

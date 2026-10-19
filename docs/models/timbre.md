@@ -18,8 +18,8 @@ timbre.verify(print, heard) // { same, score }
 
 | | |
 |---|---|
-| Size | 0.87 MB (int8) |
-| Input | 16 kHz mono speech, at least 280 samples; 1.5 s windows advised |
+| Size | 0.74 MB (int8 weights) |
+| Input | 16 kHz mono speech, one window of 280 to 24,000 samples (1.5 s, advised) |
 | Output | two unit vectors of 192 values: `embedding` (the print Focus follows) and `id` (to compare voices) |
 | License | Apache-2.0 |
 
@@ -76,7 +76,8 @@ A print is plain JSON: numbers, no audio. `Voiceprint.fromJSON()` returns `null`
 
 | | |
 |---|---|
-| Galaxy Z Fold8, Chrome, WebAssembly, 1 thread | 4.7 ms per 1.5 s window |
+| WebAssembly, 1 thread, Apple M1 Max (Node 22) | 3.3 ms per 1.5 s window |
+| WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | 2.9 ms per 1.5 s window |
 
 Timbre runs in the background worker, never on the audio path.
 
@@ -84,23 +85,23 @@ Timbre runs in the background worker, never on the audio path.
 
 Equal error rate (same voice or not, lower is better) on the Common Voice test sets of 7 languages (CC0): 2,029 speakers never heard in training, 4 clips each (8,057 clips). For reference, the open 3D-Speaker CAM++ (Apache-2.0, 28 MB) on the same trials.
 
-| EER | alkove-timbre `id` (0.87 MB) | CAM++ (28 MB) |
+| EER | alkove-timbre `id` (0.74 MB) | CAM++ (28 MB) |
 |---|---|---|
 | A print of about 12 s (3 clips) against a 1.5 s window | **2.95 %** | 1.72 % |
-| The same, impostors only with a close pitch (±2 semitones) | 4.08 % | 2.32 % |
-| Clip against clip, whole clips (about 4 s) | 4.46 % | 2.61 % |
-| Clip against clip, 3 s | 4.95 % | 3.02 % |
-| Clip against clip, 1.5 s | 7.19 % | 4.75 % |
+| The same, impostors only with a close pitch (±2 semitones) | 4.11 % | 2.32 % |
+| Clip against clip, whole clips (about 4 s) | 4.42 % | 2.61 % |
+| Clip against clip, 3 s | 4.90 % | 3.02 % |
+| Clip against clip, 1.5 s | 7.14 % | 4.75 % |
 
-Mean of the 7 languages. Print against a 1.5 s window, per language: French 2.68 %, English 3.27, Spanish 2.71, Italian 2.65, Portuguese 4.16, Catalan 2.84, Romanian 2.37 (30 speakers only).
+Mean of the 7 languages. Print against a 1.5 s window, per language: French 2.68 %, English 3.20, Spanish 2.79, Italian 2.57, Portuguese 4.28, Catalan 2.83, Romanian 2.30 (30 speakers only). The published file takes windows of up to 1.5 s; the whole-clip and 3 s rows ran the same weights on longer windows.
 
 Harder, and closer to a live call: 1,424 windows taken from scenes with noise, music or another voice.
 
 | EER | raw mic | after Focus, with print | after Focus, without print |
 |---|---|---|---|
-| `id`, 1.5 s windows | 11.9 % | 9.9 % | 10.8 % |
-| `id`, 1 s windows | 14.2 % | 14.0 % | 12.5 % |
-| `embedding`, 1.5 s windows | 15.9 % | 18.8 % | 19.3 % |
+| `id`, 1.5 s windows | 11.9 % | 10.1 % | 11.6 % |
+| `id`, 1 s windows | 14.4 % | 14.2 % | 13.4 % |
+| `embedding`, 1.5 s windows | 15.7 % | 18.6 % | 19.1 % |
 
 About ±1 point on this smaller protocol. Speech from Common Voice French dev (CC0), Multilingual LibriSpeech French dev (CC BY 4.0) and LibriTTS-R dev-clean (CC BY 4.0). Noise and music from MUSAN (CC BY 4.0), the DNS Challenge (CC BY 4.0) and RIRS_NOISES (Apache-2.0).
 
@@ -117,11 +118,11 @@ Out of scope:
 
 ## Running it without the SDK
 
-A plain ONNX file (opset 17), for onnxruntime or onnxruntime-web 1.30 or later:
+The model is an `.alk` file for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [its format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. Give the engine the window's length first:
 
 | Name | Type | |
 |---|---|---|
-| `audio` (in) | float32 `[1, samples]` | 16 kHz mono, -1 to 1, at least 280 samples; 1.5 s (24,000 samples) advised |
+| `audio` (in) | float32 `[1, samples]` | 16 kHz mono, -1 to 1, 280 to 24,000 samples; 1.5 s (24,000 samples) advised |
 | `embedding` (out) | float32 `[1, 192]` | unit norm: the print for Focus |
 | `id` (out) | float32 `[1, 192]` | unit norm: compare two voices by the dot product |
 

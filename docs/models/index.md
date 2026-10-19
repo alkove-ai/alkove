@@ -12,11 +12,11 @@ Alkove is five small models, each doing a single job, and one WebAssembly engine
 
 | Model | Job | Size | Languages |
 |---|---|---|---|
-| [alkove-focus-1-preview](/docs/models/focus/) | Voice isolation: keeps the closest voice, or the voice of a print, and removes noise, music and other voices | 0.93 MB | any (speech) |
-| [alkove-cue-1-preview](/docs/models/cue/) | Voice activity: the probability that someone is speaking, every 30 ms | 1.2 MB | any (speech) |
-| [alkove-spot-1-preview](/docs/models/spot/) | Keyword spotting: any typed word, no training | 2.9 MB | fr, en, es, it, pt, ca, ro |
-| [alkove-lex-1-preview](/docs/models/lex/) | Pronunciation: a written word to its likely phonemes, with probabilities | 1.8 MB | fr, en, es, it, pt, ca, ro |
-| [alkove-timbre-1-preview](/docs/models/timbre/) | Voiceprints: who is speaking, and the print Focus follows | 0.87 MB | any (speech) |
+| [alkove-focus-1-preview](/docs/models/focus/) | Voice isolation: keeps the closest voice, or the voice of a print, and removes noise, music and other voices | 1.1 MB | any (speech) |
+| [alkove-cue-1-preview](/docs/models/cue/) | Voice activity: the probability that someone is speaking, every 30 ms | 1.1 MB | any (speech) |
+| [alkove-spot-1-preview](/docs/models/spot/) | Keyword spotting: any typed word, no training | 2.8 MB | fr, en, es, it, pt, ca, ro |
+| [alkove-lex-1-preview](/docs/models/lex/) | Pronunciation: a written word to its likely phonemes, with probabilities | 1.9 MB | fr, en, es, it, pt, ca, ro |
+| [alkove-timbre-1-preview](/docs/models/timbre/) | Voiceprints: who is speaking, and the print Focus follows | 0.74 MB | any (speech) |
 
 All five together weigh under 8 MB. All take 16 kHz mono audio (Lex takes text). The SDK resamples the microphone or your file for you.
 

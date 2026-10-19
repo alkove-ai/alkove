@@ -17,7 +17,7 @@ wake.on('wake', ({ word, score }) => console.log('heard', word, score))
 
 | | |
 |---|---|
-| Size | 2.9 MB (4-bit and int8 weights) |
+| Size | 2.8 MB (4-bit and int8 weights) |
 | Languages | French, English, Spanish, Italian, Portuguese, Catalan, Romanian |
 | Input | 16 kHz mono, 480 samples (30 ms) per step |
 | Output | phoneme log-probabilities, 90 ms late; probability of speech, 30 ms late |
@@ -83,8 +83,8 @@ On a call or agent input, `input.spot()` reads the cleaned audio: no second micr
 
 | | |
 |---|---|
-| Galaxy Z Fold8, Chrome, WebAssembly, 1 thread | about 22 ms per second of audio (about 2 % of one core) |
-| WebAssembly (Node on an Apple silicon Mac), 1 thread | about 31 ms per second of audio (about 3 % of one core) |
+| WebAssembly, 1 thread, Apple M1 Max (Node 22) | about 12 ms per second of audio (about 1 % of one core) |
+| WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | about 10 ms per second of audio |
 
 ## Benchmarks
 
@@ -92,10 +92,10 @@ Recall of typed words at 1 and 0.5 false alarm per hour. 40 words per language, 
 
 | Recall | fr | en | es | it | ca | pt | mean |
 |---|---|---|---|---|---|---|---|
-| at 1 false alarm / hour | 89.7 | 66.9 | 69.4 | 78.7 | 91.6 | 84.5 | **80.1 %** |
-| at 0.5 false alarm / hour | 85.5 | 62.4 | 61.0 | 73.7 | 87.2 | 72.9 | **73.8 %** |
+| at 1 false alarm / hour | 89.9 | 66.9 | 69.9 | 78.8 | 91.3 | 85.3 | **80.4 %** |
+| at 0.5 false alarm / hour | 85.3 | 62.2 | 61.9 | 74.0 | 86.8 | 72.2 | **73.7 %** |
 
-Only after a pause (the word said after 300 ms without speech), at 1 false alarm per hour: **85.6 %**, at 0.5: 81.1 % (mean of fr, en, es, it, ca, pt).
+Only after a pause (the word said after 300 ms without speech), at 1 false alarm per hour: **85.9 %**, at 0.5: 81.3 % (mean of fr, en, es, it, ca, pt).
 
 French, English, Spanish and Italian on MOCKS (CC BY 4.0 / MPL 2.0); Catalan and Portuguese on the Common Voice test sets (CC0). Romanian is supported, but its Common Voice test set is too short to set a threshold at these false-alarm rates, so it is left out of the table.
 
@@ -109,14 +109,12 @@ Out of scope: transcription (Spot finds the words it is given, it does not write
 
 ## Running it without the SDK
 
-A plain ONNX file (opset 17), for onnxruntime or onnxruntime-web 1.30 or later. One call per 480 samples:
+The model is an `.alk` file for the [Alkove engine](https://github.com/alkove-ai/alkove/tree/main/crates/engine) (Rust, Apache-2.0), natively or in WebAssembly; [its format](https://github.com/alkove-ai/alkove/blob/main/crates/engine/FORMAT.md) is documented. One call per 480 samples:
 
 | Name | Type | |
 |---|---|---|
 | `audio` (in) | float32 `[1, 480]` | 16 kHz mono, -1 to 1 |
-| `state` (in) | float32 `[19672]` | zeros at the start, then the previous `next_state` |
 | `logp` (out) | float32 `[1, 1, 59]` | log-probabilities of the CTC blank and the 58 phonemes, 3 steps (90 ms) late |
 | `speech` (out) | float32 `[1, 1]` | probability of speech, 1 step (30 ms) late |
-| `next_state` (out) | float32 `[19672]` | passed back on the next call |
 
-The model gives phoneme probabilities; the search for a word and its thresholds are in the SDK.
+The engine keeps Spot's state from one call to the next; it starts at zeros. The model gives phoneme probabilities; the search for a word and its thresholds are in the SDK.

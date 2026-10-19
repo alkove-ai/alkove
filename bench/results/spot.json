@@ -1,8 +1,8 @@
 {
  "model": "alkove-spot-1-preview",
- "file": "alkove-spot-1-preview.onnx",
- "bytes": 2860508,
- "sha256": "aa8ce7259528a78db9427a8d970c35be72e0c070af705f8c668a0b1e3cb02dc6",
+ "file": "alkove-spot-1-preview.alk",
+ "bytes": 2774380,
+ "sha256": "d7cbb73a4a027144040ebabba7ec361201e9b7ec2cbdb7a6c8e0e3b15e97de66",
  "benchmarks": [
   {
    "id": "typed-words",
@@ -23,27 +23,27 @@
    "results": {
     "recall": {
      "1.0": {
-      "fr": 89.7,
+      "fr": 89.9,
       "en": 66.9,
-      "es": 69.4,
-      "it": 78.7,
-      "ca": 91.6,
-      "pt": 84.5,
-      "mean": 80.1
+      "es": 69.9,
+      "it": 78.8,
+      "ca": 91.3,
+      "pt": 85.3,
+      "mean": 80.4
      },
      "0.5": {
-      "fr": 85.5,
-      "en": 62.4,
-      "es": 61.0,
-      "it": 73.7,
-      "ca": 87.2,
-      "pt": 72.9,
-      "mean": 73.8
+      "fr": 85.3,
+      "en": 62.2,
+      "es": 61.9,
+      "it": 74.0,
+      "ca": 86.8,
+      "pt": 72.2,
+      "mean": 73.7
      }
     },
     "after_pause_recall": {
-     "1.0": 85.6,
-     "0.5": 81.1
+     "1.0": 85.9,
+     "0.5": 81.3
     }
    },
    "notes": {

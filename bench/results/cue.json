@@ -1,8 +1,8 @@
 {
  "model": "alkove-cue-1-preview",
- "file": "alkove-cue-1-preview.onnx",
- "bytes": 1156915,
- "sha256": "00a8a49b08653d067dba276a6bd8c3868a06b154d6cb72ef0d7211c3981f340a",
+ "file": "alkove-cue-1-preview.alk",
+ "bytes": 1066500,
+ "sha256": "e054958b133befc2bff36ad4ceae98a8b25d19c3fefdcc50df8139634132fe4f",
  "benchmarks": [
   {
    "id": "streams-behind-focus",
@@ -29,7 +29,7 @@
    },
    "results": {
     "Cue": {
-     "miss": 2.89,
+     "miss": 2.93,
      "fa": 4,
      "open_while_silent_pct": 6.4,
      "onset_vs_silero_ms": 10.0
@@ -79,7 +79,7 @@
       "open_pct": 0.0
      },
      "tv": {
-      "false_starts_per_min": 7.3,
+      "false_starts_per_min": 7.5,
       "open_pct": 50.0
      }
     }
