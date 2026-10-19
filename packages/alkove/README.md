@@ -2,7 +2,7 @@
 
 On-device voice input for the web: keep the user's voice and drop the rest, detect speech, hear a wake word, recognize a voice. Everything runs in the browser, in WebAssembly. No server, no key, no telemetry.
 
-> **Preview (0.x).** The API may change between versions until 1.0.
+> **Preview (0.x).** A minor version (0.2, 0.3) may break the API until 1.0; a patch never does. See [stability](https://alkove.ai/docs/guides/stability/) and the [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md).
 
 **Read this first.** Alkove is made for **a near microphone and one person**: a phone, a headset, a laptop in front of you. It keeps the closest voice (or the voice of a print) and removes the others, so on a room microphone in the middle of a meeting table it removes the other participants. Audio is processed at 16 kHz: the output carries speech up to 8 kHz ("HD voice", not full band).
 

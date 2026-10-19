@@ -75,7 +75,7 @@ Alkove.configure({
 |---|---|
 | `modelBaseUrl` | Folder of the `.alk` files. Each model is read at `<modelBaseUrl>/<model>.alk`, for example `/alkove/alkove-focus-1-preview.alk`. |
 | `assetBaseUrl` | Folder of `alkove-engine.wasm`, `alkove-worker.js` and `alkove-worklet.js`. When it is set, the worker and the worklet load from these URLs instead of `blob:` URLs. |
-| `models` | One source per file, by name (`focus`, `cue`, `spot`, `timbre`, `lex`, or `ort` for the engine): a URL, a string, an `ArrayBuffer` or a `Uint8Array`. Takes precedence over the base URLs for that file. |
+| `models` | One source per file, by name (`focus`, `cue`, `spot`, `timbre`, `lex`, or `engine` for `alkove-engine.wasm`): a URL, a string, an `ArrayBuffer` or a `Uint8Array`. Takes precedence over the base URLs for that file. |
 | `modelDir` | Node only: a folder on disk the models are read from. |
 
 The full type is in the [reference](/docs/reference/interfaces/config/).
