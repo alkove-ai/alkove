@@ -1,11 +1,11 @@
-import type { Chain, ChainEvent } from './core/chain'
-import { Cue, type SpeechParams, SpeechTracker, SPEECH_DEFAULTS } from './core/cue'
+import type { ChainEvent } from './core/chain'
+import { type SpeechParams, SPEECH_DEFAULTS } from './core/cue'
 import type { Engine } from './core/engine'
-import { type Context, Spot, Spotter, type WakeEvent, type Word, type WordJSON, wordOf } from './core/spot/spot'
+import type { NativeProcessor } from './core/native'
+import { type Context, type WakeEvent, type Word, type WordJSON, wordOf } from './core/spot/spot'
 import { Voiceprint, type VoiceprintJSON } from './core/timbre'
-import { log10 } from './dsp/math'
 import { encodeWav } from './dsp/wav'
-import { CUE, FOCUS, RATE } from './manifest'
+import { RATE } from './manifest'
 
 export interface ProcessOptions {
   focus?: boolean | { voiceprint?: Voiceprint | VoiceprintJSON | string | null; strength?: number }
@@ -72,115 +72,28 @@ export function printOf(p: Voiceprint | VoiceprintJSON | string | null | undefin
   return Voiceprint.fromJSON(p)
 }
 
-// every chosen primitive over 16 kHz audio pushed in blocks, as real time feeds them; the output comes back aligned with the input
+// every chosen primitive over 16 kHz audio pushed in blocks, as real time feeds them, in the core; the output comes back aligned with the input
 export class Processor {
-  private chain: Chain | null = null
-  private cue: Cue | null = null
-  private tracker: SpeechTracker | null = null
-  private spot: Spot | null = null
-  private spotter: Spotter | null = null
-  private shift: number
-  private skip: number
-  private delay: number
-  private pushed = 0
-  private given = 0
-  private open: number | null = null
-  private part: Omit<ProcessPart, 'start' | 'audio'> = { speech: [], wakes: [], diag: [] }
+  private core: NativeProcessor
   private closed = false
 
   constructor(
     engine: Engine,
     readonly opts: Omit<ProcessOptions, 'onProgress' | 'signal'> = {},
   ) {
-    const useFocus = opts.focus !== undefined && opts.focus !== false
-    const focusOpts = typeof opts.focus === 'object' ? opts.focus : {}
-    const speech = { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) }
-    const words = opts.spot?.words.map(wordOf) ?? []
-    if (words.length) {
-      this.spotter = new Spotter(words, opts.spot?.context ?? 'anywhere')
-      this.spot = new Spot(engine.stream('spot'))
-    }
-    this.shift = useFocus ? FOCUS.lag / RATE : 0
-    if (useFocus) {
-      this.chain = engine.chain({
-        gate: false,
-        normalize: opts.normalize ?? false,
-        strength: focusOpts.strength ?? 1,
-        print: printOf(focusOpts.voiceprint)?.embedding ?? null,
-        speech,
-      })
-      if (opts.trace) this.chain.onCue = (speech, t) => this.trace().cue.push({ t: +t.toFixed(3), speech })
-      this.chain.onFocus = (hop, t) => {
-        if (this.spot) this.feedSpot(hop)
-        if (opts.trace) {
-          let s = 0
-          for (const x of hop) s += x * x
-          this.trace().focus.push({ t: t / RATE - this.shift, db: +(10 * log10(s / hop.length + 1e-12)).toFixed(2) })
-        }
-      }
-    } else if (opts.cue) {
-      this.cue = new Cue(engine.stream('cue'))
-      this.tracker = new SpeechTracker(speech)
-    }
-    this.delay = this.chain?.delay ?? 0
-    this.skip = this.delay
-  }
-
-  private trace(): Trace {
-    return (this.part.trace ??= { focus: [], cue: [], spot: [] })
-  }
-
-  private onEvent = (e: ChainEvent) => {
-    if (e.type === 'speechstart') this.open = e.start
-    else if (e.type === 'speechend') {
-      if (this.opts.cue !== false) this.part.speech.push({ start: e.start, end: e.end })
-      this.open = null
-    } else this.part.diag.push(e)
-  }
-
-  private feedSpot(pcm: Float32Array): void {
-    this.spot!.push(pcm, (f, step) => {
-      this.spotter!.frame(f, (e) => this.part.wakes.push({ ...e, start: Math.max(0, e.start - this.shift), end: Math.max(0, e.end - this.shift) }))
-      if (this.opts.trace) this.trace().spot.push({ t: step * 0.03 - this.shift, speech: f.speech ?? 0, ...Object.fromEntries(this.spotter!.scores.map((s) => [s.word, s.score])) })
-    })
-  }
-
-  private run(pcm: Float32Array): Float32Array {
-    if (this.chain) return this.chain.push(pcm, this.onEvent)
-    if (this.cue)
-      this.cue.push(pcm, (p, k) => {
-        if (this.opts.trace) this.trace().cue.push({ t: k * 0.03, speech: p })
-        const e = this.tracker!.push(p, k)
-        if (e) this.onEvent(e)
-      })
-    if (this.spot) this.feedSpot(pcm)
-    return pcm
-  }
-
-  private take(out: Float32Array, final: boolean): ProcessPart {
-    const cut = Math.min(this.skip, out.length)
-    this.skip -= cut
-    let audio = out.subarray(cut)
-    if (final) audio = audio.subarray(0, Math.max(0, this.pushed - this.given))
-    const part: ProcessPart = { start: this.given / RATE, audio: audio.slice(), ...this.part }
-    this.given += audio.length
-    this.part = { speech: [], wakes: [], diag: [] }
-    return part
+    this.core = engine.processor(coreOptions(opts))
   }
 
   push(pcm: Float32Array): ProcessPart {
-    if (this.closed) throw new Error('push after end')
-    this.pushed += pcm.length
-    return this.take(this.run(pcm), false)
+    return this.core.push(pcm) as unknown as ProcessPart
   }
 
   // the samples still inside the primitives come out, and the speech still open closes at the end
   end(): ProcessPart {
+    if (this.closed) throw new Error('push after end')
     this.closed = true
-    const tail = this.run(new Float32Array(this.delay + CUE.chunk * (CUE.lagSteps + 2) + FOCUS.chunk + 480 * 4))
-    if (this.open !== null && this.opts.cue !== false && (this.chain || this.cue)) this.part.speech.push({ start: this.open, end: this.pushed / RATE })
-    const part = this.take(tail, true)
-    for (const n of [this.chain, this.cue, this.spot]) n?.release()
+    const part = this.core.end() as unknown as ProcessPart
+    this.core.release()
     return part
   }
 }

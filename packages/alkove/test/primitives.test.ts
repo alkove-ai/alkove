@@ -1,10 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { Cue } from '../src/core/cue'
 import { WasmEngine } from '../src/core/engine'
-import { Lex } from '../src/core/lex'
-import { compileWord, Spot } from '../src/core/spot/spot'
 import { dot, Timbre } from '../src/core/timbre'
+import type { WordJSON } from '../src/core/spot/spot'
 import { processPcm } from '../src/process'
 import { f32, loadEngine, maxDiff, modelBytes, wav } from './helpers'
 
@@ -31,20 +29,31 @@ describe('primitives against the engine natively (lab)', () => {
 
   it('cue: one probability per 30 ms, one step late', () => {
     const ref = f32('speech.cue.f32')
+    const net = engine.stream('cue')
+    const pcm = wav('speech.wav')
     const got: number[] = []
-    new Cue(engine.stream('cue')).push(wav('speech.wav'), (p, k) => (got[k] = p))
-    expect(got.length).toBe(ref.length - 1)
-    expect(maxDiff(got, ref.subarray(1))).toBe(0)
+    for (let i = 0; i + 480 <= pcm.length; i += 480) {
+      net.f32('audio').set(pcm.subarray(i, i + 480))
+      net.run()
+      got.push(net.f32('speech')[0]!)
+    }
+    expect(got.length).toBe(ref.length)
+    expect(maxDiff(got, ref)).toBe(0)
   })
 
   it('spot', () => {
     const logp = f32('speech.spot.logp.f32')
     const speech = f32('speech.spot.speech.f32')
+    const net = engine.stream('spot')
+    const pcm = wav('speech.wav')
     let worst = 0
-    new Spot(engine.stream('spot')).push(wav('speech.wav'), (f, s) => {
-      for (let k = 0; k < 59; k++) worst = Math.max(worst, Math.abs(f.logp[k]! - logp[59 * s + k]!))
-      if (f.speech !== null) worst = Math.max(worst, Math.abs(f.speech - speech[s]!))
-    })
+    for (let s = 0; 480 * (s + 1) <= pcm.length; s++) {
+      net.f32('audio').set(pcm.subarray(480 * s, 480 * (s + 1)))
+      net.run()
+      const out = net.f32('logp')
+      for (let k = 0; k < 59; k++) worst = Math.max(worst, Math.abs(out[k]! - logp[59 * s + k]!))
+      worst = Math.max(worst, Math.abs(net.f32('speech')[0]! - speech[s]!))
+    }
     expect(worst).toBe(0)
   })
 
@@ -58,9 +67,9 @@ describe('primitives against the engine natively (lab)', () => {
 
 describe('what the primitives say', () => {
   it('lex writes « amendement » as French does', () => {
-    const p = new Lex(engine.net('lex', 'encoder'), engine.net('lex', 'decoder')).phonemize('amendement', 'fr')
-    expect(p[0]!.ipa).toBe('amɑ̃dmɑ̃')
-    expect(p[0]!.p).toBeGreaterThan(0.5)
+    const [p] = engine.lex().phonemize(['amendement'], 'fr')
+    expect(p![0]!.ipa).toBe('amɑ̃dmɑ̃')
+    expect(p![0]!.p).toBeGreaterThan(0.5)
   })
 
   it('timbre knows the same voice from another clip', () => {
@@ -73,7 +82,7 @@ describe('what the primitives say', () => {
   })
 
   it('process: speech found, the word spotted', () => {
-    const word = compileWord('amendement', { lang: 'fr' }, () => new Lex(engine.net('lex', 'encoder'), engine.net('lex', 'decoder')))
+    const word = engine.compile('amendement', ['fr']).word as unknown as WordJSON
     const r = processPcm(engine, wav('speech.wav'), { cue: true, spot: { words: [word] } })
     expect(r.speech.length).toBe(1)
     // 0.5 s of silence, then the clip's own 0.7 s before the voice

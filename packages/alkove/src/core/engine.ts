@@ -1,7 +1,7 @@
 import type { Alk, Model, Session, Tensor } from '../engine/alk'
 import type { ModelName } from '../manifest'
 import { Chain, type ChainOptions } from './chain'
-import { NativeEnroller, NativeLex, NativeListener, NativeProcessor, type Value } from './native'
+import { compileNative, NativeEnroller, NativeLex, NativeListener, NativeProcessor, type Value } from './native'
 
 export type StreamModel = 'focus' | 'cue' | 'spot'
 
@@ -27,6 +27,8 @@ export interface Engine {
   listener(words: Value[], context: string): NativeListener
   enroller(word: Value, takes: number, chain: string): NativeEnroller
   lex(): NativeLex
+  // a typed word with Lex, phonemes between slashes without
+  compile(text: string, lang: string[], chain?: string): { word: Value; warnings: Value[] }
 }
 
 // one model per name (weights unpacked once), one session per stream: each keeps its own state
@@ -75,6 +77,10 @@ export class WasmEngine implements Engine {
   // one per engine: its sessions are reused from word to word
   lex(): NativeLex {
     return (this.lexer ??= new NativeLex(this.alk, this.model('lex')))
+  }
+
+  compile(text: string, lang: string[], chain?: string): { word: Value; warnings: Value[] } {
+    return compileNative(this.alk, /^\s*\/.+\/\s*$/.test(text) ? null : this.lex(), text, lang, chain)
   }
 
   net(model: 'timbre' | 'lex', plan?: string): Net {

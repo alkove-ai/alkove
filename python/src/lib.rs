@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
-use alkove_core::{fp, ChainEvent, ChainOptions, FocusOptions, Models, Part, ProcessOptions, SpeechEvent, SpeechParams};
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use alkove_core::spot::{context_of, EnrollOptions, Enroller as CoreEnroller, Listener as CoreListener, Spot, Spotter, Word, ENROLL};
+use alkove_core::{fp, lex, ChainEvent, ChainOptions, Models, Part, ProcessOptions, SpeechEvent, SpeechParams, Value};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyByteArray;
+use pyo3::types::{PyBool, PyByteArray, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 
 fn floats(b: &[u8]) -> PyResult<Vec<f32>> {
     if b.len() % 4 != 0 {
@@ -26,9 +27,63 @@ fn bytes<'py>(py: Python<'py>, x: &[f32]) -> Bound<'py, PyByteArray> {
 
 fn error(e: alkove_core::Error) -> PyErr {
     match e {
-        alkove_core::Error::Print(_) => PyValueError::new_err(e.to_string()),
+        alkove_core::Error::Print(_) | alkove_core::Error::Type(_) | alkove_core::Error::Range(_) | alkove_core::Error::Value(_) => PyValueError::new_err(e.to_string()),
+        alkove_core::Error::Alkove(code, message) => Python::attach(|py| {
+            let made = py.import("alkove.errors").and_then(|m| m.getattr("AlkoveError")).and_then(|c| c.call1((code, message.as_str())));
+            match made {
+                Ok(err) => PyErr::from_value(err),
+                Err(e) => e,
+            }
+        }),
         _ => PyRuntimeError::new_err(e.to_string()),
     }
+}
+
+// the core's values as Python's own: dict, list, str, float, bool, None
+fn to_py<'py>(py: Python<'py>, v: &Value) -> PyResult<Bound<'py, PyAny>> {
+    Ok(match v {
+        Value::Null => py.None().into_bound(py),
+        Value::Bool(b) => PyBool::new(py, *b).to_owned().into_any(),
+        Value::Num(x) => PyFloat::new(py, *x).into_any(),
+        Value::Str(s) => PyString::new(py, s).into_any(),
+        Value::Arr(a) => PyList::new(py, a.iter().map(|x| to_py(py, x)).collect::<PyResult<Vec<_>>>()?)?.into_any(),
+        Value::Obj(f) => {
+            let d = PyDict::new(py);
+            for (k, x) in f {
+                d.set_item(k, to_py(py, x)?)?;
+            }
+            d.into_any()
+        }
+    })
+}
+
+fn from_py(o: &Bound<'_, PyAny>) -> PyResult<Value> {
+    if o.is_none() {
+        return Ok(Value::Null);
+    }
+    if let Ok(b) = o.cast::<PyBool>() {
+        return Ok(Value::Bool(b.is_true()));
+    }
+    if o.is_instance_of::<PyInt>() || o.is_instance_of::<PyFloat>() {
+        return Ok(Value::Num(o.extract::<f64>()?));
+    }
+    if let Ok(s) = o.cast::<PyString>() {
+        return Ok(Value::Str(s.extract::<String>()?));
+    }
+    if let Ok(d) = o.cast::<PyDict>() {
+        return d.iter().map(|(k, x)| Ok((k.extract::<String>()?, from_py(&x)?))).collect::<PyResult<Vec<_>>>().map(Value::Obj);
+    }
+    if o.is_instance_of::<PyList>() || o.is_instance_of::<PyTuple>() {
+        return o.try_iter()?.map(|x| from_py(&x?)).collect::<PyResult<Vec<_>>>().map(Value::Arr);
+    }
+    // numpy arrays and scalars, and anything else that iterates or converts to a number
+    if let Ok(x) = o.extract::<f64>() {
+        return Ok(Value::Num(x));
+    }
+    if let Ok(it) = o.try_iter() {
+        return it.map(|x| from_py(&x?)).collect::<PyResult<Vec<_>>>().map(Value::Arr);
+    }
+    Err(PyTypeError::new_err(format!("not a JSON value: {}", o.get_type().name()?)))
 }
 
 // four numbers per event, as the wasm gives them: the kind first
@@ -45,14 +100,7 @@ fn record(e: &ChainEvent) -> (u8, f64, f64, f64) {
     }
 }
 
-type Rows = Vec<(f64, f64)>;
 type Records = Vec<(u8, f64, f64, f64)>;
-type RawPart<'py> = (f64, Bound<'py, PyByteArray>, Vec<(f64, f64)>, Records, Option<(Rows, Rows)>);
-
-fn part(py: Python<'_>, p: Part) -> RawPart<'_> {
-    let rows = |r: &[alkove_core::TraceRow]| r.iter().map(|r| (r.t, r.value)).collect::<Rows>();
-    (p.start, bytes(py, &p.audio), p.speech.iter().map(|s| (s.start, s.end)).collect(), p.diag.iter().map(record).collect(), p.trace.as_ref().map(|t| (rows(&t.focus), rows(&t.cue))))
-}
 
 /// A model loaded from its .alk bytes, shared by every stream that runs on it.
 #[pyclass(frozen, module = "alkove._alkove")]
@@ -149,13 +197,12 @@ impl Chain {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn options(focus: bool, strength: f64, print: Option<&[u8]>, cue: Option<bool>, speech_params: (f64, f64, f64, f64), normalize: bool, trace: bool, rate: f64) -> PyResult<ProcessOptions> {
-    Ok(ProcessOptions { focus: if focus { Some(FocusOptions { print: print.map(floats).transpose()?, strength }) } else { None }, cue, speech: speech(speech_params), normalize, trace, rate })
+fn models(focus: Option<&Model>, cue: Option<&Model>, spot: Option<&Model>) -> Models {
+    Models { focus: focus.map(|m| m.inner.clone()), cue: cue.map(|m| m.inner.clone()), spot: spot.map(|m| m.inner.clone()) }
 }
 
-fn models(focus: Option<&Model>, cue: Option<&Model>) -> Models {
-    Models { focus: focus.map(|m| m.inner.clone()), cue: cue.map(|m| m.inner.clone()), spot: None }
+fn options(o: &Bound<'_, PyDict>) -> PyResult<ProcessOptions> {
+    ProcessOptions::from_value(&from_py(o.as_any())?).map_err(error)
 }
 
 /// The chain on a live stream at any rate: frames in, the processed samples that are ready out, at the same rate.
@@ -251,70 +298,210 @@ impl SpeechTracker {
     }
 }
 
-/// Focus and Cue over audio pushed in blocks of any size, the output aligned with the input.
+/// Focus, Cue and Spot over audio pushed in blocks of any size, the output aligned with the input.
 #[pyclass(module = "alkove._alkove")]
 struct Processor {
     inner: alkove_core::Processor,
 }
 
+// the part's audio, and the rest as the web SDK gives it
+fn part(py: Python<'_>, mut p: Part) -> PyResult<(Bound<'_, PyByteArray>, Bound<'_, PyAny>)> {
+    let audio = std::mem::take(&mut p.audio);
+    Ok((bytes(py, &audio), to_py(py, &p.to_value())?))
+}
+
 #[pymethods]
 impl Processor {
     #[new]
-    #[pyo3(signature = (focus_model, cue_model, focus, strength, print, cue, speech_params, normalize, trace, rate))]
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        focus_model: Option<&Model>,
-        cue_model: Option<&Model>,
-        focus: bool,
-        strength: f64,
-        print: Option<&[u8]>,
-        cue: Option<bool>,
-        speech_params: (f64, f64, f64, f64),
-        normalize: bool,
-        trace: bool,
-        rate: f64,
-    ) -> PyResult<Self> {
-        let opts = options(focus, strength, print, cue, speech_params, normalize, trace, rate)?;
-        let inner = alkove_core::Processor::new(&models(focus_model, cue_model), opts).map_err(error)?;
+    #[pyo3(signature = (focus_model, cue_model, spot_model, options))]
+    fn new(focus_model: Option<&Model>, cue_model: Option<&Model>, spot_model: Option<&Model>, options: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let inner = alkove_core::Processor::new(&models(focus_model, cue_model, spot_model), self::options(options)?).map_err(error)?;
         Ok(Processor { inner })
     }
 
-    fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<RawPart<'py>> {
+    fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<(Bound<'py, PyByteArray>, Bound<'py, PyAny>)> {
         let pcm = floats(pcm)?;
         let inner = &mut self.inner;
         let p = py.detach(|| fp::exact(|| inner.push(&pcm))).map_err(error)?;
-        Ok(part(py, p))
+        part(py, p)
     }
 
-    fn end<'py>(&mut self, py: Python<'py>) -> PyResult<RawPart<'py>> {
+    fn end<'py>(&mut self, py: Python<'py>) -> PyResult<(Bound<'py, PyByteArray>, Bound<'py, PyAny>)> {
         let inner = &mut self.inner;
         let p = py.detach(|| fp::exact(|| inner.end())).map_err(error)?;
-        Ok(part(py, p))
+        part(py, p)
     }
 }
 
 /// A whole recording at 16 kHz.
 #[pyfunction]
-#[pyo3(signature = (focus_model, cue_model, pcm, focus, strength, print, cue, speech_params, normalize, trace))]
-#[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (focus_model, cue_model, spot_model, pcm, options))]
 fn process<'py>(
     py: Python<'py>,
     focus_model: Option<&Model>,
     cue_model: Option<&Model>,
+    spot_model: Option<&Model>,
     pcm: &[u8],
-    focus: bool,
-    strength: f64,
-    print: Option<&[u8]>,
-    cue: Option<bool>,
-    speech_params: (f64, f64, f64, f64),
-    normalize: bool,
-    trace: bool,
-) -> PyResult<RawPart<'py>> {
+    options: &Bound<'_, PyDict>,
+) -> PyResult<(Bound<'py, PyByteArray>, Bound<'py, PyAny>)> {
     let pcm = floats(pcm)?;
-    let opts = options(focus, strength, print, cue, speech_params, normalize, trace, alkove_core::RATE)?;
-    let m = models(focus_model, cue_model);
+    let opts = self::options(options)?;
+    let m = models(focus_model, cue_model, spot_model);
     let p = py.detach(|| fp::exact(|| alkove_core::process(&m, &pcm, opts))).map_err(error)?;
-    Ok(part(py, p))
+    part(py, p)
+}
+
+/// Lex's beam search: text to phonemes, word by word.
+#[pyclass(module = "alkove._alkove")]
+struct Lex {
+    inner: lex::Lex,
+}
+
+#[pymethods]
+impl Lex {
+    #[new]
+    fn new(model: &Model) -> PyResult<Self> {
+        Ok(Lex { inner: lex::Lex::new(&model.inner).map_err(error)? })
+    }
+
+    // each text's pronunciations, the likeliest first: [{ ids, ipa, p }]
+    fn phonemize<'py>(&mut self, py: Python<'py>, texts: Vec<String>, lang: &str) -> PyResult<Bound<'py, PyAny>> {
+        let inner = &mut self.inner;
+        let out = py
+            .detach(|| {
+                fp::exact(|| {
+                    texts
+                        .iter()
+                        .map(|t| {
+                            let ps = inner.phonemize(t, lang, lex::BEAMS, |_, _| true)?;
+                            Ok(Value::Arr(
+                                ps.iter()
+                                    .map(|p| alkove_core::value::obj([("ids", p.ids.iter().map(|&i| i as f64).collect::<Vec<_>>().into()), ("ipa", p.ipa.as_str().into()), ("p", p.p.into())]))
+                                    .collect(),
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, alkove_core::Error>>()
+                })
+            })
+            .map_err(error)?;
+        to_py(py, &Value::Arr(out))
+    }
+}
+
+/// A typed word (with Lex) or phonemes between slashes (lex may be None): { word, warnings }.
+#[pyfunction]
+#[pyo3(signature = (lex, text, lang, chain=None))]
+fn compile<'py>(py: Python<'py>, lex: Option<PyRefMut<'_, Lex>>, text: &str, lang: Vec<String>, chain: Option<&str>) -> PyResult<Bound<'py, PyAny>> {
+    let mut lex = lex;
+    let w = fp::exact(|| alkove_core::spot::compile(text, &lang, chain, lex.as_mut().map(|l| &mut l.inner))).map_err(error)?;
+    to_py(py, &alkove_core::value::obj([("word", w.to_value()), ("warnings", Value::Arr(w.warnings))]))
+}
+
+/// A word's JSON as this version reads it, or None when it was compiled for another Spot.
+#[pyfunction]
+fn word<'py>(py: Python<'py>, json: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    match Word::from_value(&from_py(json)?).map_err(error)? {
+        Some(w) => to_py(py, &w.to_value()),
+        None => Ok(py.None().into_bound(py)),
+    }
+}
+
+/// 0 = the same sound; IPA between slashes or not.
+#[pyfunction]
+fn distance(a: &str, b: &str) -> f64 {
+    lex::distance_ipa(a, b)
+}
+
+/// Spot's 58 phonemes, in the order of its classes.
+#[pyfunction]
+fn inventory() -> Vec<String> {
+    alkove_core::spot::phones::inventory().phones.iter().map(|p| alkove_core::text::nfc(p)).collect()
+}
+
+fn words(v: &Bound<'_, PyDict>) -> PyResult<(Vec<Word>, alkove_core::spot::Context)> {
+    let v = from_py(v.as_any())?;
+    let ws = v.get("words").and_then(Value::arr).unwrap_or(&[]).iter().map(Word::of).collect::<Result<Vec<_>, _>>().map_err(error)?;
+    Ok((ws, context_of(v.get("context").and_then(Value::str).unwrap_or("anywhere"))))
+}
+
+/// Spot and the words it listens for, frame by frame.
+#[pyclass(module = "alkove._alkove")]
+struct Listener {
+    inner: CoreListener,
+}
+
+#[pymethods]
+impl Listener {
+    #[new]
+    fn new(spot: &Model, options: &Bound<'_, PyDict>) -> PyResult<Self> {
+        let (ws, context) = words(options)?;
+        Ok(Listener { inner: CoreListener::new(&spot.inner, ws, context).map_err(error)? })
+    }
+
+    fn set_words(&mut self, options: &Bound<'_, PyDict>) -> PyResult<()> {
+        let (ws, context) = words(options)?;
+        self.inner.spotter = Spotter::new(ws, context);
+        Ok(())
+    }
+
+    // [[step, speech or None, [scores], [wakes]]] per frame of 30 ms
+    fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+        let pcm = floats(pcm)?;
+        let inner = &mut self.inner;
+        let frames = py.detach(|| {
+            fp::exact(|| {
+                let mut frames = Vec::new();
+                inner.push(&pcm, |h| {
+                    frames.push(Value::Arr(vec![
+                        (h.step as f64).into(),
+                        h.speech.map_or(Value::Null, |p| (p as f64).into()),
+                        h.scores.into(),
+                        Value::Arr(h.wakes.iter().map(|w| w.to_value()).collect()),
+                    ]))
+                });
+                frames
+            })
+        });
+        to_py(py, &Value::Arr(frames))
+    }
+}
+
+/// A word said `takes` times, on Spot's own speech head.
+#[pyclass(module = "alkove._alkove")]
+struct Enroller {
+    spot: Spot,
+    inner: CoreEnroller,
+}
+
+#[pymethods]
+impl Enroller {
+    #[new]
+    #[pyo3(signature = (spot, word, takes, chain))]
+    fn new(spot: &Model, word: &Bound<'_, PyAny>, takes: usize, chain: &str) -> PyResult<Self> {
+        let w = Word::of(&from_py(word)?).map_err(error)?;
+        let opts = EnrollOptions { takes, ..ENROLL };
+        Ok(Enroller { spot: Spot::new(&spot.inner).map_err(error)?, inner: CoreEnroller::new(&w.text, &w.lang, w.phonemes, chain, opts) })
+    }
+
+    // { takes, done }: the takes heard in this block
+    fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+        let pcm = floats(pcm)?;
+        let (spot, inner) = (&mut self.spot, &mut self.inner);
+        let takes = py.detach(|| {
+            fp::exact(|| {
+                let mut takes = Vec::new();
+                spot.push(&pcm, |_, logp, speech| inner.frame(logp, speech, |t| takes.push(t.to_value())));
+                takes
+            })
+        });
+        to_py(py, &alkove_core::value::obj([("takes", Value::Arr(takes)), ("done", self.inner.done().into())]))
+    }
+
+    // { word, takes, warnings }
+    fn result<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let r = self.inner.result().map_err(error)?;
+        to_py(py, &alkove_core::value::obj([("word", r.word.to_value()), ("takes", Value::Arr(r.takes.iter().map(|t| t.to_value()).collect())), ("warnings", Value::Arr(r.warnings))]))
+    }
 }
 
 /// Windowed sinc between any two rates, across chunks.
@@ -356,6 +543,14 @@ fn _alkove(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Processor>()?;
     m.add_class::<Live>()?;
     m.add_class::<SpeechTracker>()?;
+    m.add_class::<Lex>()?;
+    m.add_class::<Listener>()?;
+    m.add_class::<Enroller>()?;
+    m.add("LANGS", lex::LANGS.to_vec())?;
+    m.add_function(wrap_pyfunction!(compile, m)?)?;
+    m.add_function(wrap_pyfunction!(word, m)?)?;
+    m.add_function(wrap_pyfunction!(distance, m)?)?;
+    m.add_function(wrap_pyfunction!(inventory, m)?)?;
     m.add_class::<Resampler>()?;
     m.add_function(wrap_pyfunction!(process, m)?)?;
     m.add_function(wrap_pyfunction!(resample, m)?)?;

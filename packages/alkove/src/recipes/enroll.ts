@@ -1,5 +1,5 @@
 import type { Warning } from '../core/lex'
-import type { Take } from '../core/spot/enroll'
+import type { Take } from '../core/spot/spot'
 import { Word, type WordJSON, wordOf } from '../core/spot/spot'
 import type { Voiceprint } from '../core/timbre'
 import { AlkoveError } from '../errors'

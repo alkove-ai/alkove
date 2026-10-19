@@ -1,30 +1,25 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 
 import { WasmEngine } from '../src/core/engine'
-import { checkText, clean, Lex, splitWords } from '../src/core/lex'
-import { compileNative, receive, send } from '../src/core/native'
-import { Enroller, type Take } from '../src/core/spot/enroll'
+import { Lex } from '../src/core/lex'
+import { receive, send, type Value } from '../src/core/native'
 import { PHONES, toIds, toIpa } from '../src/core/spot/phones'
-import { NEG, Search } from '../src/core/spot/search'
-import { compileWord, type Context, Spot, Spotter, type Word } from '../src/core/spot/spot'
+import type { Context, WordJSON } from '../src/core/spot/spot'
 import type { Alk } from '../src/engine/alk'
-import { coreOptions, Processor, type ProcessOptions } from '../src/process'
+import { coreOptions, type ProcessOptions } from '../src/process'
 import { loadHarness, modelBytes, noise, wav } from './helpers'
 
-// Spot and Lex in the core against the TypeScript they replace, on the same wasm engine
+// Spot and Lex in the core: against JavaScript itself and the main thread's phones.ts where they remain, else against digests of what the TypeScript gave
 
 let alk: Alk
 let engine: WasmEngine
-let lex: () => Lex
 beforeAll(async () => {
   alk = await loadHarness()
   engine = new WasmEngine(alk, modelBytes)
-  let l: Lex | null = null
-  lex = () => (l ??= new Lex(engine.net('lex', 'encoder'), engine.net('lex', 'decoder')))
 }, 300_000)
 
 const core = (v: Record<string, unknown>) => {
@@ -32,10 +27,8 @@ const core = (v: Record<string, unknown>) => {
   return receive(alk, (alk.x as unknown as { alk_h_value(): number }).alk_h_value())
 }
 
-// a run's outputs in one sha256, keys sorted: what the TypeScript gave, kept once it is gone
-const goldenPath = join(import.meta.dirname, 'fixtures/core.json')
-const GOLDEN: Record<string, string> = JSON.parse(readFileSync(goldenPath, 'utf8'))
-const made: Record<string, string> = {}
+// a run's outputs in one sha256, keys sorted: what the TypeScript gave before the core replaced it
+const GOLDEN: Record<string, string> = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures/core.json'), 'utf8'))
 const canon = (v: unknown): unknown =>
   ArrayBuffer.isView(v)
     ? Array.from(v as Float32Array)
@@ -45,13 +38,22 @@ const canon = (v: unknown): unknown =>
         ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon((v as Record<string, unknown>)[k])]))
         : v
 function digest(key: string, outputs: unknown[]): void {
-  const d = createHash('sha256').update(JSON.stringify(canon(outputs))).digest('hex')
-  if (GOLDEN[key]) expect(d, key).toBe(GOLDEN[key])
-  else made[key] = d
+  expect(createHash('sha256').update(JSON.stringify(canon(outputs))).digest('hex'), key).toBe(GOLDEN[key])
 }
-afterAll(() => {
-  if (Object.keys(made).length) writeFileSync(goldenPath, JSON.stringify({ ...GOLDEN, ...made }, null, 1) + '\n')
-})
+
+// what the TypeScript's clean, splitWords and checkText did
+const clean = (t: string) => t.normalize('NFC').toLowerCase().replace(/’/g, "'")
+const splitWords = (t: string) => clean(t).replace(/l·l|ŀl/g, 'l').match(/\p{L}+(?:['-]\p{L}+)*'?/gu) ?? []
+function checkText(t: string) {
+  const out: Record<string, unknown>[] = []
+  if (/\p{N}/u.test(t)) out.push({ code: 'text.digits', message: 'Numbers are not read: write them in letters.' })
+  const acronyms = t.match(/\b\p{Lu}{2,}\b/gu)
+  if (acronyms) out.push({ code: 'text.acronym', message: 'Acronyms are read as words: write them as they sound.', words: acronyms })
+  const abbreviations = t.match(/\b\p{L}{1,3}\.(?=\s|$)/gu)
+  if (abbreviations) out.push({ code: 'text.abbreviation', message: 'Abbreviations are read as written.', words: abbreviations })
+  return out
+}
+const NEG = -1e9
 
 const rng = (seed: number) => {
   let s = seed >>> 0
@@ -163,14 +165,8 @@ describe('phonemes, as the TypeScript wrote them', () => {
         const z = Math.log(logits.reduce((a, x) => a + Math.exp(x - m), 0)) + m
         return Float32Array.from(logits, (x) => x - z)
       })
-      const ts = new Search(ids, lang, 0.03)
-      const want = frames.map((f, t) => {
-        const x = ts.step(f, t)
-        return [x.score, x.start]
-      })
       const got = core({ op: 'search', ids, lang, frames: frames.map((f) => Array.from(f)) }) as number[][]
-      expect(got).toEqual(want)
-      expect(want.some(([s]) => s! > NEG / 2)).toBe(true)
+      expect(got.some(([s]) => s! > NEG / 2)).toBe(true)
       runs.push(got)
     }
     digest('spot: the keyword search', runs)
@@ -191,9 +187,7 @@ describe('Lex and compiling, as the TypeScript did', () => {
   it('phonemize in the seven languages', () => {
     const all: unknown[] = []
     for (const [lang, words] of Object.entries(WORDS)) {
-      const n = engine.lex().phonemize(words, lang)
-      expect(n, lang).toEqual(words.map((w) => lex().phonemize(w, lang as 'fr')))
-      all.push(n)
+      all.push(engine.lex().phonemize(words, lang))
     }
     digest('lex: phonemize in the seven languages', all)
     expect(() => engine.lex().phonemize(['x'], 'de')).toThrow(RangeError)
@@ -213,21 +207,13 @@ describe('Lex and compiling, as the TypeScript did', () => {
     ]
     const all: unknown[] = []
     for (const [text, lang, chain] of cases) {
-      let want: unknown
-      try {
-        const w = compileWord(text, { lang: lang as 'fr'[], chain: chain as 'raw' }, lex)
-        want = { word: w.toJSON(), warnings: w.warnings }
-      } catch (e) {
-        want = { error: String(e) }
-      }
       let got: unknown
       try {
-        const r = compileNative(alk, engine.lex(), text, lang, chain)
+        const r = engine.compile(text, lang, chain)
         got = { word: r.word, warnings: (r.warnings as { code: string }[]).filter((x) => x.code !== 'text.script') }
       } catch (e) {
         got = { error: String(e) }
       }
-      expect(got, text).toEqual(want)
       all.push(got)
     }
     digest('lex: compile', all)
@@ -265,7 +251,7 @@ const words = () =>
     ['territoriales', ['fr']],
     ['/kɔ̃sɛj/', ['fr']],
     ['hey jarvis', ['en']],
-  ].map(([t, l]) => compileWord(t as string, { lang: l as 'fr'[] }, lex))
+  ].map(([t, l]) => engine.compile(t as string, l as string[]).word as unknown as WordJSON)
 
 describe('Spot in process, as the TypeScript gave it', () => {
   const cases: [string, number, ProcessOptions][] = [
@@ -279,24 +265,19 @@ describe('Spot in process, as the TypeScript gave it', () => {
     it(name, async () => {
       const opts: ProcessOptions = { ...base, spot: { words: words(), context: contexts[seed] } }
       const pcm = stream(seed, 40)
-      const ts = new Processor(engine, opts)
       const native = engine.processor(coreOptions(opts))
       const r = rng(seed * 7)
       let wakes = 0
       const parts: unknown[] = []
       for (let i = 0; i < pcm.length; ) {
         const n = Math.min(pcm.length - i, 1 + Math.floor(r() * 6000))
-        const a = ts.push(pcm.subarray(i, i + n))
         const b = native.push(pcm.subarray(i, i + n))
-        expect(b).toEqual(a)
         parts.push(b)
-        wakes += a.wakes.length
+        wakes += (b.wakes as unknown[]).length
         i += n
         await breathe()
       }
-      const last = native.end()
-      expect(last).toEqual(ts.end())
-      parts.push(last)
+      parts.push(native.end())
       native.release()
       expect(wakes).toBeGreaterThan(0)
       digest(`spot: process, ${name}`, parts)
@@ -307,8 +288,7 @@ describe('listening and enrolling in real time, as the worker did', () => {
   it('Spot and its words frame by frame: speech head, scores, wakes; words replaced on the way', () => {
     const ws = words()
     const pcm = stream(15, 40)
-    const ts = { spot: new Spot(engine.stream('spot')), spotter: new Spotter(ws, 'both') }
-    const native = engine.listener(ws.map((w) => w.toJSON() as unknown as null), 'both')
+    const native = engine.listener(ws as unknown as Value[], 'both')
     const r = rng(16)
     const frames: unknown[] = []
     for (let i = 0; i < pcm.length; ) {
@@ -316,18 +296,9 @@ describe('listening and enrolling in real time, as the worker did', () => {
       if (i > 0 && r() < 0.01) {
         const some = ws.slice(0, 1 + Math.floor(r() * ws.length))
         const context = (['pause', 'anywhere', 'both'] as const)[Math.floor(r() * 3)]!
-        ts.spotter = new Spotter(some, context)
-        native.setWords(some.map((w) => w.toJSON() as unknown as null), context)
+        native.setWords(some as unknown as Value[], context)
       }
-      const want: unknown[] = []
-      ts.spot.push(pcm.subarray(i, i + n), (f, step) => {
-        const wakes: unknown[] = []
-        ts.spotter.frame(f, (e) => wakes.push(e))
-        want.push([step, f.speech, ts.spotter.scores.map((s) => s.score), wakes])
-      })
-      const got = native.push(pcm.subarray(i, i + n))
-      expect(got).toEqual(want)
-      frames.push(got)
+      frames.push(native.push(pcm.subarray(i, i + n)))
       i += n
     }
     native.release()
@@ -335,44 +306,24 @@ describe('listening and enrolling in real time, as the worker did', () => {
   })
 
   it('enrolling: the takes as they come, then the word and its warnings, or the error', () => {
-    const typed = compileWord('amendement', { lang: 'fr' }, lex)
+    const typed = engine.compile('amendement', ['fr']).word
     const speech = wav('speech.wav')
     const quiet = new Float32Array(16000)
     const parts = [speech, quiet, stream(17, 6), speech, quiet, speech, quiet, speech]
     const all: unknown[] = []
     for (const takes of [3, 2, 9]) {
-      const ts = new Enroller(typed.text, typed.lang, typed.phonemes, 'focus', { takes, k: 0.8, margin: 1, detect: -2.2, spread: 1 })
-      const spot = new Spot(engine.stream('spot'))
-      const native = engine.enroller(typed.toJSON() as unknown as null, takes, 'focus')
-      for (const p of parts) {
-        const seen: Take[] = []
-        spot.push(p, (f) => ts.frame(f, (t) => seen.push(t)))
-        const got = native.push(p)
-        expect(got).toEqual({ takes: seen, done: ts.done })
-        all.push(got)
+      const native = engine.enroller(typed, takes, 'focus')
+      for (const p of parts) all.push(native.push(p))
+      try {
+        all.push(native.result())
+      } catch (e) {
+        all.push({ error: String(e) })
       }
-      const res = (fn: () => { word: unknown; takes: unknown; warnings: unknown }) => {
-        try {
-          return fn()
-        } catch (e) {
-          return { error: String(e) }
-        }
-      }
-      const result = res(() => native.result())
-      expect(result).toEqual(
-        res(() => {
-          const x = ts.result()
-          return { word: x.word.toJSON(), takes: x.takes, warnings: x.warnings }
-        }),
-      )
-      all.push(result)
       native.release()
     }
     digest('spot: enrolling', all)
-    const none = engine.enroller(typed.toJSON() as unknown as null, 3, 'raw')
+    const none = engine.enroller(typed, 3, 'raw')
     none.push(new Float32Array(32000))
     expect(() => none.result()).toThrow('word.no-take')
   })
 })
-
-export type { Word }

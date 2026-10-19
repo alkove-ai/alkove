@@ -1,9 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { WasmEngine } from '../src/core/engine'
-import { Lex } from '../src/core/lex'
-import { Enroller, type Take } from '../src/core/spot/enroll'
-import { compileWord, Spot } from '../src/core/spot/spot'
+import type { WordJSON } from '../src/core/spot/spot'
 import { processPcm } from '../src/process'
 import { loadEngine, modelBytes, wav } from './helpers'
 
@@ -24,19 +22,16 @@ const join = (...parts: Float32Array[]) => {
 
 describe('enrolling a word', () => {
   it('three takes set a threshold under them and over the rest, which then finds the word', () => {
-    const lex = () => new Lex(engine.net('lex', 'encoder'), engine.net('lex', 'decoder'))
-    const typed = compileWord('amendement', { lang: 'fr' }, lex)
+    const typed = engine.compile('amendement', ['fr']).word
     const speech = wav('speech.wav')
     const quiet = new Float32Array(16000)
-    const audio = join(speech, quiet, speech, quiet, speech, quiet)
-    const enroller = new Enroller(typed.text, typed.lang, typed.phonemes, 'raw')
-    const takes: Take[] = []
-    const spot = new Spot(engine.stream('spot'))
-    spot.push(audio, (f) => enroller.frame(f, (t) => takes.push(t)))
-    const ok = takes.filter((t) => t.ok)
+    const enroller = engine.enroller(typed, 3, 'raw')
+    const { takes, done } = enroller.push(join(speech, quiet, speech, quiet, speech, quiet))
+    const ok = takes.filter((t) => t.ok) as { score: number }[]
     expect(ok.length).toBe(3)
-    expect(enroller.done).toBe(true)
-    const { word } = enroller.result()
+    expect(done).toBe(true)
+    const word = enroller.result().word as unknown as WordJSON
+    enroller.release()
     expect(word.calibrated).toBe(true)
     expect(word.thresholds.anywhere).toBeLessThanOrEqual(Math.min(...ok.map((t) => t.score)))
     expect(word.thresholds.anywhere).toBeGreaterThanOrEqual(-2.2)

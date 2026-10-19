@@ -55,7 +55,7 @@ A call or agent input can also listen for words behind Focus with `input.spot()`
 - An AudioWorklet resamples the microphone to 16 kHz and keeps a short queue. It never runs a model.
 - A real-time worker runs Focus, Cue and Spot frame by frame. A background worker runs Timbre and Lex. Both share one compiled engine, and there is one engine per page whatever the number of inputs.
 - The audio path never goes through your main thread. Only what you ask for comes back to it: events, and the PCM of an agent input.
-- The engine is Alkove's own (65 KB), bundled in the package: the same result to the bit in every browser. It needs WebAssembly SIMD but no special headers: no COOP / COEP, no `SharedArrayBuffer`.
+- The engine is Alkove's own (118 KB), bundled in the package: the same result to the bit in every browser. It needs WebAssembly SIMD but no special headers: no COOP / COEP, no `SharedArrayBuffer`.
 
 ## What an input tells you
 

@@ -91,7 +91,7 @@ Alkove.configure({ modelBaseUrl: '/alkove/', assetBaseUrl: '/alkove/' })
 |---|---|
 | call / agent | Focus 0.9 MB + Cue 0.9 MB, + Timbre 0.7 MB with a print |
 | wake word | Spot 2.5 MB, + Lex 1.5 MB for a typed word |
-| engine | Alkove's own, 65 KB |
+| engine | Alkove's own, 118 KB |
 
 ## Content Security Policy
 

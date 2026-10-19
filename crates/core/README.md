@@ -12,8 +12,13 @@ Rust, no dependencies beyond the engine, Apache-2.0.
 | `Processor`, `process` | Focus and Cue over audio pushed in blocks of any size, the output aligned with the input, as `Alkove.process` and `Alkove.stream` give them. |
 | `SpeechTracker` | the speech state machine on Cue's probabilities: `confidence`, `exitConfidence`, `startSecs`, `stopSecs`. |
 | `Resampler` | windowed sinc between any two rates, across chunks. |
+| `Live` | the chain on a live stream at any rate, as the web SDK runs it in real time. |
+| `spot` | the keyword search on Spot's phoneme posteriors (`Search`, `Spotter`, `Listener`), words and their JSON (`Word`, `compile`), enrollment (`Enroller`). |
+| `lex` | Lex's beam search, text to phonemes in fr, en, es, pt, it, ca, ro. |
+| `text` | what the SDK's TypeScript did with `normalize`, `toLowerCase` and its regular expressions; NFC and NFD on the Latin, IPA and Greek blocks. |
+| `value` | JSON-shaped values: platforms read and write JSON, the core reads and builds these. |
 
-Next: Spot's search, compiled words and enrollment; Lex's beam search; Timbre's prints, thresholds and learning; the real-time pipelines of the web worker.
+Next: Timbre's prints, thresholds and learning; the real-time pipelines of the web worker.
 
 ## What it guarantees
 
@@ -57,5 +62,6 @@ Event kinds: 0 speech start (`start`), 1 speech end (`start`, `end`), 2 idle (`a
 
 ## Tests
 
-- **`cargo test`**: JavaScript's number rules and the core's math.
-- **`packages/alkove/test/core.test.ts`**: the core against the TypeScript where it remains (math, resampler), and against digests of what the TypeScript gave (chain, `process`) on streams drawn at random: voices at any level, silences, noise, blocks of any size, settings changed along the way.
+- **`cargo test`**: JavaScript's number rules, the core's math, the float mode guard, the values' encoding.
+- **`packages/alkove/test/core.test.ts`, `spot-core.test.ts`**: the core against JavaScript and the TypeScript where they remain (math, resampler, `normalize`, `toLowerCase`, the regular expressions on every code point, phonemes), and against digests of what the TypeScript gave (chain, `process`, the keyword search, Lex, compiling, listening, enrolling) on streams drawn at random.
+- **`python/tests`**: the same streams drawn in Python give the same digests, natively.

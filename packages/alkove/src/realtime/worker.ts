@@ -1,8 +1,8 @@
 import type { Chain, ChainOptions } from '../core/chain'
 import { WasmEngine } from '../core/engine'
 import { LEARN, rms, VoiceprintLearner } from '../core/learner'
-import { ENROLL, Enroller } from '../core/spot/enroll'
-import { type Context, Spot, Spotter, type WordJSON, wordOf } from '../core/spot/spot'
+import type { NativeEnroller, NativeListener } from '../core/native'
+import { type Context, type WordJSON, wordOf } from '../core/spot/spot'
 import { dot, Timbre as TimbreCore, Voiceprint, type VoiceprintJSON } from '../core/timbre'
 import { log10 } from '../dsp/math'
 import { Resampler } from '../dsp/resample'
@@ -60,7 +60,7 @@ interface Realtime {
   timer: ReturnType<typeof setInterval>
   opts: RealtimeOptions
   chain: Chain | null
-  spot: { net: Spot; spotter: Spotter; shift: number } | null
+  spot: { listener: NativeListener; names: string[]; shift: number } | null
   events: unknown[]
   shift: number
   timing: { n: number; sum: number; max: number; slow: number }
@@ -75,7 +75,7 @@ interface Realtime {
   history: { buf: Float32Array; pos: number; total: number } | null
   utterance: { parts: Float32Array[]; start: number } | null
   hops: number
-  enroll: { net: Spot; enroller: Enroller; audio: Float32Array[]; sent: boolean } | null
+  enroll: { enroller: NativeEnroller; audio: Float32Array[]; sent: boolean } | null
   tape: Float32Array | null
   written: number
   held: { e: Record<string, unknown>; ready: number; key: number }[]
@@ -165,12 +165,12 @@ function send(r: Realtime, m: Record<string, unknown>, transfer: Transferable[])
   else post({ ...m, kind: m.type, type: 'pcm', input: r.id }, transfer)
 }
 
-// building a session blocks this worker for hundreds of ms: the worklet goes raw at the same delay meanwhile, instead of starving into an overload
-function stream(r: Realtime, model: 'spot'): Spot {
-  const pause = !engine!.has(model) && r.port
+// loading Spot blocks this worker for hundreds of ms: the worklet goes raw at the same delay meanwhile, instead of starving into an overload
+function withSpot<T>(r: Realtime, make: () => T): T {
+  const pause = !engine!.has('spot') && r.port
   if (pause) r.port!.postMessage({ pause: true })
   try {
-    return new Spot(engine!.stream(model))
+    return make()
   } finally {
     if (pause) r.port!.postMessage({ pause: false })
   }
@@ -178,8 +178,13 @@ function stream(r: Realtime, model: 'spot'): Spot {
 
 function setWords(r: Realtime, words: WordJSON[], context: Context): void {
   const list = words.map(wordOf)
-  if (!r.spot) r.spot = { net: stream(r, 'spot'), spotter: new Spotter(list, context), shift: r.chain ? FOCUS.lag / RATE : 0 }
-  else r.spot.spotter = new Spotter(list, context)
+  const json = list.map((w) => w.toJSON() as unknown as null)
+  const names = list.map((w) => w.text)
+  if (!r.spot) r.spot = { listener: withSpot(r, () => engine!.listener(json, context)), names, shift: r.chain ? FOCUS.lag / RATE : 0 }
+  else {
+    r.spot.listener.setWords(json, context)
+    r.spot.names = names
+  }
 }
 
 // on the raw mic, a wake carries its audio; with onlyMyVoice it waits 0.5 s more for Timbre in the background worker
@@ -214,23 +219,24 @@ function release(r: Realtime): void {
 function feedSpot(r: Realtime, pcm: Float32Array): void {
   const s = r.spot
   if (!s) return
-  s.net.push(pcm, (f, step) => {
-    s.spotter.frame(f, (w) => onWake(r, { type: 'wake', ...w, start: Math.max(0, w.start - s.shift), end: Math.max(0, w.end - s.shift) }))
-    if (r.opts.trace && step % 3 === 0) emitTo(r, { type: 'trace', primitive: 'spot', t: step * 0.03 - s.shift, speech: f.speech ?? 0, scores: s.spotter.scores })
-    if (!r.chain && f.speech !== null && step % 10 === 0) emitTo(r, { type: 'heard', speech: f.speech, scores: s.spotter.scores })
-  })
+  for (const [step, speech, values, wakes] of s.listener.push(pcm)) {
+    for (const w of wakes as { start: number; end: number }[]) onWake(r, { type: 'wake', ...w, start: Math.max(0, w.start - s.shift), end: Math.max(0, w.end - s.shift) })
+    const scores = () => s.names.map((word, i) => ({ word, score: values[i]! }))
+    if (r.opts.trace && step % 3 === 0) emitTo(r, { type: 'trace', primitive: 'spot', t: step * 0.03 - s.shift, speech: speech ?? 0, scores: scores() })
+    if (!r.chain && speech !== null && step % 10 === 0) emitTo(r, { type: 'heard', speech, scores: scores() })
+  }
 }
 
 // the last seconds of the mic, to cut the takes out of for the voiceprint
 const TAPE = 8 * RATE
 
 function startEnroll(r: Realtime, spec: { word: WordJSON; takes: number } | null): void {
-  r.enroll?.net.release()
+  r.enroll?.enroller.release()
   r.enroll = null
   if (!spec) return
   const w = wordOf(spec.word)
   const chain = r.chain ? 'focus' : 'raw'
-  r.enroll = { net: stream(r, 'spot'), enroller: new Enroller(w.text, w.lang, w.phonemes, chain, { ...ENROLL, takes: spec.takes }), audio: [], sent: false }
+  r.enroll = { enroller: withSpot(r, () => engine!.enroller(w.toJSON() as unknown as null, spec.takes, chain)), audio: [], sent: false }
   if (!r.tape) {
     r.tape = new Float32Array(TAPE)
     r.written = 0
@@ -240,18 +246,17 @@ function startEnroll(r: Realtime, spec: { word: WordJSON; takes: number } | null
 function feedEnroll(r: Realtime, hop: Float32Array): void {
   const en = r.enroll!
   const shift = r.chain ? FOCUS.lag / RATE : 0
-  en.net.push(hop, (f) =>
-    en.enroller.frame(f, (take) => {
-      emitTo(r, { type: 'take', ...take, start: Math.max(0, take.start - shift), end: Math.max(0, take.end - shift) })
-      if (take.ok) en.audio.push(cut(r, take.start, take.end))
-    }),
-  )
-  if (en.enroller.done && !en.sent) {
+  const { takes: heard, done } = en.enroller.push(hop)
+  for (const take of heard as { start: number; end: number; ok: boolean }[]) {
+    emitTo(r, { type: 'take', ...take, start: Math.max(0, take.start - shift), end: Math.max(0, take.end - shift) })
+    if (take.ok) en.audio.push(cut(r, take.start, take.end))
+  }
+  if (done && !en.sent) {
     en.sent = true
     try {
       const { word, takes, warnings } = en.enroller.result()
       const audio = concat(en.audio)
-      emitTo(r, { type: 'enrolled', word: word.toJSON(), takes, warnings, audio })
+      emitTo(r, { type: 'enrolled', word, takes, warnings, audio })
     } catch (err) {
       emitTo(r, { type: 'enrolled', error: String((err as Error).message) })
     }
@@ -513,8 +518,8 @@ function dispose(input: number): void {
     r.closed = true
     r.port?.close()
     clearInterval(r.timer)
-    r.spot?.net.release()
-    r.enroll?.net.release()
+    r.spot?.listener.release()
+    r.enroll?.enroller.release()
     r.chain?.release()
     inputs.delete(input)
   }

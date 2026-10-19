@@ -1,6 +1,6 @@
 import type { ChainOptions } from '../core/chain'
 import type { SpeechParams } from '../core/cue'
-import type { Take } from '../core/spot/enroll'
+import type { Take } from '../core/spot/spot'
 import { type Context, type WakeEvent, type Word, type WordJSON, wordOf } from '../core/spot/spot'
 import type { Warning } from '../core/lex'
 import { Voiceprint, type VoiceprintJSON } from '../core/timbre'
