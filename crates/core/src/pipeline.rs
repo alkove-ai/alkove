@@ -871,8 +871,9 @@ impl Coach {
     // a wake's audio against the reference print: same voice and score; no print, or too short, counts as the same
     pub fn verify(&self, timbre: &mut Timbre, pcm: &[f32]) -> Result<(bool, f64), Error> {
         match &self.reference {
+            // a word and its 0.5 s past one window: Timbre's windows, as for a print
             Some(r) if pcm.len() >= MIN => {
-                let v = verify(r, &[timbre.window(pcm)?], Level::Balanced);
+                let v = verify(r, &timbre.windows(pcm)?, Level::Balanced);
                 Ok((v.same, v.score))
             }
             _ => Ok((true, 1.0)),
