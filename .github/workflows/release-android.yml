@@ -30,16 +30,25 @@ jobs:
       - run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
       - name: the tag is the version in gradle.properties
         run: test "${GITHUB_REF_NAME#android-v}" = "$(sed -n 's/^version=//p' android/gradle.properties)"
+      # absent is a 404; anything else (credentials, network) stops the release
       - name: a published version is never replaced
         run: |
           v="${GITHUB_REF_NAME#android-v}"
-          if aws s3 ls --endpoint-url "$R2" "$BUCKET/ai/alkove/alkove/$v/" | grep -q .; then echo "$v is already on maven.alkove.ai"; exit 1; fi
+          for a in alkove alkove-livekit; do
+            if aws s3api head-object --endpoint-url "$R2" --bucket "${BUCKET#s3://}" --key "ai/alkove/$a/$v/$a-$v.pom" > /dev/null 2> err; then echo "$a $v is already on maven.alkove.ai"; exit 1; fi
+            grep -q -E "404|Not Found" err || { cat err; exit 1; }
+          done
       # Gradle adds the new version to the metadata it finds: the versions already out stay listed
       - name: the metadata already published
         run: |
           for a in alkove alkove-livekit; do
             mkdir -p "android/build/maven/ai/alkove/$a"
-            aws s3 cp --endpoint-url "$R2" "$BUCKET/ai/alkove/$a/maven-metadata.xml" "android/build/maven/ai/alkove/$a/" || true
+            key="ai/alkove/$a/maven-metadata.xml"
+            if aws s3api head-object --endpoint-url "$R2" --bucket "${BUCKET#s3://}" --key "$key" > /dev/null 2> err; then
+              aws s3 cp --endpoint-url "$R2" "$BUCKET/$key" "android/build/maven/ai/alkove/$a/"
+            else
+              grep -q -E "404|Not Found" err || { cat err; exit 1; }
+            fi
           done
       - run: ./gradlew --no-daemon :alkove:testDebugUnitTest :livekit:testDebugUnitTest publishAllPublicationsToStagingRepository
         working-directory: android

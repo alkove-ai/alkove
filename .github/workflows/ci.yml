@@ -94,7 +94,7 @@ jobs:
       - run: pip install --no-deps -e integrations/livekit -e integrations/pipecat
       - run: python -m pytest -q integrations/livekit/tests integrations/pipecat/tests
 
-  # the Android library: its binding, its tests on the host JVM (the web's digests once the models can be downloaded), the AARs and the example
+  # the Android library: its binding, its tests on the host JVM (the web's digests once the models can be downloaded), the AARs and the example minified (R8 against the consumer rules)
   android:
     runs-on: ubuntu-latest
     steps:
@@ -108,5 +108,5 @@ jobs:
       - run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
       - run: cargo clippy --profile android -p alkove-android --all-targets -- -D warnings
       - run: cargo test -p alkove-android
-      - run: ./gradlew --no-daemon :alkove:testDebugUnitTest :livekit:testDebugUnitTest :alkove:assembleRelease :livekit:assembleRelease :example:assembleDebug
+      - run: ./gradlew --no-daemon :alkove:testDebugUnitTest :livekit:testDebugUnitTest :alkove:assembleRelease :livekit:assembleRelease :example:assembleRelease
         working-directory: android
