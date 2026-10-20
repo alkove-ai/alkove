@@ -1,25 +1,144 @@
-# Alkove
+<p align="center">
+  <a href="https://alkove.ai">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/alkove-dark.png">
+      <img alt="Alkove" src=".github/assets/alkove-light.png" width="273" height="76">
+    </picture>
+  </a>
+</p>
 
-On-device voice input: keep the user's voice, detect speech, hear a wake word, recognize a voice. In the browser, without a server. [alkove.ai](https://alkove.ai)
+<h3 align="center">Listens to one voice. Answers to any name.</h3>
 
-| Package | |
-|---|---|
-| [`alkove`](./packages/alkove) | the web library (npm) |
-| [`alkove`](./python) | the Python package (PyPI) |
-| [`livekit-plugins-alkove`](./integrations/livekit) | Focus and Cue for LiveKit Agents |
-| [`pipecat-alkove`](./integrations/pipecat) | Focus and Cue for Pipecat |
-| [`alkove-engine`](./crates/engine) | the inference engine and the `.alk` format |
-| [`alkove-core`](./crates/core) | the features, written once in Rust for every package |
+<p align="center">
+  Voice isolation, wake words, voice activity and voiceprints, on the device.<br>
+  In the browser and in Python. No server, no key, no telemetry.
+</p>
 
-Models: [huggingface.co/alkove-ai](https://huggingface.co/alkove-ai). Code and weights under Apache-2.0.
+<p align="center">
+  <a href="https://www.npmjs.com/package/alkove"><img alt="npm" src="https://img.shields.io/npm/v/alkove?color=e0702c&label=npm"></a>
+  <a href="https://pypi.org/project/alkove/"><img alt="PyPI" src="https://img.shields.io/pypi/v/alkove?color=e0702c&label=pypi"></a>
+  <a href="./LICENSE"><img alt="Apache-2.0, code and weights" src="https://img.shields.io/badge/code%20%2B%20weights-Apache--2.0-13254a"></a>
+  <a href="https://huggingface.co/alkove-ai"><img alt="Models on Hugging Face" src="https://img.shields.io/badge/models-Hugging%20Face-13254a"></a>
+</p>
 
-Building needs Node 22, pnpm and [rustup](https://rustup.rs): `rust-toolchain.toml` pins the Rust version and its wasm target, installed on the first build.
+<p align="center">
+  <a href="https://alkove.ai/#demo"><b>Try it on your voice</b></a> ·
+  <a href="https://alkove.ai/docs/">Docs</a> ·
+  <a href="./integrations/livekit">LiveKit Agents</a> ·
+  <a href="./integrations/pipecat">Pipecat</a>
+</p>
+
+<br>
+
+<a href="https://alkove.ai/#demo">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/focus-dark.png">
+    <img alt="The raw microphone holds two voices and noise; after Focus, only the user's voice is left" src=".github/assets/focus-light.png" width="800">
+  </picture>
+</a>
+
+<p align="center"><sub>Focus on the demo's sample: the user, another voice and noise (Common Voice, CC0). <a href="https://alkove.ai/#demo">Listen to it</a>.</sub></p>
+
+## Why Alkove
+
+- **The other voices stay out.** On meetings recorded on headset microphones (AMI), words from other people reaching the transcript drop from 17 per minute to 0.5. Denoisers let 19 or more through.
+- **Any word is a wake word.** Type it in one of 7 languages: no training, no recording session. 80 % recall at one false alarm per hour.
+- **Fewer false barge-ins.** Behind Focus, Cue starts on music 4× less often than Silero VAD.
+- **Small enough for a phone.** Five models under 8 MB together, Focus at 1.1 MB, an engine of 134 KB (brotli).
+- **Open.** Code and weights under Apache-2.0, the engine is our own, in Rust. Every number above comes with its datasets and protocol in [`bench/`](./bench).
+
+## Quick start
+
+### In the browser
 
 ```sh
-pnpm install
-pnpm build
-pnpm test
-cargo test --release
+npm install alkove
 ```
 
-The Python package builds with [maturin](https://www.maturin.rs): `cd python && maturin develop --profile python`.
+```ts
+import { createCallInput } from 'alkove'
+
+const input = await createCallInput()
+pc.addTrack(input.track) // only the user's voice goes out
+```
+
+```ts
+import { createWakeListener, Spot } from 'alkove'
+
+const word = await Spot.compile('Hey Nova', { lang: 'en' })
+const wake = await createWakeListener({ words: [word] })
+wake.on('wake', ({ audio }) => startListening(audio))
+```
+
+Voice agents, files, Node and the primitives: [the `alkove` package](./packages/alkove).
+
+### LiveKit Agents
+
+```sh
+pip install livekit-plugins-alkove
+```
+
+```python
+from livekit.plugins import alkove
+
+session = AgentSession(vad=alkove.VAD.load(), ...)
+await session.start(
+    agent,
+    room=ctx.room,
+    room_options=room_io.RoomOptions(
+        audio_input=room_io.AudioInputOptions(noise_cancellation=alkove.Focus()),
+    ),
+)
+```
+
+### Pipecat
+
+```sh
+pip install pipecat-alkove
+```
+
+```python
+from pipecat_alkove import AlkoveFilter, AlkoveVADAnalyzer
+
+params = TransportParams(audio_in_enabled=True, audio_in_filter=AlkoveFilter())
+vad = AlkoveVADAnalyzer()
+```
+
+Python on its own: `pip install alkove`, see [the Python package](./python).
+
+## The five models
+
+| Model | What it does | Size |
+|---|---|---|
+| [Focus](https://alkove.ai/docs/models/focus/) | Keeps the closest voice, or one person's voice from their print, and removes noise, music and other voices | 1.1 MB |
+| [Cue](https://alkove.ai/docs/models/cue/) | Tells when someone speaks, every 30 ms | 1.1 MB |
+| [Spot](https://alkove.ai/docs/models/spot/) | Hears any word you type, in 7 languages, with no training | 2.8 MB |
+| [Lex](https://alkove.ai/docs/models/lex/) | Turns a written word into its likely pronunciations | 1.8 MB |
+| [Timbre](https://alkove.ai/docs/models/timbre/) | Makes voiceprints and compares them | 0.74 MB |
+
+Weights on [Hugging Face](https://huggingface.co/alkove-ai), downloaded once, checked by sha256 and cached. In production, [host them yourself](https://alkove.ai/docs/guides/self-hosting/).
+
+## Read this first
+
+- **A near microphone, one person.** A phone, a headset, a laptop in front of you. Alkove keeps the closest voice and removes the others: on a room microphone in the middle of a meeting table, it removes the other participants too.
+- **16 kHz voice.** The output carries speech up to 8 kHz: HD voice, not full band.
+- **Preview (0.x).** A minor version may break the API until 1.0, a patch never does. See the [changelog](./CHANGELOG.md).
+
+## In this repository
+
+| | |
+|---|---|
+| [`packages/alkove`](./packages/alkove) | the web library (npm) |
+| [`python`](./python) | the Python package (PyPI) |
+| [`integrations/livekit`](./integrations/livekit) | Focus and Cue for LiveKit Agents |
+| [`integrations/pipecat`](./integrations/pipecat) | Focus and Cue for Pipecat |
+| [`crates/engine`](./crates/engine) | the inference engine and the `.alk` format |
+| [`crates/core`](./crates/core) | the features, written once in Rust for every package |
+| [`bench`](./bench) | every benchmark number, with its datasets and protocol |
+| [`examples`](./examples) | two plain HTML pages on the built package |
+
+Building from source: [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## License
+
+Apache-2.0, code and weights. See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
