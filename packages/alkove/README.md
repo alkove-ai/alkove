@@ -103,6 +103,13 @@ Alkove.configure({ modelBaseUrl: '/alkove/', assetBaseUrl: '/alkove/' })
 
 No network call besides downloading the models, from the origin you choose. No telemetry. Neither audio nor voice prints leave the device. A voice print your app stores or sends is biometric data (GDPR art. 9): treat it as such.
 
+## Other platforms
+
+The same models and core, the same outputs to the bit:
+
+- Python, for servers and voice agents: [`pip install alkove`](https://alkove.ai/docs/start/python/), with plugins for [LiveKit Agents](https://alkove.ai/docs/guides/livekit/) (`livekit-plugins-alkove`) and [Pipecat](https://alkove.ai/docs/guides/pipecat/) (`pipecat-alkove`).
+- Android, natively in Kotlin: [`ai.alkove:alkove`](https://alkove.ai/docs/start/android/) from `maven.alkove.ai`, and `ai.alkove:alkove-livekit` for a LiveKit room.
+
 ## License
 
 Code and model weights: [Apache-2.0](./LICENSE). See [NOTICE](./NOTICE). The Apache license grants no right to the Alkove name or logo: a fork may not call itself Alkove.

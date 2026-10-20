@@ -1,11 +1,11 @@
 ---
 title: Overview
-description: On-device voice input for the web. Keep the user's voice, detect speech, hear a wake word, recognize a voice, all in the browser.
+description: On-device voice input for the web, Python and Android. Keep the user's voice, detect speech, hear a wake word, recognize a voice, all on the device.
 sidebar:
   order: 0
 ---
 
-Alkove turns a microphone into clean voice input, on the device. The `alkove` npm library runs five small models in WebAssembly, in the browser or in Node; the `alkove` Python package runs them natively, with plugins for LiveKit Agents and Pipecat. No server, no key, no account, no telemetry: audio and voiceprints never leave the device.
+Alkove turns a microphone into clean voice input, on the device. The `alkove` npm library runs five small models in WebAssembly, in the browser or in Node; the `alkove` Python package runs them natively, with plugins for LiveKit Agents and Pipecat, and so does the Android library, in Kotlin. No server, no key, no account, no telemetry: audio and voiceprints never leave the device.
 
 ```ts
 import { createCallInput } from 'alkove'
@@ -48,6 +48,7 @@ Each use has one function. Start from the one that matches your app.
 | Processing recordings | `Alkove.process`, `Alkove.stream` | [Files](/docs/start/files/) |
 | Your own pipeline | `Timbre`, `Lex`, `Spot`, `Voiceprint` | [Primitives](/docs/guides/primitives/) |
 | A voice agent on a server | `pip install alkove`, or a plugin | [Python](/docs/start/python/), [LiveKit Agents](/docs/guides/livekit/), [Pipecat](/docs/guides/pipecat/) |
+| An Android app | `ai.alkove:alkove`, `AgentInput`, `WakeListener` | [Android](/docs/start/android/) |
 
 A call or agent input can also listen for words behind Focus with `input.spot()`: one microphone, one Focus, no second input.
 

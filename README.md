@@ -8,12 +8,13 @@
 
 <p align="center">
   Voice isolation, wake words, voice activity and voiceprints, on the device.<br>
-  In the browser and in Python. No server, no key, no telemetry.
+  In the browser, in Python and on Android. No server, no key, no telemetry.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/alkove"><img alt="npm" src="https://img.shields.io/npm/v/alkove?color=e0702c&label=npm"></a>
   <a href="https://pypi.org/project/alkove/"><img alt="PyPI" src="https://img.shields.io/pypi/v/alkove?color=e0702c&label=pypi"></a>
+  <a href="https://alkove.ai/docs/start/android/"><img alt="Android" src="https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fmaven.alkove.ai%2Fai%2Falkove%2Falkove%2Fmaven-metadata.xml&color=e0702c&label=android"></a>
   <a href="./LICENSE"><img alt="Apache-2.0, code and weights" src="https://img.shields.io/badge/code%20%2B%20weights-Apache--2.0-13254a"></a>
   <a href="https://huggingface.co/alkove-ai"><img alt="Models on Hugging Face" src="https://img.shields.io/badge/models-Hugging%20Face-13254a"></a>
 </p>
@@ -21,6 +22,7 @@
 <p align="center">
   <a href="https://alkove.ai/#demo"><b>Try it on your voice</b></a> ·
   <a href="https://alkove.ai/docs/">Docs</a> ·
+  <a href="https://alkove.ai/docs/start/android/">Android</a> ·
   <a href="./integrations/livekit">LiveKit Agents</a> ·
   <a href="./integrations/pipecat">Pipecat</a>
 </p>
@@ -65,6 +67,21 @@ wake.on('wake', ({ audio }) => startListening(audio))
 ```
 
 Voice agents, files, Node and the primitives: [the `alkove` package](./packages/alkove).
+
+### On Android
+
+```kotlin
+// settings.gradle.kts: repositories { maven("https://maven.alkove.ai") }
+implementation("ai.alkove:alkove:0.2.0")
+```
+
+```kotlin
+val input = AgentInput.start(context, AgentOptions(output = Output(Format.S16, rate = 24000))) { chunk ->
+    socket.send(chunk) // only the user's voice goes out
+}
+```
+
+Wake words, files, a LiveKit room (`ai.alkove:alkove-livekit`): [the Android quick start](https://alkove.ai/docs/start/android/).
 
 ### LiveKit Agents
 
@@ -124,6 +141,7 @@ Weights on [Hugging Face](https://huggingface.co/alkove-ai), downloaded once, ch
 |---|---|
 | [`packages/alkove`](./packages/alkove) | the web library (npm) |
 | [`python`](./python) | the Python package (PyPI) |
+| [`android`](./android) | the Android library and its LiveKit plugin ([maven.alkove.ai](https://maven.alkove.ai)) |
 | [`integrations/livekit`](./integrations/livekit) | Focus and Cue for LiveKit Agents |
 | [`integrations/pipecat`](./integrations/pipecat) | Focus and Cue for Pipecat |
 | [`crates/engine`](./crates/engine) | the inference engine and the `.alk` format |

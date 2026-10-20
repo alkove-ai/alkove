@@ -6,7 +6,7 @@ sidebar:
   order: 0
 ---
 
-Alkove is five small models, each doing a single job, and one WebAssembly engine that runs them on the device. You rarely load a model by hand: the recipes (`createCallInput`, `createAgentInput`, `createWakeListener`) and `Alkove.process()` load what they need.
+Alkove is five small models, each doing a single job, and one engine that runs them on the device: in WebAssembly in the browser, natively in Python and on Android. You rarely load a model by hand: the recipes (`createCallInput`, `createAgentInput`, `createWakeListener`) and `Alkove.process()` load what they need.
 
 ## The five models
 
