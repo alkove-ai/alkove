@@ -78,8 +78,8 @@ With `focus`, Cue runs on the cleaned audio, as in a live input. With `cue` alon
 
 | | |
 |---|---|
-| WebAssembly, 1 thread, Galaxy Z Fold8 (Chrome 155) | 2.4 ms per second of audio (about 0.2 % of one core) |
-| WebAssembly, 1 thread, Apple M1 Max (Node 22) | 2.6 ms per second of audio (about 0.3 % of one core) |
+| WebAssembly, 1 thread, Galaxy Z Fold8 (Chrome 155) | 2.4 ms per second of audio |
+| WebAssembly, 1 thread, Apple M1 Max (Node 22) | 2.6 ms per second of audio |
 | WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | 3.7 ms per second of audio |
 
 ## Benchmarks

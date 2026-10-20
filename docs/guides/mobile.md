@@ -61,11 +61,11 @@ On call and agent inputs, Focus and Cue go to sleep in silences: after 2 s where
 
 What one second of audio costs on a phone (Galaxy Z Fold8, Chrome, WebAssembly, one thread), from the model cards:
 
-| Model | Time per second of audio | Share of one core |
-|---|---|---|
-| Focus | about 54 ms | about 5 % |
-| Cue | 2.4 ms | under 1 % |
-| Spot | about 9 ms | about 1 % |
+| Model | Time per second of audio |
+|---|---|
+| Focus | about 54 ms |
+| Cue | 2.4 ms |
+| Spot | about 9 ms |
 
 A wake listener runs Spot alone on the raw microphone, the whole time it is open.
 
