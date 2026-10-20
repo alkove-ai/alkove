@@ -80,4 +80,4 @@ p = alkove.Processor(models, focus=True, voiceprint=me)  # Focus keeps that voic
 
 ## Errors
 
-A file that cannot be fetched or does not match its sha256 raises `alkove.AlkoveError`, with the codes of the [web library](/docs/guides/errors/). A rate outside 1 to 768 kHz raises `ValueError`. The full API is in the [package README](https://github.com/alkove-ai/alkove/tree/main/python).
+A file that cannot be fetched or does not match its sha256 raises `alkove.AlkoveError`, with the codes of the [web library](/docs/guides/errors/). A rate outside 1 to 768 kHz raises `ValueError`. Every class and function: the [Python reference](/docs/python/).
