@@ -2,7 +2,7 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## 0.2.1
+## 0.2.1 (2026-10-21)
 
 - A wake listener with `onlyMyVoice` checks a word longer than one second: the word and its 0.5 s past Timbre's 1.5 s window were refused, and the wake waited forever. It is now checked on Timbre's windows, as a print is; shorter words give the same result as before.
 - The package's `bin` written as npm expects it. The README points to the Python package, its LiveKit and Pipecat plugins, and the Android library.
