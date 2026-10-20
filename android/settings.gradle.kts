@@ -33,4 +33,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "alkove-android"
-include(":alkove", ":livekit")
+include(":alkove", ":livekit", ":example")
