@@ -10,7 +10,7 @@ import alkove
 
 from .models import models as shared_models
 
-# LiveKit's gain control takes whole 10 ms frames: each frame goes out the size it came in, this far behind
+# LiveKit's gain control takes whole 10 ms frames: held ahead of Live's output (one hop's wait), each frame goes out the size it came in, about 37 ms behind in all
 LEAD = 0.02
 
 

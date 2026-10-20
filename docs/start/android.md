@@ -107,7 +107,7 @@ val models = Models.load(context, listOf("focus", "cue"))
 room.audioProcessingController.capturePostProcessor = AlkoveFocus(models)
 ```
 
-Focus then runs on the microphone's frames inside LiveKit's audio path, at its rate: each 10 ms frame comes back 20 ms behind, the size it came in. `AlkoveFocus(models, voiceprint = me)` keeps the voice of a print; `onEvent` gets Cue's speech start and end. Another WebRTC stack with a hook on the microphone's frames can do the same with `CallProcessor`.
+Focus then runs on the microphone's frames inside LiveKit's audio path, at its rate: each 10 ms frame comes back about 37 ms behind, the size it came in. `AlkoveFocus(models, voiceprint = me)` keeps the voice of a print; `onEvent` gets Cue's speech start and end. Another WebRTC stack with a hook on the microphone's frames can do the same with `CallProcessor`.
 
 ## Errors
 
