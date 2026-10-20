@@ -12,7 +12,7 @@ import java.nio.ByteOrder
 /**
  * Focus in LiveKit's microphone path: keeps the user's voice, the closest one or the voice of a print, removes the others and the
  * noise. `room.audioProcessingController.capturePostProcessor = AlkoveFocus(models)`, with Focus and Cue loaded
- * (`Models.load(context, listOf("focus", "cue"))`). Each 10 ms frame comes back 20 ms behind; `onEvent` gets Cue's speech start and
+ * (`Models.load(context, listOf("focus", "cue"))`). Each 10 ms frame comes back about 37 ms behind; `onEvent` gets Cue's speech start and
  * end on WebRTC's audio thread.
  */
 class AlkoveFocus @JvmOverloads constructor(
@@ -25,13 +25,14 @@ class AlkoveFocus @JvmOverloads constructor(
 ) : AudioProcessorInterface, AutoCloseable {
     private val processor = CallProcessor(models, voiceprint, strength, normalize, speech)
     private var frame = FloatArray(480)
+    private var failed = false
 
-    /** Off: LiveKit's audio goes through untouched; back on, from a fresh stream. */
+    /** Off: the raw microphone at the same delay, with a short fade, so turning it on and off moves nothing in time. */
     @Volatile
     var enabled = true
         set(on) {
-            if (on && !field) processor.reset()
             field = on
+            processor.setEnabled(on)
         }
 
     override fun isEnabled() = enabled
@@ -42,19 +43,22 @@ class AlkoveFocus @JvmOverloads constructor(
 
     override fun resetAudioProcessing(newRate: Int) = processor.reset()
 
-    // channel 0, full band, float at int16 scale: 10 ms at numFrames × 100 Hz
+    // channel 0, full band, float at int16 scale: 10 ms at numFrames × 100 Hz, read and written by index whatever the buffer's position
     override fun processAudio(numBands: Int, numFrames: Int, buffer: ByteBuffer) {
-        if (!enabled) return
-        // a view from byte 0, whatever the buffer's position
-        val f = buffer.duplicate().order(ByteOrder.nativeOrder()).rewind().let { (it as ByteBuffer).asFloatBuffer() }
-        val n = minOf(numFrames, f.remaining())
+        buffer.order(ByteOrder.nativeOrder())
+        val n = minOf(numFrames, buffer.capacity() / 4)
         if (frame.size < n) frame = FloatArray(n)
-        f.get(frame, 0, n)
-        for (i in 0 until n) frame[i] /= 32768f
-        val events = processor.process(frame, numFrames * 100, 1, n)
-        for (i in 0 until n) frame[i] *= 32768f
-        f.rewind()
-        f.put(frame, 0, n)
+        for (i in 0 until n) frame[i] = buffer.getFloat(4 * i) / 32768f
+        // an exception must not reach WebRTC's audio thread: the frame goes through as it came
+        val events = try {
+            processor.process(frame, numFrames * 100, 1, n)
+        } catch (e: Throwable) {
+            if (!failed) onEvent?.invoke(Event.Diag("worker.error", "warn", mapOf("message" to (e.message ?: e.toString()), "on" to "processAudio")))
+            failed = true
+            return
+        }
+        failed = false
+        for (i in 0 until n) buffer.putFloat(4 * i, frame[i] * 32768f)
         onEvent?.let { cb -> events.forEach(cb) }
     }
 

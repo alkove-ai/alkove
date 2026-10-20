@@ -4,7 +4,7 @@ import kotlin.math.ceil
 
 /**
  * Focus and Cue inside a call's own audio path: the WebRTC stack holds the microphone and hands its frames over, each comes back
- * the size it came in, [LEAD] behind. For a capture post-processor (LiveKit), or any stack with a hook on the microphone's frames.
+ * the size it came in, about 37 ms behind ([LEAD], Focus's lag and the resamplers'). For a capture post-processor (LiveKit), or any stack with a hook on the microphone's frames.
  */
 class CallProcessor @JvmOverloads constructor(
     private val models: Models,
@@ -23,6 +23,13 @@ class CallProcessor @JvmOverloads constructor(
     private var held = FloatArray(0)
     private var count = 0
     private var mono = FloatArray(0)
+    private var scratch = FloatArray(0)
+    private var closed = false
+
+    init {
+        models.need("focus", "cue")
+        require(voiceprint == null || voiceprint.embedding.size == 192) { "a print of ${voiceprint?.embedding?.size} values: Focus takes 192" }
+    }
 
     /** A fresh stream from the next frame: another track, another call. */
     @Synchronized
@@ -31,10 +38,11 @@ class CallProcessor @JvmOverloads constructor(
         live = null
     }
 
-    /** Frames of any size at `rate`, interleaved over `channels`, processed in place; the speech and diag events they gave. */
+    /** Frames of any size at `rate`, interleaved over `channels`, processed in place; the speech and diag events they gave. Closed: left as they are. */
     @Synchronized
     @JvmOverloads
     fun process(frame: FloatArray, rate: Int, channels: Int = 1, n: Int = frame.size / channels): List<Event> {
+        if (closed) return emptyList()
         val l = stream(rate)
         if (mono.size < n) mono = FloatArray(n)
         for (i in 0 until n) {
@@ -42,7 +50,8 @@ class CallProcessor @JvmOverloads constructor(
             for (c in 0 until channels) s += frame[i * channels + c]
             mono[i] = (s / channels).toFloat()
         }
-        val (got, events) = l.pushInto(mono, n)
+        val got = l.pushInto(mono, n)
+        val events = l.events
         val out = l.output
         if (held.size < count + got) held = held.copyOf(maxOf(2 * held.size, count + got))
         out.copyInto(held, count, 0, got)
@@ -60,11 +69,18 @@ class CallProcessor @JvmOverloads constructor(
     }
 
     /** Int16 frames, as WebRTC stacks give them. */
+    @Synchronized
     @JvmOverloads
     fun process(frame: ShortArray, rate: Int, channels: Int = 1, n: Int = frame.size / channels): List<Event> {
-        val f = FloatArray(n * channels) { (frame[it] / 32768.0).toFloat() }
-        val events = process(f, rate, channels, n)
-        toInt16(f).copyInto(frame, 0, 0, n * channels)
+        val m = n * channels
+        if (scratch.size < m) scratch = FloatArray(m)
+        for (i in 0 until m) scratch[i] = (frame[i] / 32768.0).toFloat()
+        val events = process(scratch, rate, channels, n)
+        // as the web writes int16: clipped, ×32768 below zero, ×32767 above, truncated
+        for (i in 0 until m) {
+            val x = scratch[i].toDouble().coerceIn(-1.0, 1.0)
+            frame[i] = (if (x < 0) x * 32768 else x * 32767).toInt().toShort()
+        }
         return events
     }
 
@@ -101,10 +117,13 @@ class CallProcessor @JvmOverloads constructor(
     }
 
     @Synchronized
-    override fun close() = reset()
+    override fun close() {
+        closed = true
+        reset()
+    }
 
     companion object {
-        /** Each frame goes out the size it came in, this far behind: Focus's lag and the resamplers', in seconds. */
+        /** Held ahead of Live's output, in seconds: one hop's wait, so each frame goes out the size it came in. */
         const val LEAD = 0.02
     }
 }

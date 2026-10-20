@@ -28,7 +28,7 @@ class AlkoveFocusTest {
         return FloatArray(s.remaining()) { (s.get(it) / 32768.0).toFloat() }
     }
 
-    // LiveKit's 10 ms frames at 48 kHz, float at int16 scale in a direct buffer: what comes back is Live's output, 20 ms behind
+    // LiveKit's 10 ms frames at 48 kHz, float at int16 scale in a direct buffer: what comes back is Live's output, LEAD behind
     @Test
     fun framesComeBackAsLiveGivesThem() {
         val models = models()
