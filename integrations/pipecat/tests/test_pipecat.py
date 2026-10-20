@@ -7,7 +7,22 @@ from pathlib import Path
 import numpy as np
 import pytest
 from pipecat.audio.vad.vad_analyzer import VADState
-from pipecat.frames.frames import FilterEnableFrame, FilterUpdateSettingsFrame
+from pipecat.frames.frames import (
+    FilterEnableFrame,
+    FilterUpdateSettingsFrame,
+    Frame,
+    InputAudioRawFrame,
+    StartFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.audio.vad_processor import VADProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transports.base_input import BaseInputTransport
+from pipecat.transports.base_transport import TransportParams
+from pipecat.workers.runner import WorkerRunner
 
 import alkove
 from pipecat_alkove import AlkoveFilter, AlkoveVADAnalyzer
@@ -95,3 +110,58 @@ def test_vad_confidence_is_cues_probability(models):
     p = alkove.Processor(models, cue=True, trace=True)
     want = [r["speech"] for c in chunks(pcm, 480) for r in (p.push(np.frombuffer(c, np.int16)).trace or {"cue": []})["cue"]]
     assert got[1 : len(want) + 1] == want
+
+
+class FileInput(BaseInputTransport):
+    def __init__(self, pcm, params):
+        super().__init__(params)
+        self._pcm = pcm
+        self.done = asyncio.Event()
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self.set_transport_ready(frame)
+        self.create_task(self._feed())
+
+    async def _feed(self):
+        for c in chunks(self._pcm, 320):
+            await self.push_audio_frame(InputAudioRawFrame(c, 16000, 1))
+            await asyncio.sleep(0.002)
+        self.done.set()
+
+
+class Sink(FrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self.audio = []
+        self.speech = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InputAudioRawFrame):
+            self.audio.append(frame.audio)
+        elif isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)):
+            self.speech.append(type(frame))
+        await self.push_frame(frame, direction)
+
+
+def test_pipeline_gives_alkove_live_and_hears_the_turn(models):
+    async def go():
+        pcm = np.concatenate([wav("mix.wav"), np.zeros(16000, np.int16)])
+        source = FileInput(pcm, TransportParams(audio_in_enabled=True, audio_in_sample_rate=16000, audio_in_filter=AlkoveFilter(models=models)))
+        sink = Sink()
+        worker = PipelineWorker(Pipeline([source, VADProcessor(vad_analyzer=AlkoveVADAnalyzer(models=models)), sink]))
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker)
+
+        async def stop():
+            await source.done.wait()
+            await worker.stop_when_done()
+
+        await asyncio.gather(runner.run(), stop())
+        live = alkove.Live(models, 16000)
+        want = b"".join(alkove.to_int16(live.push(np.frombuffer(c, np.int16))[0]).tobytes() for c in chunks(pcm, 320))
+        assert b"".join(sink.audio) == want
+        assert sink.speech == [VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame]
+
+    asyncio.run(go())
