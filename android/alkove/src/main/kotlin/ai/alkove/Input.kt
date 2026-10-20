@@ -35,6 +35,8 @@ private const val OVERLOAD_MS = 250.0
 private const val RETRY_MS = 10_000L
 private const val RETRY_MAX_MS = 160_000L
 private const val STABLE_MS = 60_000L
+// ADPF's target per hop: under it the system may keep the thread slow and save power, over it it adds frequency
+private const val HINT_TARGET_NS = 4_000_000L
 
 /**
  * A real-time input on the microphone: the SDK opens it at 16 kHz, runs the models on its own thread at audio priority, and reports
@@ -90,6 +92,7 @@ abstract class AlkoveInput internal constructor(
     private val out = FloatArray(HOP)
     private var timing = DoubleArray(4)
     private var record: CompletableDeferred<ByteArray>? = null
+    private var hint: Hint? = null
 
     @Volatile
     private var farActive = false
@@ -213,6 +216,7 @@ abstract class AlkoveInput internal constructor(
 
     private fun run() {
         Mic.urgent()
+        hint = Hint.create(app, HINT_TARGET_NS)
         try {
             while (!closed) {
                 val n = mic.read(hop)
@@ -233,6 +237,7 @@ abstract class AlkoveInput internal constructor(
             pipe = 0
             rawPipe = 0
             record?.cancel()
+            hint?.close()
         }
     }
 
@@ -245,7 +250,9 @@ abstract class AlkoveInput internal constructor(
         if (active) {
             val t0 = System.nanoTime()
             pending = Native.pipelineStep(pipe, hop, farQuietMs, out)
-            timed((System.nanoTime() - t0) / 1e6)
+            val dt = System.nanoTime() - t0
+            hint?.report(dt)
+            timed(dt / 1e6)
         } else if (h != 0L && rawOutput() != null) pending = Native.pipelineRaw(h, hop)
         if (pending > 0) drain(h)
         if (active && (frames / HOP) % 8 == 0L) {
@@ -280,6 +287,7 @@ abstract class AlkoveInput internal constructor(
                 "asleep" to (chained && Native.pipelineGet(pipe, 1) == 1.0),
                 "gainDb" to if (chained) Math.round(10 * Native.pipelineGet(pipe, 2)) / 10.0 else 0.0,
                 "queueMs" to (mic.backlogMs()?.let { Math.round(it) } ?: 0L),
+                "adpf" to (hint != null),
             ),
         )
         timing = DoubleArray(4)

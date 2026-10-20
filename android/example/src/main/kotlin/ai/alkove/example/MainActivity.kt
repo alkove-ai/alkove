@@ -99,7 +99,7 @@ class MainActivity : Activity() {
             is Event.Utterance -> say("utterance ${f(e.end - e.start)} s, ${e.pcm.size} bytes")
             is Wake -> say("WAKE ${e.word} score ${f(e.score)} (threshold ${f(e.threshold)}) at ${f(e.start)} s${e.voice?.let { ", voice ${f(it)}" } ?: ""}")
             is Event.Diag -> when (e.code) {
-                "timing" -> say("timing ${e.data["meanMs"]} ms per 16 ms hop (max ${e.data["maxMs"]}, slow ${e.data["slow"]}, queue ${e.data["queueMs"]} ms, asleep ${e.data["asleep"]})")
+                "timing" -> say("timing ${e.data["meanMs"]} ms per 16 ms hop (max ${e.data["maxMs"]}, slow ${e.data["slow"]}, queue ${e.data["queueMs"]} ms, asleep ${e.data["asleep"]}, adpf ${e.data["adpf"]})")
                 else -> say("diag ${e.code} ${e.level} ${e.data}")
             }
             else -> {}
@@ -166,6 +166,8 @@ class MainActivity : Activity() {
     }
 
     // what one second of audio costs natively, against the wasm figures of the model cards (Fold, Chrome: Focus 54 ms, Cue 2.4, Spot 9)
+    private var pacedMs = 0.0
+
     private fun bench() {
         scope.launch {
             say("bench: loading Focus, Cue, Spot…")
@@ -185,6 +187,18 @@ class MainActivity : Activity() {
                     i += Chain.HOP
                 }
                 val chainMs = (System.nanoTime() - t0) / 1e6 / seconds
+                // the same hops one every 16 ms, as the microphone gives them: the governor keeps the clock low, often ten times slower
+                var paced = 0L
+                var k = 0
+                while (k < 300) {
+                    pcm.copyInto(hop, 0, k * Chain.HOP, (k + 1) * Chain.HOP)
+                    val s0 = System.nanoTime()
+                    chain.step(hop, out)
+                    paced += System.nanoTime() - s0
+                    Thread.sleep(16)
+                    k++
+                }
+                pacedMs = paced / 1e6 / k
                 chain.close()
                 val listener = Listener(models, listOf(compile("/kamij/")), context = "anywhere")
                 val t1 = System.nanoTime()
@@ -193,7 +207,7 @@ class MainActivity : Activity() {
                 listener.close()
                 chainMs to spotMs
             }
-            say("bench: Focus + Cue ${f(r.first)} ms per second of audio (wasm: about 56), Spot ${f(r.second)} ms (wasm: 9)")
+            say("bench: Focus + Cue ${f(r.first)} ms per second of audio (wasm: about 56), Spot ${f(r.second)} ms (wasm: 9); one hop every 16 ms: ${f(pacedMs)} ms per hop")
         }
     }
 
