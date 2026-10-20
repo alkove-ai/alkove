@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +16,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
@@ -37,10 +39,11 @@ private const val RETRY_MAX_MS = 160_000L
 private const val STABLE_MS = 60_000L
 // ADPF's target per hop: under it the system may keep the thread slow and save power, over it it adds frequency
 private const val HINT_TARGET_NS = 4_000_000L
+private const val HELD_AUDIO = 16L shl 20
 
 /**
  * A real-time input on the microphone: the SDK opens it at 16 kHz, runs the models on its own thread at audio priority, and reports
- * on [events]. Collect them once; they wait for you, up to a thousand. Close it when done.
+ * on [events]. Collect them once; they wait for you, up to a thousand (utterances up to 16 MB of audio). Close it when done.
  */
 abstract class AlkoveInput internal constructor(
     context: Context,
@@ -49,10 +52,11 @@ abstract class AlkoveInput internal constructor(
     private val baseUrl: String?,
 ) : AutoCloseable {
     protected val app: Context = context.applicationContext
-    private val channel = Channel<Event>(1024, BufferOverflow.DROP_OLDEST)
+    private val heldAudio = AtomicLong()
+    private val channel = Channel<Event>(1024, BufferOverflow.DROP_OLDEST) { if (it is Event.Utterance) heldAudio.addAndGet(-it.pcm.size.toLong()) }
 
     /** Speech, wakes, mode and status changes, diagnostics: the web SDK's events. */
-    val events: Flow<Event> = channel.receiveAsFlow()
+    val events: Flow<Event> = channel.receiveAsFlow().onEach { if (it is Event.Utterance) heldAudio.addAndGet(-it.pcm.size.toLong()) }
 
     @Volatile
     var mode: Mode = Mode.RAW
@@ -69,10 +73,23 @@ abstract class AlkoveInput internal constructor(
     val voiceprint: Voiceprint?
         get() = print
 
+    @Volatile
+    internal var strength = 1.0
+
+    // what setters changed since the pipeline's options were built: sent once it is installed
+    @Volatile
+    private var settings = 0
+    private var built = 0
+
     private val mic = Mic(app, echoCancellation, device)
     private val commands = ConcurrentLinkedQueue<() -> Unit>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var thread: Thread? = null
+
+    // closing, the capture thread's end and the background's publication, under one lock
+    private val life = Any()
+    private var finished = false
+    private var bgClosed = false
 
     @Volatile
     private var closed = false
@@ -93,9 +110,14 @@ abstract class AlkoveInput internal constructor(
     private var timing = DoubleArray(4)
     private var record: CompletableDeferred<ByteArray>? = null
     private var hint: Hint? = null
+    private var dropped = false
 
     @Volatile
     private var farActive = false
+
+    // a playback started and stopped within one hop still counts
+    @Volatile
+    private var farStarted = false
 
     @Volatile
     private var enabled = true
@@ -136,8 +158,13 @@ abstract class AlkoveInput internal constructor(
     internal fun start() {
         if (!Alkove.supported) return startUnsupported()
         printed = voiceprint != null
-        mic.open(::silenced)
         rawOutput()?.let { rawPipe = Native.pipelineNew(0, 0, 0, Values.encode(mapOf("chain" to null, "output" to it))) }
+        try {
+            mic.open(::silenced)
+        } catch (e: Throwable) {
+            if (rawPipe != 0L) Native.pipelineFree(rawPipe)
+            throw e
+        }
         setStatus(Status.RUNNING)
         setMode(Mode.RAW, RawReason.LOADING)
         thread = Thread(::run, "alkove-mic").apply { start() }
@@ -151,13 +178,15 @@ abstract class AlkoveInput internal constructor(
         setMode(Mode.RAW, RawReason.UNSUPPORTED)
         diag("engine.unsupported", "warn", mapOf("message" to "No native library for this device (${android.os.Build.SUPPORTED_ABIS.joinToString()}): raw microphone for this session."))
         thread = Thread({
-            Mic.urgent()
             val chunk = FloatArray(maxOf(1, rawRate() / 50))
             try {
+                Mic.urgent()
                 while (!closed) {
                     if (m.read(chunk) < 0 || closed) break
                     rawChunk(chunk)
                 }
+            } catch (e: Throwable) {
+                diag("worker.error", "warn", mapOf("message" to (e.message ?: e.toString())))
             } finally {
                 m.close()
             }
@@ -169,6 +198,8 @@ abstract class AlkoveInput internal constructor(
     }
 
     private fun diag(code: String, level: String, data: Map<String, Any?> = emptyMap()) = emit(Event.Diag(code, level, data))
+
+    private fun failed(on: String, e: Throwable) = diag("worker.error", "warn", mapOf("message" to (e.message ?: e.toString()), "on" to on))
 
     @Synchronized
     private fun setMode(m: Mode, r: RawReason? = null) {
@@ -195,6 +226,17 @@ abstract class AlkoveInput internal constructor(
 
     private fun showActive() = setMode(activeMode(), if (enabled) null else RawReason.OFF)
 
+    // on the capture thread, or once it ended `orElse` where it is called
+    private fun command(orElse: () -> Unit = {}, c: () -> Unit) {
+        synchronized(life) {
+            if (!finished) {
+                commands.add(c)
+                return
+            }
+        }
+        orElse()
+    }
+
     private suspend fun startModels(wait: Long) {
         if (closed) return
         try {
@@ -211,13 +253,23 @@ abstract class AlkoveInput internal constructor(
                     coach = Native.coachNew(Values.encode(mapOf("reference" to reference)))
                     if (learn) Native.coachLearner(coach, Values.encode(mapOf("start" to start)))
                 }
-                bg = ex
+                synchronized(life) {
+                    if (bgClosed) {
+                        ex.execute(::freeBackground)
+                        ex.shutdown()
+                        return
+                    }
+                    bg = ex
+                }
             }
+            val version = settings
             val h = Native.pipelineNew(m.ptr("focus"), m.ptr("cue"), m.ptr("spot"), Values.encode(pipelineOptions()))
-            commands.add {
+            command({ Native.pipelineFree(h) }) {
                 if (closed) Native.pipelineFree(h)
                 else {
                     pipe = h
+                    built = version
+                    applySettings()
                     applyWords()
                     if (rawPipe != 0L) Native.pipelineFree(rawPipe).also { rawPipe = 0 }
                     activate()
@@ -232,18 +284,18 @@ abstract class AlkoveInput internal constructor(
         }
     }
 
-    // the input's clock goes on while the hops pause: events are dated on it
+    // the input's clock goes on while the hops pause: events are dated on it, from the hop about to be stepped
     private fun activate() {
-        shift = frames.toDouble() / Alkove.RATE - Native.pipelineGet(pipe, 0)
+        shift = (frames - HOP).toDouble() / Alkove.RATE - Native.pipelineGet(pipe, 0)
         activeSince = System.currentTimeMillis()
         retryAt = 0
         showActive()
     }
 
     private fun run() {
-        Mic.urgent()
-        hint = Hint.create(app, HINT_TARGET_NS)
         try {
+            Mic.urgent()
+            hint = Hint.create(app, HINT_TARGET_NS)
             while (!closed) {
                 val n = mic.read(hop)
                 if (closed) break
@@ -252,11 +304,16 @@ abstract class AlkoveInput internal constructor(
                     continue
                 }
                 frames += HOP
-                while (true) commands.poll()?.invoke() ?: break
-                farQuietMs = if (farActive) 0.0 else farQuietMs + 1000.0 * HOP / Alkove.RATE
+                runCommands()
+                farQuietMs = if (farActive || farStarted) 0.0 else farQuietMs + 1000.0 * HOP / Alkove.RATE
+                farStarted = false
                 step()
             }
+        } catch (e: Throwable) {
+            failed("capture", e)
         } finally {
+            synchronized(life) { finished = true }
+            runCommands()
             mic.close()
             if (pipe != 0L) Native.pipelineFree(pipe)
             if (rawPipe != 0L) Native.pipelineFree(rawPipe)
@@ -267,23 +324,51 @@ abstract class AlkoveInput internal constructor(
         }
     }
 
+    private fun runCommands() {
+        while (true) {
+            val c = commands.poll() ?: break
+            try {
+                c()
+            } catch (e: Throwable) {
+                failed("command", e)
+            }
+        }
+    }
+
     private fun step() {
         val now = System.currentTimeMillis()
         if (retryAt != 0L && now >= retryAt && pipe != 0L) activate()
         val active = pipe != 0L && retryAt == 0L
-        var pending = 0
         val h = if (pipe != 0L) pipe else rawPipe
-        if (active) {
-            val t0 = System.nanoTime()
-            pending = Native.pipelineStep(pipe, hop, farQuietMs, out)
-            val dt = System.nanoTime() - t0
-            hint?.report(dt)
-            timed(dt / 1e6)
-        } else if (h != 0L && rawOutput() != null) pending = Native.pipelineRaw(h, hop)
-        if (pending > 0) drain(h)
+        try {
+            var pending = 0
+            if (active) {
+                val t0 = System.nanoTime()
+                pending = Native.pipelineStep(pipe, hop, farQuietMs, out)
+                val dt = System.nanoTime() - t0
+                hint?.report(dt)
+                timed(dt / 1e6)
+            } else if (h != 0L && rawOutput() != null) pending = Native.pipelineRaw(h, hop)
+            if (pending > 0) drain(h)
+        } catch (e: Throwable) {
+            crashed(e)
+            return
+        }
         if (active && (frames / HOP) % 8 == 0L) {
             val backlog = mic.backlogMs()
             if (backlog != null && backlog > OVERLOAD_MS) overload(backlog, now)
+        }
+    }
+
+    // the core failed on a hop: raw microphone, the pipeline dropped, the models again later
+    private fun crashed(e: Throwable) {
+        diag("engine.crash", "warn", mapOf("message" to "The engine stopped: raw microphone; retry in ${MODELS_RETRY_MS / 1000} s.", "error" to (e.message ?: e.toString())))
+        setMode(Mode.RAW, RawReason.FAILED)
+        if (pipe != 0L) Native.pipelineFree(pipe)
+        pipe = 0
+        scope.launch {
+            delay(MODELS_RETRY_MS)
+            startModels(MODELS_RETRY_MS)
         }
     }
 
@@ -339,22 +424,34 @@ abstract class AlkoveInput internal constructor(
                     val pcm = a[1] as FloatArray
                     val q = a[2].num()
                     val t = a[3].num()
-                    background { coached(Native.coachWindow(coach, timbre!!.ptr, pcm, pcm.size, q, t)) }
+                    background("window") { coached(Native.coachWindow(coach, timbre!!.ptr, pcm, pcm.size, q, t)) }
                 }
                 "verify" -> {
                     val key = a[1].num().toInt()
                     val pcm = a[2] as FloatArray
-                    background {
+                    // a voice that cannot be checked does not wake
+                    background("verify", { command { if (pipe != 0L) Native.pipelineVerified(pipe, key, false, 0.0) } }) {
                         val r = Values.decode(Native.coachVerify(coach, timbre!!.ptr, pcm, pcm.size)).obj()
-                        commands.add { if (pipe != 0L) Native.pipelineVerified(pipe, key, r["same"] as Boolean, r["score"].num()) }
+                        command { if (pipe != 0L) Native.pipelineVerified(pipe, key, r["same"] as Boolean, r["score"].num()) }
                     }
                 }
                 "audio" -> audio(a[1] as ByteArray)
-                "utterance" -> emit(Event.Utterance(a[1] as ByteArray, a[2].num() + shift, a[3].num() + shift))
+                "utterance" -> utterance(a[1] as ByteArray, a[2].num() + shift, a[3].num() + shift)
                 "record" -> record?.complete(a[1] as ByteArray).also { record = null }
             }
         }
         traces?.let { emit(Event.Trace(it)) }
+    }
+
+    private fun utterance(pcm: ByteArray, start: Double, end: Double) {
+        if (heldAudio.get() + pcm.size > HELD_AUDIO) {
+            if (!dropped) diag("utterance.dropped", "warn", mapOf("message" to "Utterances are not collected: dropped past 16 MB held."))
+            dropped = true
+            return
+        }
+        dropped = false
+        heldAudio.addAndGet(pcm.size.toLong())
+        emit(Event.Utterance(pcm, start, end))
     }
 
     // the background's answer to a learning window: events, and a better print for Focus
@@ -363,7 +460,7 @@ abstract class AlkoveInput internal constructor(
             val a = o.arr()
             if (a[0] == "print") {
                 val p = a[1] as FloatArray
-                commands.add { if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("print" to p))) }
+                command { if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("print" to p))) }
             } else onEvent(a[1].obj())
         }
     }
@@ -426,64 +523,94 @@ abstract class AlkoveInput internal constructor(
             } catch (e: AlkoveException) {
                 if (e.code == "mic.denied") {
                     emit(Event.Mic(MicState.DENIED))
-                    closed = true
+                    close()
                     return
                 }
-                wait = minOf(2 * wait, MODELS_RETRY_MAX_MS)
+            } catch (e: Throwable) {
+                failed("mic", e)
             }
+            wait = minOf(2 * wait, MODELS_RETRY_MAX_MS)
+        }
+    }
+
+    // on the capture thread: what setters changed while the pipeline was built
+    private fun applySettings() {
+        if (built == settings) return
+        built = settings
+        Native.pipelineSet(pipe, Values.encode(mapOf("strength" to strength, "enabled" to enabled, "print" to print?.embedding)))
+    }
+
+    private fun changed(change: Map<String, Any?>) {
+        settings++
+        command {
+            if (pipe == 0L) return@command
+            built = settings
+            Native.pipelineSet(pipe, Values.encode(change))
         }
     }
 
     /** Off: the raw microphone, at the same delay, with a short fade. */
     fun setEnabled(on: Boolean) {
         enabled = on
-        commands.add {
-            if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("enabled" to on)))
-            if (!on) setMode(Mode.RAW, RawReason.OFF) else if (pipe != 0L && reason == RawReason.OFF) showActive()
+        changed(mapOf("enabled" to on))
+        command {
+            when {
+                !on -> setMode(Mode.RAW, RawReason.OFF)
+                retryAt != 0L -> setMode(Mode.RAW, RawReason.OVERLOAD)
+                pipe != 0L && reason == RawReason.OFF -> showActive()
+            }
         }
     }
 
     /** How much of Focus goes out, 0 to 1, the rest being the raw microphone. */
     fun setStrength(s: Double) {
-        commands.add { if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("strength" to s))) }
+        strength = s
+        changed(mapOf("strength" to s))
     }
 
     /** Focus keeps this voice from the next silence on; null goes back to the closest voice. With `learn`, learning starts again from it. */
     fun setVoiceprint(p: Voiceprint?) {
         print = p
-        commands.add { if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("print" to p?.embedding))) }
-        if (learning()) background { Native.coachLearner(coach, Values.encode(mapOf("start" to p?.value))) }
+        changed(mapOf("print" to p?.embedding))
+        if (learning()) background("learner") { Native.coachLearner(coach, Values.encode(mapOf("start" to p?.value))) }
     }
 
     /** Drops the print and what was learned of it. */
     fun forgetVoiceprint() {
         print = null
-        commands.add { if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("print" to null))) }
-        background { Native.coachForget(coach) }
+        changed(mapOf("print" to null))
+        background("forget") { Native.coachForget(coach) }
     }
 
     /** The app's own playback starts or stops (an agent's voice): learning skips what the far end may have put in the microphone. */
     fun farEndActive(on: Boolean) {
         farActive = on
+        if (on) farStarted = true
     }
 
-    /** Speech heard and noise removed so far (`stats = true`), null before the models run. */
+    /** Speech heard and noise removed so far (`stats = true`), null before the models run or once closed. */
     suspend fun stats(): Stats? {
         val d = CompletableDeferred<Stats?>()
-        commands.add {
+        command({ d.complete(null) }) {
             val v = if (pipe != 0L) Values.decode(Native.pipelineStats(pipe)) as Map<*, *>? else null
             d.complete(v?.obj()?.let { Stats(it["speechSeconds"].num(), it["seconds"].num(), (it["noiseRemovedDb"] as Number?)?.toDouble()) })
         }
         return d.await()
     }
 
-    /** The next `seconds`: a stereo WAV at 16 kHz, left the microphone, right the output. */
+    /** The next `seconds` (0 to 600): a stereo WAV at 16 kHz, left the microphone, right the output. */
     suspend fun record(seconds: Double): ByteArray {
         val d = CompletableDeferred<ByteArray>()
-        commands.add {
-            if (pipe == 0L) d.completeExceptionally(AlkoveException("engine.failed", "The models are not running yet."))
+        val notRunning = { d.completeExceptionally(AlkoveException("engine.failed", "The models are not running.")) }
+        command({ notRunning() }) {
+            if (pipe == 0L) notRunning()
             else {
-                Native.pipelineRecord(pipe, seconds)
+                try {
+                    Native.pipelineRecord(pipe, seconds)
+                } catch (e: Throwable) {
+                    d.completeExceptionally(e)
+                    return@command
+                }
                 record?.cancel()
                 record = d
             }
@@ -494,16 +621,38 @@ abstract class AlkoveInput internal constructor(
     /** The last `keepRecent` seconds, as [record] gives them; null without `keepRecent`. */
     suspend fun recent(): ByteArray? {
         val d = CompletableDeferred<ByteArray?>()
-        commands.add { d.complete(if (pipe != 0L) Native.pipelineRecent(pipe) else null) }
+        command({ d.complete(null) }) { d.complete(if (pipe != 0L) Native.pipelineRecent(pipe) else null) }
         return d.await()
     }
 
-    // a closed input's background takes nothing more
-    private fun background(task: () -> Unit) {
-        try {
-            bg?.execute(task)
-        } catch (_: RejectedExecutionException) {
+    // on the background thread once it has its coach; a closed input's background takes nothing more
+    private fun background(on: String, orElse: () -> Unit = {}, task: () -> Unit) {
+        val run = Runnable {
+            if (coach == 0L) return@Runnable orElse()
+            try {
+                task()
+            } catch (e: Throwable) {
+                failed(on, e)
+                orElse()
+            }
         }
+        val queued = synchronized(life) {
+            val ex = bg
+            if (bgClosed || ex == null) false
+            else try {
+                ex.execute(run)
+                true
+            } catch (_: RejectedExecutionException) {
+                false
+            }
+        }
+        if (!queued) orElse()
+    }
+
+    private fun freeBackground() {
+        if (coach != 0L) Native.coachFree(coach)
+        coach = 0
+        timbre?.close()
     }
 
     // on the capture thread
@@ -519,7 +668,7 @@ abstract class AlkoveInput internal constructor(
         scope.launch {
             try {
                 spotModel = Alkove.models(app, listOf("spot"), baseUrl).ptr("spot")
-                commands.add(::applyWords)
+                command(c = ::applyWords)
             } catch (e: Exception) {
                 diag("models.failed", "warn", mapOf("message" to "Spot not loaded: no words.", "error" to (e.message ?: e.toString())))
             }
@@ -528,21 +677,25 @@ abstract class AlkoveInput internal constructor(
 
     /** Stops the microphone and the models. */
     override fun close() {
-        if (closed && status == Status.CLOSED) return
-        closed = true
+        synchronized(life) {
+            if (closed) return
+            closed = true
+        }
         setStatus(Status.CLOSED)
         scope.cancel()
         thread?.let {
-            it.interrupt()
-            it.join(500)
-        }
-        bg?.let { ex ->
-            ex.execute {
-                if (coach != 0L) Native.coachFree(coach)
-                coach = 0
-                timbre?.close()
+            if (it !== Thread.currentThread()) {
+                it.interrupt()
+                it.join(500)
             }
-            ex.shutdown()
+        }
+        val ex = synchronized(life) {
+            bgClosed = true
+            bg
+        }
+        ex?.let {
+            it.execute(::freeBackground)
+            it.shutdown()
         }
         channel.close()
     }
@@ -573,6 +726,7 @@ class AgentInput private constructor(context: Context, private val opts: AgentOp
     AlkoveInput(context, opts.echoCancellation, opts.device, opts.baseUrl) {
     init {
         print = opts.voiceprint
+        strength = opts.strength
     }
 
     private val output = opts.output.let { it.copy(chunkMs = maxOf(16, Math.round(it.chunkMs / 16.0).toInt() * 16)) }
@@ -613,7 +767,7 @@ class AgentInput private constructor(context: Context, private val opts: AgentOp
 
     override fun pipelineOptions() =
         mapOf(
-            "chain" to mapOf("gate" to false, "normalize" to opts.normalize, "strength" to opts.strength, "print" to opts.voiceprint?.embedding, "speech" to (opts.speech ?: SpeechParams()).value()),
+            "chain" to mapOf("gate" to false, "normalize" to opts.normalize, "strength" to strength, "print" to print?.embedding, "speech" to (opts.speech ?: SpeechParams()).value()),
             "learn" to opts.learn,
             "keepRecent" to opts.keepRecent,
             "trace" to opts.trace,
@@ -651,10 +805,10 @@ data class WakeOptions @JvmOverloads constructor(
 
 /** Spot alone on the raw microphone: wakes on [events], each with the word's raw audio. */
 class WakeListener private constructor(context: Context, private val opts: WakeOptions) : AlkoveInput(context, false, opts.device, opts.baseUrl) {
-    private val words = opts.words.map(Word::of)
+    private val words = if (Alkove.supported) opts.words.map(Word::of) else emptyList()
 
     init {
-        require(words.isNotEmpty()) { "WakeListener: no word" }
+        require(opts.words.isNotEmpty()) { "WakeListener: no word" }
         for (w in words) if (w.chain == "focus") emit(Event.Diag("word.chain", "warn", mapOf("message" to "\"${w.text}\" was enrolled behind Focus: its thresholds are off on the raw microphone.")))
     }
 
