@@ -16,6 +16,7 @@ __version__ = _alkove.VERSION
 __all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "Lex", "Listener", "Live", "MANIFEST", "Models", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Timbre", "Voiceprint", "VoiceprintLearner", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
 
 RATE = 16000
+"""The models' rate, and the rate of every output, in Hz."""
 WHY = ("silence", "forced", "wake")
 
 
@@ -37,6 +38,8 @@ class SpeechParams:
 
 @dataclass(frozen=True)
 class Speech:
+    """A stretch of speech, in seconds from the stream's start."""
+
     start: float
     end: float
 

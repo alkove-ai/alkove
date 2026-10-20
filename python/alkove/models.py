@@ -16,12 +16,14 @@ from . import _alkove
 from .errors import AlkoveError
 
 MANIFEST = json.loads(_alkove.MANIFEST)
+"""The models this version runs: under `models`, by name, their file, size, sha256 and revision on Hugging Face."""
 NAMES = tuple(MANIFEST["models"])
 
 Source = Union[str, os.PathLike, bytes]
 
 
 def cache_dir() -> Path:
+    """Where `fetch` keeps the models: `~/Library/Caches/alkove` on macOS, `%LOCALAPPDATA%\\alkove` on Windows, `$XDG_CACHE_HOME/alkove` or `~/.cache/alkove` elsewhere."""
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Caches"
     elif sys.platform == "win32":
