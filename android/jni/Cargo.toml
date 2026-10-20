@@ -1,0 +1,20 @@
+[package]
+name = "alkove-android"
+description = "The Android package of Alkove: the core and the engine over JNI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "alkove"
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+alkove-core = { path = "../../crates/core" }
+alkove-engine = { path = "../../crates/engine" }
+# 0.3.1 re-exports 0.4, which builds proc macros (syn); 0.3.0 has no dependency
+jni-sys = "=0.3.0"

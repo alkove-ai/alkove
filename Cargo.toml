@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/engine", "crates/core", "crates/wasm", "python"]
-# the Python extension builds with maturin, against a Python
+members = ["crates/engine", "crates/core", "crates/wasm", "python", "android/jni"]
+# the Python extension builds with maturin, against a Python; the Android library with cargo-ndk
 default-members = ["crates/engine", "crates/core", "crates/wasm"]
 resolver = "2"
 
@@ -24,5 +24,10 @@ opt-level = "s"
 
 # the Python wheel: a panic raises in Python instead of ending the interpreter
 [profile.python]
+inherits = "release"
+panic = "unwind"
+
+# the Android library: a panic throws in Kotlin instead of ending the app
+[profile.android]
 inherits = "release"
 panic = "unwind"
