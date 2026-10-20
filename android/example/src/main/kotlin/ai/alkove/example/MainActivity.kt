@@ -165,7 +165,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // what one second of audio costs natively, against the wasm figures of the model cards (Fold, Chrome: Focus 54 ms, Cue 2.4, Spot 9)
     private var pacedMs = 0.0
 
     private fun bench() {
@@ -207,7 +206,7 @@ class MainActivity : Activity() {
                 listener.close()
                 chainMs to spotMs
             }
-            say("bench: Focus + Cue ${f(r.first)} ms per second of audio (wasm: about 56), Spot ${f(r.second)} ms (wasm: 9); one hop every 16 ms: ${f(pacedMs)} ms per hop")
+            say("bench: Focus + Cue ${f(r.first)} ms per second of audio, Spot ${f(r.second)} ms; one hop every 16 ms: ${f(pacedMs)} ms per hop")
         }
     }
 

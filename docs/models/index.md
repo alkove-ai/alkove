@@ -50,15 +50,15 @@ See [Self-hosting models](/docs/guides/self-hosting/) for where the files come f
 
 ## Speed
 
-Measured on a Galaxy Z Fold8, in Chrome, WebAssembly, one thread:
+Measured natively on a Galaxy Z Fold8, one thread:
 
 | Model | Cost |
 |---|---|
-| Focus | about 54 ms per second of audio |
-| Cue | 2.4 ms per second of audio |
-| Spot | about 9 ms per second of audio |
-| Timbre | 2.5 ms per 1.5 s window |
-| Lex | about 5 ms per word: 1.8 ms to read it, then 0.3 ms per phoneme |
+| Focus | about 39 ms per second of audio |
+| Cue | 1.7 ms per second of audio |
+| Spot | about 7.5 ms per second of audio |
+| Timbre | 2.0 ms per 1.5 s window |
+| Lex | about 2.9 ms per word |
 
 On that phone the outputs are the same, to the bit, as on a desktop. Timbre and Lex only run now and then (a voiceprint update, a word compiled), never per audio frame.
 

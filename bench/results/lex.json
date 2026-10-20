@@ -14,6 +14,28 @@
    "results": {
     "first_right": 86.0
    }
+  },
+  {
+   "id": "speed-native",
+   "data": [],
+   "protocol": "crates/core/examples/lex.rs on the published file: Lex's beam search (3 beams) on 43 words and phrases of the seven languages, 20 rounds, one thread, the median of several passes; with the engine's own time per run of each plan (crates/engine/examples/bench.rs, 3000 runs). Measured 2026-10-20.",
+   "metrics": {
+    "ms_per_word": "ms per word, the beam search whole",
+    "encoder_us": "µs per run of the encoder (once per word)",
+    "decoder_us": "µs per run of the decoder (once per step)"
+   },
+   "results": {
+    "Galaxy Z Fold8 (SM-F971B, Snapdragon SM8850), Android 17, native arm64": {
+     "ms_per_word": 2.9,
+     "encoder_us": 1110,
+     "decoder_us": 188
+    },
+    "Apple M1 Max, macOS, native arm64": {
+     "ms_per_word": 4.1,
+     "encoder_us": 1598,
+     "decoder_us": 269
+    }
+   }
   }
  ]
 }

@@ -98,6 +98,22 @@
      "focus, no print": 19.1
     }
    }
+  },
+  {
+   "id": "speed-native",
+   "data": [],
+   "protocol": "crates/engine/examples/bench.rs on the published file, alkove-engine 0.2.0: one thread, 3000 runs of the plan back to back on fixed random inputs, the median of several passes; the outputs' fingerprints are the same on both machines. Measured 2026-10-20. Timbre runs once per 1.5 s window.",
+   "metrics": {
+    "ms_per_window": "ms per 1.5 s window"
+   },
+   "results": {
+    "Galaxy Z Fold8 (SM-F971B, Snapdragon SM8850), Android 17, native arm64": {
+     "ms_per_window": 2.0
+    },
+    "Apple M1 Max, macOS, native arm64": {
+     "ms_per_window": 2.9
+    }
+   }
   }
  ]
 }

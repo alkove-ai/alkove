@@ -289,6 +289,25 @@
      "n": 600
     }
    }
+  },
+  {
+   "id": "speed-native",
+   "data": [],
+   "protocol": "crates/engine/examples/bench.rs on the published file, alkove-engine 0.2.0: one thread, 3000 runs of the plan back to back on fixed random inputs, the median of several passes; the outputs' fingerprints are the same on both machines. Measured 2026-10-20. Focus runs once per 256 samples (16 ms).",
+   "metrics": {
+    "us_per_run": "µs per run",
+    "ms_per_second": "ms per second of audio"
+   },
+   "results": {
+    "Galaxy Z Fold8 (SM-F971B, Snapdragon SM8850), Android 17, native arm64": {
+     "us_per_run": 618,
+     "ms_per_second": 38.6
+    },
+    "Apple M1 Max, macOS, native arm64": {
+     "us_per_run": 892,
+     "ms_per_second": 55.8
+    }
+   }
   }
  ]
 }

@@ -66,9 +66,8 @@ Focus adds 16 ms (one step) on top of its 16 ms step. A live input reports its t
 
 | | |
 |---|---|
-| WebAssembly, 1 thread, Galaxy Z Fold8 (Chrome 155) | about 54 ms per second of audio |
-| WebAssembly, 1 thread, Apple M1 Max (Node 22) | about 70 ms per second of audio |
-| WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | about 60 ms per second of audio |
+| Native, 1 thread, Galaxy Z Fold8 (Android 17) | about 39 ms per second of audio |
+| Native, 1 thread, Apple M1 Max (macOS) | about 56 ms per second of audio |
 
 Between sentences, a live input lets Focus sleep: when its output and the microphone stay quiet, the engine stops running until the microphone rises again. It saves battery and heat on phones.
 

@@ -83,9 +83,8 @@ On a call or agent input, `input.spot()` reads the cleaned audio: no second micr
 
 | | |
 |---|---|
-| WebAssembly, 1 thread, Galaxy Z Fold8 (Chrome 155) | about 9 ms per second of audio |
-| WebAssembly, 1 thread, Apple M1 Max (Node 22) | about 12 ms per second of audio |
-| WebAssembly, 1 thread, AMD EPYC 4564P (Node 22) | about 10 ms per second of audio |
+| Native, 1 thread, Galaxy Z Fold8 (Android 17) | about 7.5 ms per second of audio |
+| Native, 1 thread, Apple M1 Max (macOS) | about 13 ms per second of audio |
 
 ## Benchmarks
 
