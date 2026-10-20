@@ -1,6 +1,6 @@
 ---
 title: "Quick start: Android"
-description: The same models and rules on Android, natively, in Kotlin: real-time inputs on the microphone, files, wake words and LiveKit.
+description: "The same models and rules on Android, natively, in Kotlin: real-time inputs on the microphone, files, wake words and LiveKit."
 sidebar:
   order: 7
 ---
