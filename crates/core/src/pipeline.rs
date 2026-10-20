@@ -406,6 +406,42 @@ impl Pipeline {
         Ok(())
     }
 
+    // { strength?, enabled?, print?, words?, context?, enroll? }, applied in that order
+    pub fn set(&mut self, v: &Value) -> Result<(), Error> {
+        if let Some(s) = v.get("strength").and_then(Value::num) {
+            if let Some(c) = self.chain_mut() {
+                c.set_strength(s);
+            }
+        }
+        if let Some(on) = v.get("enabled").and_then(Value::bool) {
+            if let Some(c) = self.chain_mut() {
+                c.set_enabled(on);
+            }
+        }
+        if let Some(pr) = v.get("print") {
+            let print: Option<Vec<f32>> = match pr {
+                Value::Arr(a) => Some(a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect()),
+                Value::Floats(x) => Some(x.clone()),
+                _ => None,
+            };
+            if let Some(c) = self.chain_mut() {
+                c.set_print(print.as_deref())?;
+            }
+        }
+        if v.get("words").is_some() {
+            let words = v.get("words").and_then(Value::arr).unwrap_or(&[]).iter().map(Word::of).collect::<Result<Vec<_>, _>>()?;
+            self.set_words(words, crate::spot::context_of(v.get("context").and_then(Value::str).unwrap_or("anywhere")))?;
+        }
+        if let Some(e) = v.get("enroll") {
+            let spec = match e {
+                Value::Obj(_) => Some((Word::of(e.get("word").unwrap_or(&Value::Null))?, e.get("takes").and_then(Value::num).unwrap_or(ENROLL.takes as f64) as usize)),
+                _ => None,
+            };
+            self.start_enroll(spec)?;
+        }
+        Ok(())
+    }
+
     // `seconds` of raw and processed mic from the next hop; the WAV comes as `Out::Record`
     pub fn record(&mut self, seconds: f64) -> Result<(), Error> {
         let n = js::round(self::seconds("record", seconds)? * RATE) as usize;

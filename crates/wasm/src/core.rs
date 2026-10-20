@@ -558,42 +558,7 @@ pub unsafe extern "C" fn alk_pipeline_verified(p: *mut PipelineHandle, key: u32,
 // Safety: `p` is live; in { strength?, enabled?, print?, words?, context?, enroll? }, applied in that order
 #[no_mangle]
 pub unsafe extern "C" fn alk_pipeline_set(p: *mut PipelineHandle) -> i32 {
-    let h = &mut (*p).p;
-    answer((|| {
-        let v = input()?;
-        if let Some(s) = v.get("strength").and_then(Value::num) {
-            if let Some(c) = h.chain_mut() {
-                c.set_strength(s);
-            }
-        }
-        if let Some(on) = v.get("enabled").and_then(Value::bool) {
-            if let Some(c) = h.chain_mut() {
-                c.set_enabled(on);
-            }
-        }
-        if let Some(pr) = v.get("print") {
-            let print: Option<Vec<f32>> = match pr {
-                Value::Arr(a) => Some(a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect()),
-                Value::Floats(x) => Some(x.clone()),
-                _ => None,
-            };
-            if let Some(c) = h.chain_mut() {
-                c.set_print(print.as_deref())?;
-            }
-        }
-        if v.get("words").is_some() {
-            let (ws, context) = words(&v)?;
-            h.set_words(ws, context)?;
-        }
-        if let Some(e) = v.get("enroll") {
-            let spec = match e {
-                Value::Obj(_) => Some((Word::of(e.get("word").unwrap_or(&Value::Null))?, e.get("takes").and_then(Value::num).unwrap_or(ENROLL.takes as f64) as usize)),
-                _ => None,
-            };
-            h.start_enroll(spec)?;
-        }
-        Ok(Value::Null)
-    })())
+    answer(input().and_then(|v| (*p).p.set(&v)).map(|()| Value::Null))
 }
 
 // Safety: `p` is live.
