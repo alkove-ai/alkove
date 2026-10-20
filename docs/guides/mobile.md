@@ -59,13 +59,7 @@ The models run in two workers, never on the main thread:
 
 On call and agent inputs, Focus and Cue go to sleep in silences: after 2 s where Focus's output is quiet and the microphone sits at its noise floor, they stop computing (diag `idle` with `asleep: true`) until the microphone rises 9 dB over that floor. This is always on.
 
-What one second of audio costs on a phone (Galaxy Z Fold8, Chrome, WebAssembly, one thread), from the model cards:
-
-| Model | Time per second of audio |
-|---|---|
-| Focus | about 54 ms |
-| Cue | 2.4 ms |
-| Spot | about 9 ms |
+Each [model card](/docs/models/) gives its speed, measured natively on a phone.
 
 A wake listener runs Spot alone on the raw microphone, the whole time it is open.
 
