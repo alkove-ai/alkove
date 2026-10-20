@@ -25,8 +25,12 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
+        // livekit-android's audioswitch
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.davidliu") }
+        }
     }
 }
 
 rootProject.name = "alkove-android"
-include(":alkove")
+include(":alkove", ":livekit")
