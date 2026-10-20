@@ -1,7 +1,7 @@
 package ai.alkove
 
-/** What the processing raw ([Mode.RAW]) is for: off, models loading or failed, a device too slow. */
-enum class RawReason { OFF, LOADING, FAILED, OVERLOAD }
+/** What the processing raw ([Mode.RAW]) is for: off, models loading or failed, a device too slow, no native library for this device. */
+enum class RawReason { OFF, LOADING, FAILED, OVERLOAD, UNSUPPORTED }
 
 /** What an input sends out: the raw microphone, Focus (with a print or not), Spot (verified by a print or not). */
 enum class Mode { RAW, FOCUS, FOCUS_PRINT, SPOT, SPOT_PRINT }

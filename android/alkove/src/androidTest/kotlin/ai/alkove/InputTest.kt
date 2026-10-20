@@ -64,3 +64,30 @@ class InputTest {
         assertEquals(Event.StatusChange(Status.CLOSED), events.last())
     }
 }
+
+// a phone with no native library for its ABI: the agent still sends the raw microphone, in its format
+class UnsupportedTest {
+    @Test
+    fun agentSendsTheRawMicrophone() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECORD_AUDIO)
+        Alkove.supportedOverride = false
+        try {
+            val bytes = AtomicLong()
+            val input = AgentInput.start(context, AgentOptions(output = Output(Format.S16, 24000))) { bytes.addAndGet(it.size.toLong()) }
+            val events = ArrayList<Event>()
+            val job = launch { input.events.collect { events.add(it) } }
+            val t0 = System.nanoTime()
+            kotlinx.coroutines.delay(2000)
+            val seconds = (System.nanoTime() - t0) / 1e9
+            input.close()
+            job.join()
+            assertTrue(events.toString(), Event.ModeChange(Mode.RAW, RawReason.UNSUPPORTED) in events)
+            assertTrue(events.toString(), events.any { it is Event.Diag && it.code == "engine.unsupported" })
+            val expected = seconds * 24000 * 2
+            assertTrue("$bytes bytes in $seconds s", bytes.get() > 0.7 * expected && bytes.get() < 1.1 * expected)
+        } finally {
+            Alkove.supportedOverride = null
+        }
+    }
+}

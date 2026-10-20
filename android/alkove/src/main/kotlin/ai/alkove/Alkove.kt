@@ -10,7 +10,29 @@ object Alkove {
     /** The models' rate, and the rate of every output, in Hz. */
     const val RATE = 16000
 
-    internal val info: Map<String, Any?> by lazy { Values.decode(Native.info()).obj() }
+    internal val info: Map<String, Any?> by lazy {
+        if (!supported) throw AlkoveException("engine.unsupported", "No native library for this device (${android.os.Build.SUPPORTED_ABIS.joinToString()}): Alkove ships arm64-v8a and x86_64.")
+        Values.decode(Native.info()).obj()
+    }
+
+    // for the tests of the fallback
+    internal var supportedOverride: Boolean? = null
+
+    private val loaded: Boolean by lazy {
+        try {
+            Native.info()
+            true
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        } catch (_: NoClassDefFoundError) {
+            false
+        }
+    }
+
+    /** False on a device whose ABI has no native library (32-bit ARM): the inputs then send the raw microphone (`RAW`, `UNSUPPORTED`), the rest throws `engine.unsupported`. */
+    @JvmStatic
+    val supported: Boolean
+        get() = supportedOverride ?: loaded
 
     /** This library's version: the same minor as the web and Python packages means the same core and models. */
     @JvmStatic

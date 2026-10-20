@@ -19,7 +19,7 @@ import android.os.Build
 import android.os.Process
 
 // the microphone at 16 kHz, mono, float: anti-echo when asked, nothing else of the platform's in front of the models
-internal class Mic(private val context: Context, private val echoCancellation: Boolean, @Volatile var device: AudioDeviceInfo?) {
+internal class Mic(private val context: Context, private val echoCancellation: Boolean, @Volatile var device: AudioDeviceInfo?, private val rate: Int = RATE) {
     private var record: AudioRecord? = null
     private val effects = ArrayList<AudioEffect>()
     private val ts = AudioTimestamp()
@@ -36,10 +36,10 @@ internal class Mic(private val context: Context, private val echoCancellation: B
             throw AlkoveException("mic.denied", "RECORD_AUDIO is not granted: ask for it before opening an input.")
         }
         val source = if (echoCancellation) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION
-        val min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
-        if (min <= 0) throw AlkoveException("mic.not-found", "No microphone takes 16 kHz mono float here ($min).")
+        val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
+        if (min <= 0) throw AlkoveException("mic.not-found", "No microphone takes $rate Hz mono float here ($min).")
         // two seconds of room: a slow hop delays the audio instead of losing it, until the overload rule goes raw
-        val r = AudioRecord(source, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, maxOf(min, 2 * RATE * 4))
+        val r = AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, maxOf(min, 2 * rate * 4))
         if (r.state != AudioRecord.STATE_INITIALIZED) {
             r.release()
             throw AlkoveException("mic.busy", "The microphone could not be opened: another app or a call may hold it.")
@@ -92,10 +92,10 @@ internal class Mic(private val context: Context, private val echoCancellation: B
     fun backlogMs(): Double? {
         val r = record ?: return null
         if (r.getTimestamp(ts, AudioTimestamp.TIMEBASE_MONOTONIC) != AudioRecord.SUCCESS) return null
-        val captured = ts.framePosition + (System.nanoTime() - ts.nanoTime) * RATE / 1e9
+        val captured = ts.framePosition + (System.nanoTime() - ts.nanoTime) * rate / 1e9
         val ahead = captured - read
         base = minOf(base, ahead)
-        return (ahead - base) * 1000 / RATE
+        return (ahead - base) * 1000 / rate
     }
 
     fun close() {

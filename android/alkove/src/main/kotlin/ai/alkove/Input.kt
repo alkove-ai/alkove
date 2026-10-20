@@ -44,8 +44,8 @@ private const val HINT_TARGET_NS = 4_000_000L
  */
 abstract class AlkoveInput internal constructor(
     context: Context,
-    echoCancellation: Boolean,
-    device: AudioDeviceInfo?,
+    private val echoCancellation: Boolean,
+    private val device: AudioDeviceInfo?,
     private val baseUrl: String?,
 ) : AutoCloseable {
     protected val app: Context = context.applicationContext
@@ -128,7 +128,13 @@ abstract class AlkoveInput internal constructor(
 
     internal open fun audio(chunk: ByteArray) {}
 
+    // without the native library: the microphone as it comes, chunked for the agent, at its rate
+    internal open fun rawRate(): Int = Alkove.RATE
+
+    internal open fun rawChunk(pcm: FloatArray) {}
+
     internal fun start() {
+        if (!Alkove.supported) return startUnsupported()
         printed = voiceprint != null
         mic.open(::silenced)
         rawOutput()?.let { rawPipe = Native.pipelineNew(0, 0, 0, Values.encode(mapOf("chain" to null, "output" to it))) }
@@ -136,6 +142,26 @@ abstract class AlkoveInput internal constructor(
         setMode(Mode.RAW, RawReason.LOADING)
         thread = Thread(::run, "alkove-mic").apply { start() }
         scope.launch { startModels(MODELS_RETRY_MS) }
+    }
+
+    private fun startUnsupported() {
+        val m = Mic(app, echoCancellation, device, rawRate())
+        m.open(::silenced)
+        setStatus(Status.RUNNING)
+        setMode(Mode.RAW, RawReason.UNSUPPORTED)
+        diag("engine.unsupported", "warn", mapOf("message" to "No native library for this device (${android.os.Build.SUPPORTED_ABIS.joinToString()}): raw microphone for this session."))
+        thread = Thread({
+            Mic.urgent()
+            val chunk = FloatArray(maxOf(1, rawRate() / 50))
+            try {
+                while (!closed) {
+                    if (m.read(chunk) < 0 || closed) break
+                    rawChunk(chunk)
+                }
+            } finally {
+                m.close()
+            }
+        }, "alkove-mic").apply { start() }
     }
 
     protected fun emit(e: Event) {
@@ -564,6 +590,25 @@ class AgentInput private constructor(context: Context, private val opts: AgentOp
 
     override fun audio(chunk: ByteArray) {
         onAudio?.invoke(chunk)
+    }
+
+    override fun rawRate() = output.rate
+
+    private var raw = FloatArray(0)
+    private var rawFill = 0
+
+    // the chunks the core's packer would give: chunkMs of samples, float32 or int16 as the web writes them
+    override fun rawChunk(pcm: FloatArray) {
+        if (raw.isEmpty()) raw = FloatArray(Math.round(output.rate * output.chunkMs / 1000.0).toInt())
+        for (x in pcm) {
+            raw[rawFill++] = x
+            if (rawFill == raw.size) {
+                rawFill = 0
+                val b = java.nio.ByteBuffer.allocate(raw.size * if (output.format == Format.S16) 2 else 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                if (output.format == Format.S16) toInt16(raw).forEach { b.putShort(it) } else raw.forEach { b.putFloat(it) }
+                audio(b.array())
+            }
+        }
     }
 
     override fun pipelineOptions() =
