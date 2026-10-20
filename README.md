@@ -1,9 +1,6 @@
 <p align="center">
   <a href="https://alkove.ai">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/alkove-dark.png">
-      <img alt="Alkove" src=".github/assets/alkove-light.png" width="273" height="76">
-    </picture>
+    <img alt="Alkove" src=".github/assets/alkove.png" width="273" height="76">
   </a>
 </p>
 
@@ -31,10 +28,7 @@
 <br>
 
 <a href="https://alkove.ai/#demo">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/focus-dark.png">
-    <img alt="The raw microphone holds two voices and noise; after Focus, only the user's voice is left" src=".github/assets/focus-light.png" width="800">
-  </picture>
+  <img alt="The raw microphone holds two voices and noise; after Focus, only the user's voice is left" src=".github/assets/focus.png" width="800">
 </a>
 
 <p align="center"><sub>Focus on the demo's sample: the user, another voice and noise (Common Voice, CC0). <a href="https://alkove.ai/#demo">Listen to it</a>.</sub></p>
