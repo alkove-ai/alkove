@@ -10,12 +10,22 @@ Focus keeps one voice, the closest one or the one of a print. A phone held or wo
 :::
 
 ```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://maven.alkove.ai")
+    }
+}
+
+// build.gradle.kts
 dependencies {
     implementation("ai.alkove:alkove:0.2.0")
 }
 ```
 
-The Android library runs the core the web library runs in WebAssembly, natively, on the phone's CPU: for the same 16 kHz audio, the output is the same to the bit. Android 7.0 (API 24) or later, `arm64-v8a` and `x86_64` (emulators, Chromebooks). The only dependency is `kotlinx-coroutines`.
+The Android library runs the core the web library runs in WebAssembly, natively, on the phone's CPU: for the same 16 kHz audio, the output is the same to the bit. Android 7.0 (API 24) or later, `arm64-v8a` and `x86_64` (emulators, Chromebooks); on a 32-bit phone the inputs send the raw microphone (`ModeChange(RAW, UNSUPPORTED)`) and `Alkove.supported` is false. The only dependency is `kotlinx-coroutines`.
 
 Declare the microphone in your manifest and ask for it before you open an input:
 
@@ -89,7 +99,7 @@ val part = p.push(frame)                      // FloatArray or ShortArray, any l
 ## In a LiveKit room
 
 ```kotlin
-implementation("ai.alkove:alkove-livekit:0.2.0")
+implementation("ai.alkove:alkove-livekit:0.2.0")   // from maven.alkove.ai, as above
 ```
 
 ```kotlin
