@@ -26,9 +26,19 @@ vad = AlkoveVADAnalyzer()  # VADParams(confidence=0.5) unless you pass params
 Give the analyzer to your user aggregator (`LLMUserAggregatorParams(vad_analyzer=vad)`) or to a `VADProcessor`, as you would Silero's.
 
 - **`AlkoveFilter`** keeps the closest voice, or with `voiceprint=` the voice of that print; `strength=` and `normalize=` work as in the web SDK. It works at the transport's input rate. `FilterEnableFrame(False)` gives the raw microphone back at the same delay; `FilterUpdateSettingsFrame(settings={"strength": 0.5})` and `{"voiceprint": ...}` change it while it runs. It returns the samples that are ready: a little less than the input at the start (Focus's 16 ms), then about the input's size.
-- **`AlkoveVADAnalyzer`** gives Cue's speech probability every 30 ms, at any input rate. Cue was tuned with a confidence of 0.5, so that is its default. Behind `AlkoveFilter`, it hears only the user.
+- **`AlkoveVADAnalyzer`** gives Cue's speech probability every 30 ms, at any input rate. Cue was tuned with a confidence of 0.5, so that is its default. `stop_secs` stays Pipecat's 0.2 s: its turn strategy (Smart Turn) decides when the turn ends, and Pipecat's latency figures assume 0.2. Behind `AlkoveFilter`, it hears only the user.
 
-`example.py` runs both on your microphone and prints when you speak.
+To keep one person's voice rather than the closest one, make their print with Timbre, from 1.5 s of their voice or more at 16 kHz:
+
+```python
+from alkove import Models, Timbre
+
+models = Models.load(["focus", "cue", "timbre"])
+me = Timbre(models).embed(pcm)
+f = AlkoveFilter(models=models, voiceprint=me)  # an alkove.Voiceprint or its 192 numbers
+```
+
+`example.py` runs both on your microphone and prints when you speak. On macOS, `pyaudio` needs `brew install portaudio` first.
 
 Tested with pipecat-ai 1.13.0.
 

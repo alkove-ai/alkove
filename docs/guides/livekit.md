@@ -47,6 +47,17 @@ async def entrypoint(ctx):
 - It keeps the closest voice; with `voiceprint=` (an `alkove.Voiceprint` or its 192 numbers), the voice of that print, even when someone else speaks louder. `strength=` and `normalize=` work as in the web library.
 - It works at the session's sample rate (24 kHz by default) and gives each frame back at the size it came in, 20 ms behind: whole 10 ms frames, as LiveKit's gain control needs. The chain is the one the web library's inputs run.
 - It starts a fresh stream on another track and when it is enabled again.
+- In `console` mode LiveKit reads the microphone itself, without `RoomIO`: Focus is not applied there, Cue is. Test Focus in a room (`dev`).
+
+To keep one person's voice rather than the closest one, make their print with Timbre, from 1.5 s of their voice or more at 16 kHz:
+
+```python
+from alkove import Models, Timbre
+
+models = Models.load(["focus", "cue", "timbre"])
+me = Timbre(models).embed(pcm)
+focus = alkove.Focus(models=models, voiceprint=me)
+```
 
 ## Cue as the VAD
 

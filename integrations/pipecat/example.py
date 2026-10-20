@@ -1,6 +1,6 @@
 """Alkove on your microphone with Pipecat: AlkoveFilter keeps your voice, AlkoveVADAnalyzer says when you speak.
 
-pip install "pipecat-ai[local]" pipecat-alkove
+pip install "pipecat-ai[local]" pipecat-alkove   # macOS: brew install portaudio first
 python example.py
 """
 
