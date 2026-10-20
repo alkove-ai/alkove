@@ -15,7 +15,7 @@ val testAssets = layout.buildDirectory.dir("testAssets")
 // cargo decides what is up to date: these run on every build
 val cargoAndroid = tasks.register<Exec>("cargoAndroid") {
     workingDir = repo
-    (local.getProperty("ndk.dir") ?: System.getenv("ANDROID_NDK_HOME"))?.let { environment("ANDROID_NDK_HOME", it) }
+    (local.getProperty("alkove.ndk.dir") ?: System.getenv("ANDROID_NDK_HOME"))?.let { environment("ANDROID_NDK_HOME", it) }
     commandLine(listOf(cargo, "ndk") + abis.flatMap { listOf("-t", it) } + listOf("-P", "24", "-o", rustLibs.get().asFile.path, "build", "--profile", "android", "-p", "alkove-android"))
 }
 
