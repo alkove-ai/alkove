@@ -31,6 +31,10 @@ android {
         minSdk = 24
         consumerProguardFiles("consumer-rules.pro")
         testInstrumentationRunner = "ai.alkove.TestRunner"
+        buildConfigField("String", "VERSION", "\"$version\"")
+    }
+    buildFeatures {
+        buildConfig = true
     }
     publishing {
         singleVariant("release") { withSourcesJar() }

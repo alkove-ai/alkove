@@ -11,7 +11,7 @@ import kotlinx.coroutines.withContext
 
 /** A model loaded from its .alk bytes, shared by every stream built on it. */
 class Model internal constructor(val name: String, bytes: ByteArray) : AutoCloseable {
-    private val handle = Handle(Native.modelLoad(bytes), Native::modelFree)
+    private val handle = Alkove.native().let { Handle(Native.modelLoad(bytes), Native::modelFree) }
 
     internal val ptr: Long
         @Synchronized get() = handle.value
@@ -37,6 +37,11 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
 
     internal fun model(name: String): Model = loaded.getValue(name)
 
+    // the models held, by name for one order everywhere, while a native object takes its own reference: neither close() nor the collector frees them meanwhile
+    internal fun <T> pinned(block: () -> T): T = hold(loaded.values.sortedBy { it.name }, 0, block)
+
+    private fun <T> hold(ms: List<Model>, i: Int, block: () -> T): T = if (i == ms.size) block() else synchronized(ms[i]) { hold(ms, i + 1, block) }
+
     internal fun need(vararg names: String) {
         val missing = names.filter { it !in loaded }
         require(missing.isEmpty()) { "${missing.joinToString()} not loaded: Models.load(context, listOf(${names.joinToString { "\"$it\"" }}))" }
@@ -51,10 +56,12 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
 
     companion object {
         /** The models this version runs, by name: their file, size, sha256 and revision on Hugging Face. */
-        @JvmField val MANIFEST: Map<String, Any?> = Json.parse(Alkove.info.str("manifest")).obj()
+        @JvmStatic
+        val MANIFEST: Map<String, Any?> by lazy { Json.parse(Alkove.info.str("manifest")).obj() }
 
         /** Every model name, in the manifest's order. */
-        @JvmField val NAMES: List<String> = MANIFEST["models"].obj().keys.toList()
+        @JvmStatic
+        val NAMES: List<String> by lazy { MANIFEST["models"].obj().keys.toList() }
 
         private fun spec(name: String): Map<String, Any?> =
             MANIFEST["models"].obj()[name]?.obj() ?: throw IllegalArgumentException("no model named \"$name\": ${NAMES.joinToString()}")
@@ -77,22 +84,22 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
             return "https://huggingface.co/${MANIFEST.str("org")}/${m.str("name")}/resolve/$revision/${m.str("file")}"
         }
 
-        private fun download(url: String, name: String, onProgress: ((Progress) -> Unit)?): ByteArray {
-            val total = spec(name).num("bytes")
+        // `before` bytes of the other files already counted, `total` of them all: one progress across the files
+        private fun download(url: String, name: String, before: Long, total: Long, onProgress: ((Progress) -> Unit)?): ByteArray {
             try {
                 val c = URL(url).openConnection() as HttpURLConnection
                 c.connectTimeout = 30_000
                 c.readTimeout = 60_000
                 try {
                     if (c.responseCode !in 200..299) throw AlkoveException("models.fetch", "HTTP ${c.responseCode}: $url")
-                    val out = java.io.ByteArrayOutputStream(total.toInt())
+                    val out = java.io.ByteArrayOutputStream(spec(name).num("bytes").toInt())
                     val buf = ByteArray(64 * 1024)
                     c.inputStream.use { s ->
                         while (true) {
                             val n = s.read(buf)
                             if (n < 0) break
                             out.write(buf, 0, n)
-                            onProgress?.invoke(Progress(out.size().toLong(), total))
+                            onProgress?.invoke(Progress(before + out.size(), total))
                         }
                     }
                     return out.toByteArray()
@@ -110,18 +117,25 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
          */
         @JvmStatic
         @JvmOverloads
-        fun fetch(names: Collection<String>, cache: File, download: Boolean = true, baseUrl: String? = null, onProgress: ((Progress) -> Unit)? = null): Map<String, File> =
-            names.associateWith { name ->
+        fun fetch(names: Collection<String>, cache: File, download: Boolean = true, baseUrl: String? = null, onProgress: ((Progress) -> Unit)? = null): Map<String, File> {
+            val missing = names.filter { !path(cache, it).exists() }
+            val total = missing.sumOf { spec(it).num("bytes") }
+            var before = 0L
+            return names.associateWith { name ->
                 val m = spec(name)
-                val path = File(File(cache, m.str("sha256")), m.str("file"))
+                val path = path(cache, name)
                 if (!path.exists()) {
                     if (!download) throw AlkoveException("models.fetch", "${m.str("name")}: not in the cache $cache, fetch it first")
-                    val data = checked(name, download(url(name, baseUrl), name, onProgress))
+                    val data = checked(name, download(url(name, baseUrl), name, before, total, onProgress))
+                    before += data.size
                     path.parentFile!!.mkdirs()
-                    // whole or not at all: another process may read the cache meanwhile
+                    // whole or not at all: another process may read the cache meanwhile; on disk before the rename, a power cut leaves no short file
                     val tmp = File.createTempFile(m.str("file"), ".part", path.parentFile)
                     try {
-                        tmp.writeBytes(data)
+                        java.io.FileOutputStream(tmp).use {
+                            it.write(data)
+                            it.fd.sync()
+                        }
                         if (!tmp.renameTo(path) && !path.exists()) throw AlkoveException("models.fetch", "${m.str("name")}: cannot write $path")
                     } finally {
                         tmp.delete()
@@ -129,11 +143,13 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
                 }
                 path
             }
+        }
+
+        private fun path(cache: File, name: String) = File(File(cache, spec(name).str("sha256")), spec(name).str("file"))
 
         /** True when every model is in the cache: an input can start without network. */
         @JvmStatic
-        fun cached(names: Collection<String>, cache: File): Boolean =
-            names.all { File(File(cache, spec(it).str("sha256")), spec(it).str("file")).exists() }
+        fun cached(names: Collection<String>, cache: File): Boolean = names.all { path(cache, it).exists() }
 
         /**
          * Blocking: `files` gives a model's File or bytes, `dir` a folder of .alk files, else they come from `cache`, downloaded there when missing.
@@ -158,18 +174,30 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
                         is File -> src.readBytes()
                         null -> when {
                             dir != null -> File(dir, spec(name).str("file")).readBytes()
-                            cache != null -> fetch(listOf(name), cache, download, baseUrl, onProgress).getValue(name).readBytes()
+                            cache != null -> fromCache(name, cache, download, baseUrl, onProgress)
                             else -> throw IllegalArgumentException("$name: no file, folder or cache given")
                         }
                         else -> throw IllegalArgumentException("$name: a File or a ByteArray")
                     }
-                    loaded[name] = Model(name, checked(name, data))
+                    loaded[name] = Model(name, if (files[name] == null && dir == null && cache != null) data else checked(name, data))
                 }
             } catch (e: Throwable) {
                 loaded.values.forEach(Model::close)
                 throw e
             }
             return Models(loaded)
+        }
+
+        // a cached file that no longer matches (a disk error, a file left short) is fetched once more
+        private fun fromCache(name: String, cache: File, download: Boolean, baseUrl: String?, onProgress: ((Progress) -> Unit)?): ByteArray {
+            val f = fetch(listOf(name), cache, download, baseUrl, onProgress).getValue(name)
+            return try {
+                checked(name, f.readBytes())
+            } catch (e: AlkoveException) {
+                if (!download) throw e
+                f.delete()
+                checked(name, fetch(listOf(name), cache, true, baseUrl, onProgress).getValue(name).readBytes())
+            }
         }
 
         /** The models from Hugging Face at this version's revision (or `baseUrl`), then from the app's cache. Call it ahead on a settings screen, on Wi-Fi if you can. */

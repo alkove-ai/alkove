@@ -7,7 +7,10 @@ class AlkoveException(val code: String, message: String) : Exception(message) {
 }
 
 // a native object freed once, by close() or else when it is collected
-internal class Handle(private var h: Long, private val free: (Long) -> Unit) {
+internal class Handle(h: Long, private val free: (Long) -> Unit) {
+    @Volatile
+    private var h = h
+
     val value: Long
         get() = h.also { check(it != 0L) { "used after close()" } }
 

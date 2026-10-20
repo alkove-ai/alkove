@@ -146,8 +146,12 @@ impl Reader<'_> {
 
     fn hex(&mut self) -> Result<u32, Error> {
         let h = self.b.get(self.at..self.at + 4).ok_or_else(|| bad("short \\u escape"))?;
+        // from_str_radix would also take a sign
+        if !h.iter().all(u8::is_ascii_hexdigit) {
+            return Err(bad("bad \\u escape"));
+        }
         self.at += 4;
-        u32::from_str_radix(std::str::from_utf8(h).map_err(|_| bad("bad \\u escape"))?, 16).map_err(|_| bad("bad \\u escape"))
+        Ok(h.iter().fold(0, |x, &c| x * 16 + (c as char).to_digit(16).expect("hex")))
     }
 
     fn string(&mut self) -> Result<String, Error> {
@@ -202,10 +206,39 @@ impl Reader<'_> {
         }
     }
 
+    fn digits(&mut self) -> usize {
+        let start = self.at;
+        while self.at < self.b.len() && self.b[self.at].is_ascii_digit() {
+            self.at += 1;
+        }
+        self.at - start
+    }
+
+    // JSON's grammar, stricter than f64's own parser (01, 1., -.5 are not JSON)
     fn number(&mut self) -> Result<Value, Error> {
         let start = self.at;
-        while self.at < self.b.len() && matches!(self.b[self.at], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9') {
+        let at = |r: &Self, c: u8| r.b.get(r.at) == Some(&c);
+        if at(self, b'-') {
             self.at += 1;
+        }
+        let int = self.digits();
+        if int == 0 || (int > 1 && self.b[self.at - int] == b'0') {
+            return Err(bad("bad number"));
+        }
+        if at(self, b'.') {
+            self.at += 1;
+            if self.digits() == 0 {
+                return Err(bad("bad number"));
+            }
+        }
+        if at(self, b'e') || at(self, b'E') {
+            self.at += 1;
+            if at(self, b'+') || at(self, b'-') {
+                self.at += 1;
+            }
+            if self.digits() == 0 {
+                return Err(bad("bad number"));
+            }
         }
         let t = std::str::from_utf8(&self.b[start..self.at]).map_err(|_| bad("bad number"))?;
         let x = t.parse::<f64>().map_err(|_| bad("bad number"))?;
@@ -330,6 +363,12 @@ mod tests {
         assert_eq!(v.get("esc"), Some(&Value::Str("é😀".into())));
         assert_eq!(stringify(&v), r#"{"text":"Ça \"va\"\n","p":[0.5,-1e-7,3],"ok":true,"none":null,"emoji":"😀","esc":"é😀"}"#);
         assert!(parse(b"{\"a\":1,}").is_err());
+        for t in ["01", "1.", "-.5", "1.e5", "+1", "-", "\"\\u+041\""] {
+            assert!(parse(t.as_bytes()).is_err(), "{t}");
+        }
+        for (t, x) in [("0", 0.0), ("-0.5", -0.5), ("1e-7", 1e-7), ("2E+3", 2000.0), ("10", 10.0)] {
+            assert_eq!(parse(t.as_bytes()).unwrap(), Value::Num(x), "{t}");
+        }
         assert!(parse(b"[1] x").is_err());
     }
 }

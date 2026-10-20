@@ -126,7 +126,8 @@ class Processor @JvmOverloads constructor(
     init {
         val opts = processOptions(focus, voiceprint, strength, cue, speech, normalize, trace, rate, words, context)
         check(models, opts)
-        handle = Handle(Native.processorNew(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), Values.encode(opts)), Native::processorFree)
+        val o = Values.encode(opts)
+        handle = models.pinned { Handle(Native.processorNew(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), o), Native::processorFree) }
     }
 
     /** Float samples at the rate given, any length. */
@@ -166,7 +167,8 @@ fun process(
     val opts = processOptions(focus, voiceprint, strength, cue, speech, normalize, trace, Alkove.RATE, words, context)
     check(models, opts)
     val x = if (rate != Alkove.RATE) resample(pcm, rate, Alkove.RATE) else pcm
-    return partOf(Native.process(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), x, x.size, Values.encode(opts)))
+    val o = Values.encode(opts)
+    return partOf(models.pinned { Native.process(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), x, x.size, o) })
 }
 
 private fun chainOptions(gate: Boolean, normalize: Boolean, strength: Double, voiceprint: Any?, speech: SpeechParams?, sleep: Boolean) =
@@ -187,7 +189,8 @@ class Chain @JvmOverloads constructor(
 
     init {
         models.need("focus", "cue")
-        handle = Handle(Native.chainNew(models.ptr("focus"), models.ptr("cue"), chainOptions(gate, normalize, strength, voiceprint, speech, sleep)), Native::chainFree)
+        val o = chainOptions(gate, normalize, strength, voiceprint, speech, sleep)
+        handle = models.pinned { Handle(Native.chainNew(models.ptr("focus"), models.ptr("cue"), o), Native::chainFree) }
     }
 
     /** One hop in, one hop out in `out` (256 samples), and the events it gave: speech, idle and diag. */
@@ -250,23 +253,28 @@ class Live @JvmOverloads constructor(
 
     init {
         models.need("focus", "cue")
-        handle = Handle(Native.liveNew(models.ptr("focus"), models.ptr("cue"), rate.toDouble(), chainOptions(gate, normalize, strength, voiceprint, speech, sleep)), Native::liveFree)
+        val o = chainOptions(gate, normalize, strength, voiceprint, speech, sleep)
+        handle = models.pinned { Handle(Native.liveNew(models.ptr("focus"), models.ptr("cue"), rate.toDouble(), o), Native::liveFree) }
     }
 
-    // the samples ready land in `out` (grown as needed); returns their count and the events
-    internal fun pushInto(pcm: FloatArray, n: Int): Pair<Int, List<Event>> {
+    // the events of the last pushInto
+    internal var events: List<Event> = emptyList()
+
+    // the samples ready land in `out` (grown as needed); returns their count
+    internal fun pushInto(pcm: FloatArray, n: Int): Int {
         val room = n + 4 * (rate / 1000 + 1) * 32
         if (out.size < room) out = FloatArray(room)
         val r = Native.livePush(handle.value, pcm, n, out)
-        val events = (r and 0xFFFFFFFFL).toInt()
-        return (r ushr 32).toInt() to if (events == 0) emptyList() else chainEvents(Native.liveEvents(handle.value), events)
+        val count = (r and 0xFFFFFFFFL).toInt()
+        events = if (count == 0) emptyList() else chainEvents(Native.liveEvents(handle.value), count)
+        return (r ushr 32).toInt()
     }
 
     /** Samples in, the ones ready out, and the events (speech, idle, diag), in seconds from the stream's start. */
     @Synchronized
     @JvmOverloads
     fun push(pcm: FloatArray, n: Int = pcm.size): Pair<FloatArray, List<Event>> {
-        val (count, events) = pushInto(pcm, n)
+        val count = pushInto(pcm, n)
         return out.copyOf(count) to events
     }
 
@@ -300,7 +308,7 @@ class Live @JvmOverloads constructor(
 /** Cue's state machine on its probabilities, frame by frame: what [Processor] and the web SDK decide, for frameworks that want each step. */
 class SpeechTracker @JvmOverloads constructor(speech: SpeechParams? = null, frameSecs: Double = 0.03) : AutoCloseable {
     private val p = speech ?: SpeechParams()
-    private val handle = Handle(Native.trackerNew(p.confidence, p.exitConfidence, p.startSecs, p.stopSecs, frameSecs), Native::trackerFree)
+    private val handle = Alkove.native().let { Handle(Native.trackerNew(p.confidence, p.exitConfidence, p.startSecs, p.stopSecs, frameSecs), Native::trackerFree) }
     private val at = DoubleArray(2)
 
     /** Frame k's probability; a speech start or end when speech starts or ends. */
@@ -332,7 +340,7 @@ class SpeechTracker @JvmOverloads constructor(speech: SpeechParams? = null, fram
 
 /** Windowed sinc between any two rates, across chunks; `aligned` puts output k exactly on input k × ratio (files), else half a window late (real time). */
 class Resampler @JvmOverloads constructor(inRate: Int, outRate: Int, aligned: Boolean = false) : AutoCloseable {
-    private val handle = Handle(Native.resamplerNew(inRate.toDouble(), outRate.toDouble(), aligned), Native::resamplerFree)
+    private val handle = Alkove.native().let { Handle(Native.resamplerNew(inRate.toDouble(), outRate.toDouble(), aligned), Native::resamplerFree) }
 
     /** Samples at `inRate`, any length; the ones ready at `outRate`. */
     @Synchronized
@@ -346,4 +354,4 @@ class Resampler @JvmOverloads constructor(inRate: Int, outRate: Int, aligned: Bo
 }
 
 /** A whole signal from one rate to another, as long as the input at the new rate. */
-fun resample(pcm: FloatArray, inRate: Int, outRate: Int): FloatArray = Native.resample(pcm, pcm.size, inRate.toDouble(), outRate.toDouble())
+fun resample(pcm: FloatArray, inRate: Int, outRate: Int): FloatArray = Alkove.native().let { Native.resample(pcm, pcm.size, inRate.toDouble(), outRate.toDouble()) }

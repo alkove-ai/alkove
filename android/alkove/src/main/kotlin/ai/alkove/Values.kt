@@ -105,9 +105,15 @@ internal object Values {
 
 // JSON read and written as JavaScript does: the same text as the web SDK for the same word or print
 internal object Json {
-    fun stringify(v: Any?): String = String(Native.jsonStringify(Values.encode(v)), Charsets.UTF_8)
+    fun stringify(v: Any?): String {
+        Alkove.native()
+        return String(Native.jsonStringify(Values.encode(v)), Charsets.UTF_8)
+    }
 
-    fun parse(text: String): Any? = Values.decode(Native.jsonParse(text.toByteArray(Charsets.UTF_8)))
+    fun parse(text: String): Any? {
+        Alkove.native()
+        return Values.decode(Native.jsonParse(text.toByteArray(Charsets.UTF_8)))
+    }
 }
 
 @Suppress("UNCHECKED_CAST")

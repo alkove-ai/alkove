@@ -40,7 +40,7 @@ class Timbre(models: Models) : AutoCloseable {
 
     init {
         models.need("timbre")
-        handle = Handle(Native.timbreNew(models.ptr("timbre")), Native::timbreFree)
+        handle = models.pinned { Handle(Native.timbreNew(models.ptr("timbre")), Native::timbreFree) }
     }
 
     internal val ptr: Long

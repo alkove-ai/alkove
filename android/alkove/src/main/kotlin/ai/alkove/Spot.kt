@@ -69,7 +69,7 @@ class Lex(models: Models) : AutoCloseable {
 
     init {
         models.need("lex")
-        handle = Handle(Native.lexNew(models.ptr("lex")), Native::lexFree)
+        handle = models.pinned { Handle(Native.lexNew(models.ptr("lex")), Native::lexFree) }
     }
 
     internal val ptr: Long
@@ -99,14 +99,16 @@ class Lex(models: Models) : AutoCloseable {
 
     companion object {
         /** The languages Lex reads. */
-        @JvmField val langs: List<String> = Alkove.info["langs"].arr().map { it as String }
+        @JvmStatic
+        val langs: List<String> by lazy { Alkove.info["langs"].arr().map { it as String } }
 
         /** Spot's 58 phonemes in IPA: the symbols a word between slashes may use (stress and length marks are ignored). */
-        @JvmField val inventory: List<String> = Alkove.info["inventory"].arr().map { it as String }
+        @JvmStatic
+        val inventory: List<String> by lazy { Alkove.info["inventory"].arr().map { it as String } }
 
         /** 0 = the same sound; a substitution between interchangeable phonemes costs half. */
         @JvmStatic
-        fun distance(a: String, b: String): Double = Native.distance(Values.encode(mapOf("a" to a, "b" to b)))
+        fun distance(a: String, b: String): Double = Alkove.native().let { Native.distance(Values.encode(mapOf("a" to a, "b" to b))) }
     }
 }
 
@@ -155,7 +157,8 @@ class Listener @JvmOverloads constructor(models: Models, words: List<Any>, conte
 
     init {
         models.need("spot")
-        handle = Handle(Native.listenerNew(models.ptr("spot"), args(words, context)), Native::listenerFree)
+        val a = args(words, context)
+        handle = models.pinned { Handle(Native.listenerNew(models.ptr("spot"), a), Native::listenerFree) }
     }
 
     private fun args(words: List<Any>, context: String): ByteArray {
@@ -204,7 +207,8 @@ class Enroller @JvmOverloads constructor(models: Models, word: Any, takes: Int =
 
     init {
         models.need("spot")
-        handle = Handle(Native.enrollerNew(models.ptr("spot"), Values.encode(mapOf("word" to Word.of(word).value, "takes" to takes, "chain" to chain))), Native::enrollerFree)
+        val a = Values.encode(mapOf("word" to Word.of(word).value, "takes" to takes, "chain" to chain))
+        handle = models.pinned { Handle(Native.enrollerNew(models.ptr("spot"), a), Native::enrollerFree) }
     }
 
     /** True once `takes` takes with the word were heard. */

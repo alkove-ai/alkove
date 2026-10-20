@@ -89,6 +89,20 @@ class TimbreTest {
         digest("timbre: learning offered speech", out)
     }
 
+    // a wake word and its 0.5 s past one Timbre window: checked on its windows instead of refused
+    @Test
+    fun aLongWakeIsVerified() {
+        val me = timbre.embed(wav("enroll.wav"))
+        val coach = Native.coachNew(Values.encode(mapOf("reference" to me.value)))
+        try {
+            val pcm = wav("speech.wav").copyOfRange(0, 40000)
+            val r = Values.decode(Native.coachVerify(coach, timbre.ptr, pcm, pcm.size)).obj()
+            assertTrue(r.toString(), r["same"] is Boolean && (r["score"] as Number).toDouble() > 0)
+        } finally {
+            Native.coachFree(coach)
+        }
+    }
+
     @Test
     fun theApi() {
         val me = timbre.embed(wav("enroll.wav"))
