@@ -1,0 +1,17 @@
+[versions]
+agp = "9.4.1"
+coroutines = "1.11.0"
+junit = "4.13.2"
+livekit = "2.29.1"
+androidx-test = "1.7.0"
+
+[libraries]
+coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+junit = { module = "junit:junit", version.ref = "junit" }
+livekit = { module = "io.livekit:livekit-android", version.ref = "livekit" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
+android-application = { id = "com.android.application", version.ref = "agp" }
