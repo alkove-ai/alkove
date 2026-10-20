@@ -2,6 +2,7 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.library)
+    `maven-publish`
 }
 
 val repo: File = rootDir.parentFile
@@ -30,6 +31,9 @@ android {
         minSdk = 24
         consumerProguardFiles("consumer-rules.pro")
         testInstrumentationRunner = "ai.alkove.TestRunner"
+    }
+    publishing {
+        singleVariant("release") { withSourcesJar() }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -66,8 +70,39 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
-    implementation(libs.coroutines.android)
+    api(libs.coroutines.android)
     testImplementation(libs.junit)
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.runner)
+}
+
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            artifactId = "alkove"
+            afterEvaluate { from(components["release"]) }
+            pom {
+                name = "Alkove"
+                description = "On-device voice input for Android: keep the user's voice, find speech, hear words, know a voice; the same to the bit as the web and Python packages"
+                url = "https://alkove.ai"
+                licenses {
+                    license {
+                        name = "Apache-2.0"
+                        url = "https://www.apache.org/licenses/LICENSE-2.0"
+                    }
+                }
+                scm {
+                    url = "https://github.com/alkove-ai/alkove"
+                    connection = "scm:git:https://github.com/alkove-ai/alkove.git"
+                }
+            }
+        }
+    }
+    // the folder that goes to maven.alkove.ai as it is
+    repositories {
+        maven {
+            name = "staging"
+            url = uri(rootProject.layout.buildDirectory.dir("maven"))
+        }
+    }
 }
