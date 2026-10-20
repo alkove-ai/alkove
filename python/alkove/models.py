@@ -116,6 +116,7 @@ class Models:
         return cls(loaded)
 
     def get(self, name: str) -> Optional["_alkove.Model"]:
+        """The model of that name if it was loaded, else None: the handle the classes of this package take."""
         return self._models.get(name)
 
     def __contains__(self, name: str) -> bool:

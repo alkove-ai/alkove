@@ -62,6 +62,7 @@ class Word:
     def __init__(self, data: dict, warnings: Sequence[dict] = ()):
         self._data = data
         self.warnings = list(warnings)
+        """What to fix in the text or the takes, [{code, message, …}] (`word.too-short`…); empty for a word read from JSON."""
 
     @staticmethod
     def from_json(j: Union[dict, str]) -> Optional["Word"]:
@@ -71,6 +72,7 @@ class Word:
 
     @staticmethod
     def of(w: Union["Word", dict, str]) -> "Word":
+        """A word, its JSON or the JSON string, as a `Word`; AlkoveError (`word.outdated`) for one compiled for another Spot."""
         if isinstance(w, Word):
             return w
         word = Word.from_json(w)
@@ -80,14 +82,38 @@ class Word:
         return word
 
     def to_json(self) -> dict:
+        """The word as plain JSON, to store and read back with `Word.from_json`."""
         return json.loads(json.dumps(self._data))
 
-    text = property(lambda self: self._data["text"])
-    lang = property(lambda self: list(self._data["lang"]))
-    phonemes = property(lambda self: [dict(p) for p in self._data["phonemes"]])
-    thresholds = property(lambda self: dict(self._data["thresholds"]))
-    calibrated = property(lambda self: self._data["calibrated"])
-    chain = property(lambda self: self._data["chain"])
+    @property
+    def text(self) -> str:
+        """The word as it was typed."""
+        return self._data["text"]
+
+    @property
+    def lang(self) -> List[str]:
+        """The languages it was compiled in; empty for phonemes written between slashes."""
+        return list(self._data["lang"])
+
+    @property
+    def phonemes(self) -> List[dict]:
+        """Its pronunciations, [{ipa, lang, p}], each with its probability."""
+        return [dict(p) for p in self._data["phonemes"]]
+
+    @property
+    def thresholds(self) -> dict:
+        """The score that wakes in each context, {anywhere, pause}: log-probabilities, a word said clearly scores near 0."""
+        return dict(self._data["thresholds"])
+
+    @property
+    def calibrated(self) -> bool:
+        """True once enrolled on the user's voice, False for a typed word (its language's default thresholds)."""
+        return self._data["calibrated"]
+
+    @property
+    def chain(self) -> str:
+        """The audio its thresholds suit: "raw" (the microphone) or "focus" (Focus's output)."""
+        return self._data["chain"]
 
     def __repr__(self) -> str:
         return f"Word({self.text!r}, {[p['ipa'] for p in self._data['phonemes']]})"
@@ -111,6 +137,7 @@ class Voiceprint:
         return Voiceprint(_alkove.voiceprint({"op": "merge", "prints": [p._data for p in prints]}))
 
     def to_json(self) -> dict:
+        """The print as plain JSON, to store and read back with `Voiceprint.from_json`."""
         return json.loads(json.dumps(self._data))
 
     @property
@@ -245,7 +272,9 @@ class Lex:
     """Text to phonemes in fr, en, es, pt, it, ca, ro: Lex's beam search, word by word."""
 
     langs = tuple(_alkove.LANGS)
+    """The languages Lex reads."""
     inventory = tuple(_alkove.inventory())
+    """Spot's 58 phonemes in IPA: the symbols a word between slashes may use (stress and length marks are ignored)."""
 
     def __init__(self, models: Models):
         _needs(models, "lex")
@@ -260,6 +289,7 @@ class Lex:
         return out[0] if isinstance(text, str) else out
 
     def compile(self, text: str, lang: Union[str, Sequence[str]], *, chain: Optional[str] = None) -> Word:
+        """`compile` with this Lex: a typed word in one or more of its languages."""
         return compile(text, lang, lex=self, chain=chain)
 
     @staticmethod
@@ -302,9 +332,11 @@ class Listener:
         return {"words": [w.to_json() for w in ws], "context": context}
 
     def set_words(self, words: Iterable, context: str = "pause") -> None:
+        """Listen for other words from the next frame on, on the same clock."""
         self._l.set_words(self._words(words, context))
 
     def push(self, pcm: Any) -> List[Heard]:
+        """16 kHz audio, any length; one `Heard` per 30 ms frame it completes."""
         return [Heard(int(step), speech, list(zip(self._names, scores)), wakes) for step, speech, scores, wakes in self._l.push(_samples(pcm))]
 
 
@@ -315,6 +347,7 @@ class Enroller:
         _needs(models, "spot")
         self._e = _alkove.Enroller(models.get("spot"), Word.of(word).to_json(), takes, chain)
         self.done = False
+        """True once `takes` takes with the word were heard."""
 
     def push(self, pcm: Any) -> List[dict]:
         """16 kHz audio; the takes heard in it ({score, ok, start, end, pronunciation})."""
@@ -332,6 +365,7 @@ class Chain:
     """The real-time chain, one hop of 256 samples at 16 kHz at a time: Focus, Cue, the mix with the raw mic, the level, the gate. Its output is `delay` samples late."""
 
     HOP = 256
+    """The samples of one `step`, at 16 kHz: 16 ms."""
 
     def __init__(
         self,
@@ -358,25 +392,31 @@ class Chain:
         self._c.set_print(_samples(_print(embedding)) if embedding is not None else None)
 
     def set_strength(self, s: float) -> None:
+        """How much of Focus goes out, 0 to 1, the rest being the raw mic: 0.8 is 80 % Focus."""
         self._c.set_strength(s)
 
     def set_enabled(self, on: bool) -> None:
+        """Off: the raw mic, at the same delay, with a short fade."""
         self._c.set_enabled(on)
 
     @property
     def delay(self) -> int:
+        """Samples between a sample going in and coming out: Focus's lag, plus the gate's look-ahead with `gate`."""
         return self._c.delay
 
     @property
     def speaking(self) -> bool:
+        """Cue hears speech now."""
         return self._c.speaking
 
     @property
     def sleeping(self) -> bool:
+        """Focus and Cue paused in a silence (`sleep`): after 2 s of quiet, until the mic rises 9 dB over its noise floor."""
         return self._c.sleeping
 
     @property
     def gain_db(self) -> float:
+        """The gain `normalize` applies now, in dB."""
         return self._c.gain_db
 
 
@@ -398,6 +438,7 @@ class Live:
         _needs(models, "focus", "cue")
         print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
         self.rate = rate
+        """The stream's rate, in and out, in Hz."""
         self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_)
 
     def push(self, pcm: Any) -> Tuple[np.ndarray, List[dict]]:
@@ -406,9 +447,11 @@ class Live:
         return _audio(out), [_event(*e) for e in events if e[0] < 5]
 
     def set_voiceprint(self, embedding: Any) -> None:
+        """Applied at the next silence, from a fresh state; None goes back to the closest voice."""
         self._l.set_print(_samples(_print(embedding)) if embedding is not None else None)
 
     def set_strength(self, s: float) -> None:
+        """How much of Focus goes out, 0 to 1, the rest being the raw mic: 0.8 is 80 % Focus."""
         self._l.set_strength(s)
 
     def set_enabled(self, on: bool) -> None:
@@ -417,6 +460,7 @@ class Live:
 
     @property
     def speaking(self) -> bool:
+        """Cue hears speech now."""
         return self._l.speaking
 
 
@@ -432,14 +476,17 @@ class SpeechTracker:
         return None if e is None else _event(e[0], e[1], e[2], 0.0)
 
     def reset(self) -> None:
+        """Back to silence, with no `speechend` for the speech it was in."""
         self._t.reset()
 
     @property
     def active(self) -> bool:
+        """Speech is open: a frame went over `confidence`, and `stop_secs` under `exit_confidence` have not passed yet."""
         return self._t.active
 
     @property
     def confirmed(self) -> bool:
+        """The open speech lasted `start_secs`: its `speechstart` was given."""
         return self._t.confirmed
 
 
@@ -487,18 +534,22 @@ class VoiceprintLearner:
 
     @property
     def progress(self) -> float:
+        """0 to 1: the windows accepted so far, out of the 4 (6 s of voice) a print needs."""
         return self._l.progress
 
     @property
     def ready(self) -> bool:
+        """The print has its 4 windows: Focus can use it."""
         return self._l.ready
 
     @property
     def voiceprint(self) -> Optional[Voiceprint]:
+        """The print learned so far once `ready`, else None."""
         p = self._l.voiceprint()
         return None if p is None else Voiceprint(p)
 
     def forget(self) -> None:
+        """Drops every window: learning starts again from nothing."""
         self._l.forget()
 
 
@@ -509,6 +560,7 @@ class Resampler:
         self._r = _alkove.Resampler(float(in_rate), float(out_rate), aligned)
 
     def push(self, pcm: Any) -> np.ndarray:
+        """Samples at `in_rate`, any length; the ones ready at `out_rate`."""
         return _audio(self._r.push(_samples(pcm)))
 
 

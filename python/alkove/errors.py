@@ -4,3 +4,4 @@ class AlkoveError(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+        """The cause, `domain.cause`: `models.fetch`, `models.hash`, `word.outdated`, `lang.unsupported`…"""
