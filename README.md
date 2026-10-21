@@ -30,10 +30,10 @@
 <br>
 
 <a href="https://alkove.ai/#demo">
-  <img alt="The raw microphone holds two voices and noise; after Focus, only the user's voice is left" src=".github/assets/focus.png" width="800">
+  <img alt="The five models on one scene: Lex reads the typed wake word, Timbre learns the voiceprint, Spot wakes only on your voice, Focus keeps only you, Cue opens and closes your turns" src=".github/assets/alkove.webp" width="800">
 </a>
 
-<p align="center"><sub>Focus on the demo's sample: the user, another voice and noise (Common Voice, CC0). <a href="https://alkove.ai/#demo">Listen to it</a>.</sub></p>
+<p align="center"><sub>The five models on one scene: a typed wake word, your voice only, your turns only. <a href="https://alkove.ai/#demo">Try it on your voice</a>.</sub></p>
 
 ## Why Alkove
 
