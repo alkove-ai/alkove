@@ -53,11 +53,11 @@ jobs:
       - run: pnpm --filter alkove build
       - run: pnpm --filter alkove check
 
-  # the wheels on every target; the digests of the web SDK once the models can be downloaded
+  # the wheels on every target but Intel macOS, which release.yml builds and tests; the digests of the web SDK once the models can be downloaded
   python:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -103,7 +103,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+          cache: gradle
       - run: rustup target add aarch64-linux-android x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-ndk --version 4.1.2 --locked
       - run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
       - run: cargo clippy --profile android -p alkove-android --all-targets -- -D warnings
