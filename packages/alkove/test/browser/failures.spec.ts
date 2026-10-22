@@ -84,6 +84,50 @@ test.describe('failures', () => {
     expect(r.peak).toBeGreaterThan(3000)
   })
 
+  test('input.ready: rejects while the models fail, resolves once they are back; the SDK\'s own mic gets the browser\'s noise suppression and gain while raw', async ({ page, origin, browserName }) => {
+    test.skip(browserName !== 'chromium', 'the SDK opens its own mic: fake devices, Chromium')
+    const token = `r${Date.now()}${browserName}`
+    await open(page, origin, { modelBaseUrl: `/flaky/${token}/` })
+    const first: any = await page.evaluate(async () => {
+      const lib = window.lib
+      const input = await lib.sdk.createAgentInput()
+      const w = window as any
+      w.agent = input
+      w.browser = []
+      input.on('diag', (d: any) => d.code === 'mic.browser' && w.browser.push(d.noiseSuppression))
+      const failed = await input.ready.then(
+        () => 'resolved',
+        (e: any) => `${e.name} ${e.code}`,
+      )
+      const settings = () => input.stream.getAudioTracks()[0].getSettings()
+      const before = settings().noiseSuppression
+      await lib.until(() => w.browser.length === 1, 4000, 'browser processing on')
+      const raw = settings()
+      return { failed, before, raw: { ns: raw.noiseSuppression, agc: raw.autoGainControl, ec: raw.echoCancellation }, mode: input.mode }
+    })
+    expect(first.failed).toMatch(/^AlkoveError (models\.fetch|engine\.failed)$/)
+    expect(first.mode).toBe('raw')
+    expect(first.before).toBe(false)
+    expect(first.raw).toEqual({ ns: true, agc: true, ec: true })
+    await fetch(`${origin}/__flaky/${token}/on`)
+    const back: any = await page.evaluate(async () => {
+      const lib = window.lib
+      const w = window as any
+      const input = w.agent
+      await lib.until(() => input.mode === 'focus', 40000, 'models back')
+      const ready = await input.ready.then(() => 'resolved', (e: any) => `${e.name} ${e.code}`)
+      await lib.until(() => w.browser.length === 2, 4000, 'browser processing off')
+      const s = input.stream.getAudioTracks()[0].getSettings()
+      // the mic opened twice more: its sound still reaches the models
+      let peak = 0
+      input.on('audio', (pcm: ArrayBuffer) => (peak = Math.max(peak, lib.rms(new Float32Array(pcm)))))
+      await lib.sleep(3000)
+      input.dispose()
+      return { ready, browser: w.browser, ns: s.noiseSuppression, agc: s.autoGainControl, ec: s.echoCancellation, sound: peak > 0.001 }
+    })
+    expect(back).toEqual({ ready: 'resolved', browser: [true, false], ns: false, agc: false, ec: true, sound: true })
+  })
+
   test('input.latency is the real delay before the models are in too', async ({ page, origin, browserName }) => {
     const token = `l${Date.now()}${browserName}`
     await open(page, origin, { modelBaseUrl: `/flaky/${token}/` })

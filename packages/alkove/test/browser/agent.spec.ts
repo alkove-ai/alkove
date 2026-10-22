@@ -1,6 +1,30 @@
 import { expect, open, reference, SLOW_FIREFOX, test } from './fixtures'
 
 test.describe('createAgentInput', () => {
+  test('input.ready resolves once the models run; a stream the app passes is left as it is', async ({ page, origin }) => {
+    await open(page, origin)
+    const r: any = await page.evaluate(async () => {
+      const lib = window.lib
+      const ctx = new AudioContext({ sampleRate: 48000 })
+      const input = await lib.sdk.createAgentInput({ stream: new lib.Player(ctx).stream, audioContext: ctx })
+      const seen: string[] = []
+      input.on('diag', (d: any) => seen.push(d.code))
+      await input.ready
+      const mode = input.mode
+      const again = await input.ready.then(() => 'resolved')
+      await lib.sleep(2500)
+      input.dispose()
+      const gone = await lib.sdk.createAgentInput({ stream: new lib.Player(ctx).stream, audioContext: ctx })
+      const early = gone.ready.then(
+        () => 'resolved',
+        (e: any) => `${e.name} ${e.code}`,
+      )
+      gone.dispose()
+      return { mode, again, browser: seen.includes('mic.browser'), early: await early }
+    })
+    expect(r).toEqual({ mode: 'focus', again: 'resolved', browser: false, early: 'AlkoveError engine.failed' })
+  })
+
   test('audio packets and utterances in the format, rate and size asked; withTrack gives a track', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     const ref = await reference('speech.wav', { focus: true })

@@ -163,6 +163,33 @@ test.describe('createCallInput', () => {
     if (r.chrome) expect(r.seen).toContain('mic.processed')
   })
 
+  test('a warning the app does not listen to goes to the console, once; one it listens to stays out of it', async ({ page, origin, browserName }) => {
+    test.skip(browserName !== 'chromium', 'fake devices: Chromium')
+    const warnings: string[] = []
+    page.on('console', (m) => m.type() === 'warning' && m.text().startsWith('alkove:') && warnings.push(m.text()))
+    await open(page, origin)
+    const seen: any = await page.evaluate(async () => {
+      const lib = window.lib
+      const ctx = new AudioContext({ sampleRate: 48000 })
+      const ns = await navigator.mediaDevices.getUserMedia({ audio: { noiseSuppression: true } })
+      const deaf = await lib.sdk.createCallInput({ stream: ns, audioContext: ctx })
+      await lib.sleep(300)
+      deaf.dispose()
+      const again = await lib.sdk.createCallInput({ stream: ns, audioContext: ctx })
+      await lib.sleep(300)
+      again.dispose()
+      const seen: string[] = []
+      const heard = await lib.sdk.createCallInput({ stream: ns, audioContext: ctx })
+      heard.on('diag', (d: any) => seen.push(d.code))
+      await lib.sleep(300)
+      heard.dispose()
+      return seen
+    })
+    expect(seen).toContain('mic.processed')
+    // one per input that does not listen: two
+    expect(warnings.filter((w) => w.includes('processes the stream'))).toHaveLength(2)
+  })
+
   test('on a played stream: speech, word and output where Alkove.process puts them, at the announced delay', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     const ref = await reference('speech.wav', { focus: true })

@@ -39,12 +39,14 @@ export const CONSTRAINTS: MediaTrackConstraints & Record<string, unknown> = {
   channelCount: 1,
 }
 
-export async function openMic(deviceId?: string, signal?: AbortSignal): Promise<MediaStream> {
+// `browser`: the browser's noise suppression and gain on, for the raw mic while the models do not run
+export async function openMic(deviceId?: string, signal?: AbortSignal, browser = false): Promise<MediaStream> {
   if (!supported().secure) throw new AlkoveError('page.insecure', 'The microphone needs HTTPS (or localhost).')
   if (!navigator.mediaDevices?.getUserMedia) throw new AlkoveError('browser.unsupported', 'No getUserMedia in this browser.')
   const waiting = setTimeout(() => report({ code: 'mic.waiting', level: 'info', message: 'The permission prompt has had no answer for 5 s.' }), WAITING_MS)
   try {
-    const ask = navigator.mediaDevices.getUserMedia({ audio: { ...CONSTRAINTS, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) } })
+    const processing = browser ? { noiseSuppression: true, autoGainControl: true } : {}
+    const ask = navigator.mediaDevices.getUserMedia({ audio: { ...CONSTRAINTS, ...processing, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) } })
     const stream = await (signal
       ? Promise.race([
           ask,

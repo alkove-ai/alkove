@@ -38,7 +38,7 @@ const stream = await navigator.mediaDevices.getUserMedia({
 const input = await createCallInput({ stream, audioContext: ctx })
 ```
 
-- `stream` or `track`: the SDK uses it as is. If the browser still processes it, the input emits a `mic.processed` diag listing the settings to turn off. The SDK never stops or reopens a stream you gave.
+- `stream` or `track`: the SDK uses it as is. If the browser still processes it, the input emits a `mic.processed` diag listing the settings to turn off. The SDK never stops or reopens a stream you gave, and leaves its processing as it is in raw mode too. In Chrome, `applyConstraints` does not change a live track's noise suppression: to turn it back on, open the microphone again.
 - `audioContext`: share your context. The SDK does not close a context it did not create.
 - `deviceId`: the microphone to open. An unknown id rejects with `mic.not-found`.
 - `signal`: an `AbortSignal` that gives up while the permission prompt is open. The promise then rejects with the signal's reason.

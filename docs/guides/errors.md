@@ -74,6 +74,16 @@ input.on('mode', ({ mode, reason }) => log('mode', mode, reason))
 | `off` | you called `setEnabled(false)` | `setEnabled(true)` |
 | `unsupported` | no WebAssembly SIMD | raw for the whole session |
 
+`await input.ready` waits for the models to run. It rejects while they cannot: `browser.unsupported` without SIMD, the load's own code (`models.fetch`, `models.hash`) or `engine.failed` when they failed, `engine.failed` too when the input is disposed first. The SDK still tries again: a later `input.ready` resolves once they are back. Add your own timeout for a slow first visit:
+
+```ts
+const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 20_000))
+const ready = await Promise.race([input.ready.then(() => true), timeout]).catch(() => false)
+if (!ready) useRawMicrophone()
+```
+
+Raw for 2 s on a microphone the SDK opened (any reason but `off`), the input turns the browser's noise suppression and gain control back on, and off again once the models run (`mic.browser` diag). In Chrome, a live track keeps the processing it was opened with: the SDK closes the microphone and opens it again, a short gap in the sound. On a stream you gave, nothing is touched: do the same yourself on `mode` if you want it.
+
 ## Retries
 
 | What | First retry | Then |
@@ -98,7 +108,7 @@ See [Phones and Safari](/docs/guides/mobile/).
 
 ## Diags
 
-A [`Diag`](/docs/reference/interfaces/diag/) is `{ code, level, message?, ...fields }`, with `level` `'info'` or `'warn'`. Inputs emit their own as `diag` events. Diags that are not about one input (`config.late`, `models.default-host`) go to `Alkove.onDiag` and to every open input. The ones raised while an input is created (`mic.waiting`, `word.chain`, `voiceprint.reset`) reach that input's `diag` events as soon as you subscribe. Plug both into your logs:
+A [`Diag`](/docs/reference/interfaces/diag/) is `{ code, level, message?, ...fields }`, with `level` `'info'` or `'warn'`. Inputs emit their own as `diag` events. Diags that are not about one input (`config.late`, `models.default-host`) go to `Alkove.onDiag` and to every open input. The ones raised while an input is created (`mic.waiting`, `word.chain`, `voiceprint.reset`) reach that input's `diag` events as soon as you subscribe. Plug both into your logs. A `warn` nobody listens to goes to the console instead, once per code (`alkove: …`):
 
 ```ts
 input.on('diag', (d) => (d.level === 'warn' ? console.warn : console.debug)(d.code, d))
@@ -110,6 +120,8 @@ const off = Alkove.onDiag((d) => console.warn(d.code, d))
 | `mic.waiting` | info | the permission prompt has had no answer for 5 s | | show a hint, or abort with `signal` |
 | `mic.processed` | warn | the stream you gave is processed by the browser | `settings` | open it with those settings off |
 | `mic.twice` | warn | two inputs on the same microphone | | use `input.spot()` on one input |
+| `mic.browser` | info | raw for 2 s on a microphone the SDK opened: the browser's noise suppression and gain on; off once the models run | `noiseSuppression`, `autoGainControl` | nothing |
+| `speech.far` | info | with `near`, a voice far under the session's kept out of the phrases | `start`, `end`, `voiceDb`, `noiseDb`, `refDb` | tune `near.gapDb` |
 | `learn.no-far-end` | warn | a call input learns without `farEnd` | | pass the remote track |
 | `config.late` | warn | `Alkove.configure()` after the first input | | configure first |
 | `models.default-host` | warn | a model comes from Hugging Face | | self-host in production |

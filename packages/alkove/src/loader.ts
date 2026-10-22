@@ -36,8 +36,14 @@ export function onDiag(fn: (d: Diag) => void): () => void {
   return () => void diags.delete(fn)
 }
 
+const warned = new Set<string>()
+
+// with nobody listening, not an input either, a warning goes to the console once per code
 export function report(d: Diag): void {
   for (const fn of diags) fn(d)
+  if (diags.size || d.level !== 'warn' || warned.has(d.code)) return
+  warned.add(d.code)
+  console.warn(`alkove: ${d.message ?? d.code}`, d)
 }
 
 export async function sha256(bytes: Uint8Array): Promise<string> {
