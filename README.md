@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/alkove"><img alt="npm" src="https://img.shields.io/npm/v/alkove?color=e0702c&label=npm"></a>
   <a href="https://pypi.org/project/alkove/"><img alt="PyPI" src="https://img.shields.io/pypi/v/alkove?color=e0702c&label=pypi"></a>
-  <a href="https://alkove.ai/docs/start/android/"><img alt="Android" src="https://img.shields.io/badge/android-v0.2.0-e0702c"></a>
+  <a href="https://alkove.ai/docs/start/android/"><img alt="Android" src="https://img.shields.io/badge/android-v0.3.0-e0702c"></a>
   <a href="./LICENSE"><img alt="Apache-2.0, code and weights" src="https://img.shields.io/badge/code%20%2B%20weights-Apache--2.0-13254a"></a>
   <a href="https://huggingface.co/alkove-ai"><img alt="Models on Hugging Face" src="https://img.shields.io/badge/models-Hugging%20Face-13254a"></a>
 </p>
@@ -40,7 +40,7 @@
 - **The other voices stay out.** On meetings recorded on headset microphones (AMI), words from other people reaching the transcript drop from 17 per minute to 0.5. Denoisers let 19 or more through.
 - **Any word is a wake word.** Type it in one of 7 languages: no training, no recording session. 80 % recall at one false alarm per hour.
 - **Fewer false barge-ins.** Behind Focus, Cue starts on music 4× less often than Silero VAD.
-- **Small enough for a phone.** Five models under 8 MB together, Focus at 1.1 MB, an engine of 134 KB (brotli).
+- **Small enough for a phone.** Five models under 8 MB together, Focus at 1.1 MB, an engine of 141 KB (brotli).
 - **Open.** Code and weights under Apache-2.0, the engine is our own, in Rust. Every number above comes with its datasets and protocol in [`bench/`](./bench).
 
 ## Quick start
@@ -72,7 +72,7 @@ Voice agents, files, Node and the primitives: [the `alkove` package](./packages/
 
 ```kotlin
 // settings.gradle.kts: repositories { maven("https://maven.alkove.ai") }
-implementation("ai.alkove:alkove:0.2.0")
+implementation("ai.alkove:alkove:0.3.0")
 ```
 
 ```kotlin

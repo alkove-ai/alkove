@@ -2,7 +2,9 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## Unreleased
+## 0.3.0 (2026-10-22)
+
+Every package moves to 0.3 together (npm, Python and its LiveKit and Pipecat plugins, Android): the same core. One default changes an output: a quiet microphone gets a gain before Focus.
 
 - `near` on the agent and call inputs: a voice 10 dB under the session's main voice (`near: { gapDb }` to change it) opens no phrase and comes as the diag `speech.far`, without any voiceprint. The session's voice is the median of its last phrases within the gap of the loudest. A far voice right after the user ends the phrase on the user's last near frame; the leveling, a call's gate and a print's learning follow the near voice.
 - `levels`, implied by `near`: `speechend` and `utterance` carry the phrase's `level` (`voiceDb`, Focus's output before the leveling; `noiseDb`; `refDb`, the session's voice).

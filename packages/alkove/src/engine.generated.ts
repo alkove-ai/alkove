@@ -3,5 +3,5 @@ export const ENGINE_WASM = {
   name: 'alkove-engine',
   file: 'alkove-engine.wasm',
   bytes: 484109,
-  sha256: '0311474fbf3b068c36c99d4c18a3d634c2359f9b422321780bb1d9dda8a8fb35',
+  sha256: '79ea644e2d0876c6c7ebc415f393a22f8a3858a483b4c10553305616ba0270e4',
 }

@@ -52,7 +52,7 @@ What each use downloads (brotli):
 |---|---|
 | call or agent | Focus 0.9 MB + Cue 0.9 MB, + Timbre 0.7 MB with a voiceprint |
 | wake word | Spot 2.5 MB, + Lex 1.5 MB for a typed word |
-| engine, for every use | 134 KB |
+| engine, for every use | 141 KB |
 
 ## Configure before the first input
 
