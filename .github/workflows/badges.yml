@@ -1,0 +1,42 @@
+name: badges
+
+# a GitHub release published: once shields gives its version, GitHub's image cache (camo) drops the README's npm, PyPI and Android badges, which it keeps up to 6 h
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: the version the badges must show, as 0.3.1
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - env:
+          TAG: ${{ github.event.release.tag_name || inputs.version }}
+          PAGE: https://github.com/${{ github.repository }}
+        run: |
+          v="${TAG#v}"
+          # npm and PyPI may take minutes to give it, shields up to 6 h for PyPI
+          for try in $(seq 1 70); do
+            seen=0 done_=0
+            for u in $(curl -sf "$PAGE" | grep -o 'https://camo.githubusercontent.com/[a-f0-9]*/[a-f0-9]*' | sort -u); do
+              src=$(python3 -c 'import sys; print(bytes.fromhex(sys.argv[1].rsplit("/", 1)[1]).decode())' "$u")
+              case "$src" in *img.shields.io/npm/*|*img.shields.io/pypi/*|*img.shields.io/badge/android-*) ;; *) continue ;; esac
+              seen=$((seen + 1))
+              if ! curl -sf "$src" | grep -q "v$v"; then echo "not yet on shields: $src"; continue; fi
+              curl -sf "$u" | grep -q "v$v" || curl -sf -X PURGE "$u" > /dev/null || true
+              if curl -sf "$u" | grep -q "v$v"; then echo "v$v on GitHub: $src"; done_=$((done_ + 1)); fi
+            done
+            if [ "$seen" -ne 3 ]; then echo "3 badges expected in the README, $seen found"; exit 1; fi
+            if [ "$done_" -eq 3 ]; then exit 0; fi
+            echo "$done_ of $seen badges at v$v, again in 5 min"
+            sleep 300
+          done
+          exit 1
