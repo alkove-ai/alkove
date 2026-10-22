@@ -14,8 +14,8 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("ai.alkove:alkove:0.3.0")
-    implementation("ai.alkove:alkove-livekit:0.3.0") // Focus in a LiveKit room
+    implementation("ai.alkove:alkove:0.3.1")
+    implementation("ai.alkove:alkove-livekit:0.3.1") // Focus in a LiveKit room
 }
 ```
 

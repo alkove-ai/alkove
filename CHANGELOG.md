@@ -2,7 +2,7 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## Unreleased
+## 0.3.1 (2026-10-22)
 
 - The gain before Focus brings a quiet microphone up to about -30 dBFS on its loud moments, no longer -20: a microphone at a speaking level gets none. In 0.3.0, AMI's headsets got about 5 dB, and the other voices came through Focus twice as often (1.19 to 2.26 words a minute on the 134 windows of the model card); another voice alone came out 1.8 dB louder (-7.76 to -5.95 dB). Every number of the model card is back: AMI, another voice, VoiceBank+DEMAND (the same to the bit) and DNS. A quiet microphone still comes up: AMI's headsets brought down to -50 to -60 dBFS keep within 4 s as much speech as at -30, where 0.2 kept almost none at -55 and -60. Two of the three digests 0.3.0 moved are back.
 
