@@ -1,6 +1,30 @@
 import { expect, open, reference, SLOW_FIREFOX, test } from './fixtures'
 
 test.describe('createAgentInput', () => {
+  test('listen(false) right after creating the input holds once the models run', async ({ page, origin, browserName }) => {
+    test.skip(browserName === 'firefox', SLOW_FIREFOX)
+    await open(page, origin)
+    const r: any = await page.evaluate(async () => {
+      const lib = window.lib
+      const ctx = new AudioContext({ sampleRate: 48000 })
+      const player = new lib.Player(ctx)
+      const buf = await player.load('speech.wav')
+      const input = await lib.sdk.createAgentInput({ stream: player.stream, audioContext: ctx })
+      input.listen(false)
+      const log = lib.watch(input, ['speechstart'])
+      await input.ready
+      player.play(buf, { delay: 0.2 })
+      await lib.until(() => ctx.currentTime > player.end + 1, 30000, 'played muted')
+      const muted = log.length
+      input.listen(true)
+      player.play(buf, { delay: 0.2 })
+      await lib.until(() => ctx.currentTime > player.end + 1, 30000, 'played')
+      input.dispose()
+      return { muted, after: log.length - muted }
+    })
+    expect(r).toEqual({ muted: 0, after: 1 })
+  })
+
   test('input.ready resolves once the models run; a stream the app passes is left as it is', async ({ page, origin }) => {
     await open(page, origin)
     const r: any = await page.evaluate(async () => {

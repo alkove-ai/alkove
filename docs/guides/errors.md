@@ -74,7 +74,7 @@ input.on('mode', ({ mode, reason }) => log('mode', mode, reason))
 | `off` | you called `setEnabled(false)` | `setEnabled(true)` |
 | `unsupported` | no WebAssembly SIMD | raw for the whole session |
 
-`await input.ready` waits for the models to run. It rejects while they cannot: `browser.unsupported` without SIMD, the load's own code (`models.fetch`, `models.hash`) or `engine.failed` when they failed, `engine.failed` too when the input is disposed first. The SDK still tries again: a later `input.ready` resolves once they are back. Add your own timeout for a slow first visit:
+`await input.ready` waits for the models to run. A failed try rejects the calls waiting on it, with the load's own code (`models.fetch`, `models.hash`) or `engine.failed`; the SDK tries again, and a later call waits for that next try. Without SIMD (`browser.unsupported`) or once the input is disposed (`engine.failed`), it rejects at once. Add your own timeout for a slow first visit:
 
 ```ts
 const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 20_000))
@@ -120,7 +120,7 @@ const off = Alkove.onDiag((d) => console.warn(d.code, d))
 | `mic.waiting` | info | the permission prompt has had no answer for 5 s | | show a hint, or abort with `signal` |
 | `mic.processed` | warn | the stream you gave is processed by the browser | `settings` | open it with those settings off |
 | `mic.twice` | warn | two inputs on the same microphone | | use `input.spot()` on one input |
-| `mic.browser` | info | raw for 2 s on a microphone the SDK opened: the browser's noise suppression and gain on; off once the models run | `noiseSuppression`, `autoGainControl` | nothing |
+| `mic.browser` | info | raw for 2 s on a microphone the SDK opened: the browser's noise suppression and gain on; off once the models run | `noiseSuppression`, `autoGainControl` asked; `applied`, what the track reports (`null` when the browser does not tell) | nothing |
 | `speech.far` | info | with `near`, a voice far under the session's kept out of the phrases | `start`, `end`, `voiceDb`, `noiseDb`, `refDb` | tune `near.gapDb` |
 | `learn.no-far-end` | warn | a call input learns without `farEnd` | | pass the remote track |
 | `config.late` | warn | `Alkove.configure()` after the first input | | configure first |

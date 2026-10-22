@@ -17,9 +17,9 @@ import { CONSTRAINTS, openMic, processed, supported } from './mic'
 export type Mode = 'raw' | 'focus' | 'focus+print' | 'spot' | 'spot+print'
 export type RawReason = 'off' | 'loading' | 'failed' | 'overload' | 'unsupported'
 export type Status = 'starting' | 'running' | 'blocked' | 'interrupted' | 'disposed'
-// Focus's output before the leveling over the phrase, the mic's noise floor, the session's main voice (null until it has heard it twice), in dBFS
+// Focus's output before the leveling over the phrase (null for a held phrase without voice), the mic's noise floor, the session's main voice (null until it has heard it twice), in dBFS
 export interface PhraseLevel {
-  voiceDb: number
+  voiceDb: number | null
   noiseDb: number
   refDb: number | null
 }
@@ -114,8 +114,14 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   private notReady: AlkoveError | null = null
   private waiting: [() => void, (e: AlkoveError) => void][] = []
   private warned = new Set<string>()
-  private browserOn = false
+  // what the mode asks of the browser's processing, and what the mic has
+  private browserWant = false
+  private browserHas = false
+  private browserBusy: Promise<void> = Promise.resolve()
   private browserTimer: ReturnType<typeof setTimeout> | undefined
+  // sent again to every new pipeline: the app's listen() and hold() hold across loads and crashes
+  private listening = true
+  private holding = false
   protected abstract readonly kind: 'call' | 'agent' | 'wake'
 
   constructor(protected opts: FocusOptions) {
@@ -144,17 +150,17 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     return this._voiceprint
   }
 
-  // once the models run; rejects when they cannot run here (browser.unsupported) or failed to load, while the SDK tries again: a later ready waits for that
+  // once the models run; a failed try rejects the calls waiting on it, a later call waits for the next try; rejects at once without SIMD or once disposed
   get ready(): Promise<void> {
     if (this.ran) return Promise.resolve()
     if (this.notReady) return Promise.reject(this.notReady)
     return new Promise((resolve, reject) => this.waiting.push([resolve, reject]))
   }
 
-  private settle(error: AlkoveError | null): void {
+  private settle(error: AlkoveError | null, final = false): void {
     if (this.ran) return
     this.ran = !error
-    this.notReady = error
+    if (final) this.notReady = error
     const waiting = this.waiting
     this.waiting = []
     for (const [resolve, reject] of waiting) {
@@ -313,33 +319,46 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   // raw for a while on a mic the SDK opened: the browser's noise suppression and gain, off again once the models run
   private followRaw(): void {
     clearTimeout(this.browserTimer)
+    if (!this.ownStream || this.disposed) return
     const raw = this._mode.mode === 'raw' && this._mode.reason !== 'off'
-    if (!this.ownStream || this.disposed || raw === this.browserOn) return
-    if (raw) this.browserTimer = setTimeout(() => void this.browser(true), RAW_BROWSER_MS)
-    else void this.browser(false)
+    if (!raw) this.wantBrowser(false)
+    else if (!this.browserWant) this.browserTimer = setTimeout(() => this.wantBrowser(true), RAW_BROWSER_MS)
   }
 
-  private async browser(on: boolean): Promise<void> {
-    if (this.disposed) return
-    this.browserOn = on
+  // one change of the mic at a time, each to what the mode asks by then
+  private wantBrowser(on: boolean): void {
+    this.browserWant = on
+    this.browserBusy = this.browserBusy.then(() => this.browser())
+  }
+
+  private async browser(): Promise<void> {
+    const on = this.browserWant
     const track = this.stream.getAudioTracks()[0]
+    if (this.disposed || !this.ownStream || on === this.browserHas || !track) return
     try {
-      await track?.applyConstraints({ ...CONSTRAINTS, noiseSuppression: on, autoGainControl: on })
+      await track.applyConstraints({ ...CONSTRAINTS, noiseSuppression: on, autoGainControl: on })
     } catch {}
-    // Chrome keeps a source's processing as it was opened, for every new track on it too: the mic closed, then opened again
-    if (track && track.getSettings().noiseSuppression !== on) {
+    const told = track.getSettings().noiseSuppression
+    // Chrome keeps a source's processing as it was opened, for every new track on it too: the mic closed, then opened again; a browser that does not tell is left as it is
+    if (typeof told === 'boolean' && told !== on) {
+      if (this.disposed || !this.ownStream) return
       const deviceId = track.getSettings().deviceId ?? this.opts.deviceId
       track.stop()
       try {
         const stream = await openMic(deviceId, undefined, on)
-        if (this.disposed || this.browserOn !== on) for (const t of stream.getTracks()) t.stop()
-        else await this.setStream(stream, true)
+        if (this.disposed || !this.ownStream) {
+          for (const t of stream.getTracks()) t.stop()
+          return
+        }
+        await this.setStream(stream, true)
       } catch {
         void this.onTrackEnded()
         return
       }
     }
-    this.diag({ code: 'mic.browser', level: 'info', noiseSuppression: on, autoGainControl: on })
+    this.browserHas = on
+    const applied = this.stream.getAudioTracks()[0]?.getSettings().noiseSuppression
+    this.diag({ code: 'mic.browser', level: 'info', noiseSuppression: on, autoGainControl: on, applied: typeof applied === 'boolean' ? applied : null })
   }
 
   protected setStatus(s: Status): void {
@@ -357,10 +376,12 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     if (!supported().simd) {
       this.diag({ code: 'engine.unsupported', level: 'warn', message: 'No WebAssembly SIMD: raw microphone for this session.' })
       this.setMode('raw', 'unsupported')
-      this.settle(new AlkoveError('browser.unsupported', 'No WebAssembly SIMD: the models cannot run in this browser.'))
+      this.settle(new AlkoveError('browser.unsupported', 'No WebAssembly SIMD: the models cannot run in this browser.'), true)
       return
     }
     this.setMode('raw', 'loading')
+    // the input starts raw and loading: setMode saw no change
+    this.followRaw()
     try {
       const host = Host.get()
       const rt = await host.models('realtime', [...this.models(), ...(this.spotWords?.words.length ? (['spot'] as const) : [])])
@@ -382,6 +403,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       const transfer: Transferable[] = [...(bgPort ? [bgPort] : []), ...(out ? [out] : [])]
       if (out) this.portGiven = true
       await rt.request({ type: 'realtime', input: this.id, opts: this.realtimeOptions(), bg: bgPort, out }, transfer)
+      if (!this.listening || this.holding) rt.post({ type: 'set', input: this.id, ...(!this.listening && { listen: false }), ...(this.holding && { hold: true }) })
       if (this.spotWords?.words.length) {
         await host.models('realtime', ['spot'])
         rt.post({ type: 'set', input: this.id, ...this.spotWords })
@@ -451,7 +473,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
         this.emit('speechcancel', { start: e.start })
         break
       case 'speechend':
-        this.emit('speechend', { start: e.start, end: e.end, ...(typeof e.voiceDb === 'number' && { level: { voiceDb: e.voiceDb, noiseDb: e.noiseDb, refDb: e.refDb } }) })
+        this.emit('speechend', { start: e.start, end: e.end, ...('voiceDb' in e && { level: { voiceDb: e.voiceDb, noiseDb: e.noiseDb, refDb: e.refDb } }) })
         break
       case 'wake':
         this.emit('wake', e as unknown as WakeEvent)
@@ -503,15 +525,18 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
 
   // off: no phrase until it is on again, the one being said dropped (speechcancel); back on, the speech under way is no phrase
   listen(on: boolean): void {
+    this.listening = on
     this.rt?.post({ type: 'set', input: this.id, listen: on })
   }
 
   // a phrase from now until release(), whatever Cue hears: hold to talk
   hold(): void {
+    this.holding = true
     this.rt?.post({ type: 'set', input: this.id, hold: true })
   }
 
   release(): void {
+    this.holding = false
     this.rt?.post({ type: 'set', input: this.id, hold: false })
   }
 
@@ -634,7 +659,9 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     this.emit('mic', { state: 'lost' })
     if (!this.ownStream) return
     try {
-      await this.setStream(await openMic(this.opts.deviceId, undefined, this.browserOn), true)
+      const want = this.browserWant
+      await this.setStream(await openMic(this.opts.deviceId, undefined, want), true)
+      this.browserHas = want
       this.reopenMs = RETRY_MS
       this.emit('mic', { state: 'reopened' })
     } catch (e) {
@@ -662,7 +689,9 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   async setDevice(deviceId: string): Promise<void> {
     this.opts.deviceId = deviceId
     this.opts.followDefault = false
-    await this.setStream(await openMic(deviceId, undefined, this.browserOn), true)
+    const want = this.browserWant
+    await this.setStream(await openMic(deviceId, undefined, want), true)
+    this.browserHas = want
   }
 
   private followDefault(): void {
@@ -675,7 +704,10 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       const def = devices.find((d) => d.kind === 'audioinput' && d.deviceId === 'default')
       if (def && def.groupId && def.groupId !== current) {
         current = def.groupId
-        await this.setStream(await openMic(undefined, undefined, this.browserOn), true).catch(() => {})
+        const want = this.browserWant
+        await this.setStream(await openMic(undefined, undefined, want), true)
+          .then(() => void (this.browserHas = want))
+          .catch(() => {})
         this.emit('mic', { state: 'reopened' })
       }
     }
@@ -691,7 +723,11 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       if (this.ownCtx) void this.ctx.close().catch(() => {})
       this.ctx = audioContext
       this.ownCtx = false
-      if (track) this.stream = new MediaStream([track])
+      if (track) {
+        if (this.ownStream) for (const t of this.stream.getTracks()) t.stop()
+        this.stream = new MediaStream([track])
+        this.ownStream = false
+      }
       await this.build()
       this.watchContext()
       this.rt?.post({ type: 'dispose', input: this.id })
@@ -742,7 +778,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     clearTimeout(this.retryTimer)
     clearTimeout(this.browserTimer)
     this.setStatus('disposed')
-    this.settle(new AlkoveError('engine.failed', 'The input was disposed before its models ran.'))
+    this.settle(new AlkoveError('engine.failed', 'The input was disposed before its models ran.'), true)
     if (this.counted && --alive === 0) void Host.get().idle()
     for (const off of this.offs) off()
     this.offs = []

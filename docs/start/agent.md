@@ -52,7 +52,7 @@ Without a voiceprint, Focus keeps the closest voice. When the user is silent, th
 - A gain control that follows the voice brings a far voice back up. The SDK opens the microphone without the browser's (`autoGainControl: false`): do the same if you pass your own stream.
 - It cannot tell apart two voices at the same distance, or a loud speaker beside the microphone. That takes a voiceprint.
 
-`levels: true`, implied by `near`, gives each phrase its `level` on `speechend` and `utterance`: `voiceDb`, Focus's output before the leveling; `noiseDb`, the microphone's noise floor; `refDb`, the session's voice, `null` until it is known. They are dBFS: compare them within a session, not between devices.
+`levels: true`, implied by `near`, gives each phrase its `level` on `speechend` and `utterance`: `voiceDb`, Focus's output before the leveling (`null` for a held phrase where no near voice was heard); `noiseDb`, the microphone's noise floor; `refDb`, the session's voice, `null` until it is known. They are dBFS: compare them within a session, not between devices.
 
 ## Mute and hold to talk
 
@@ -101,7 +101,7 @@ See [Wake words](/docs/guides/wake-words/) for contexts and thresholds.
 
 While the models load, if they fail, or if the device is too slow, `audio` keeps coming with the raw microphone, and `mode` says why (`raw` with reason `loading`, `failed`, `overload` or `unsupported`). `utterance` and the speech events need Cue: they resume with the models. The SDK tries again by itself. `input.latency` gives the delay in milliseconds, about 50 ms.
 
-`await input.ready` resolves once the models run, and rejects while they cannot (`browser.unsupported`, `models.fetch`, `engine.failed`): the moment to fall back to your own path. On a microphone it opened, the SDK turns the browser's noise suppression back on after 2 s of raw. See [Errors and diagnostics](/docs/guides/errors/#modes-and-their-reasons).
+`await input.ready` resolves once the models run. A failed try rejects it (`models.fetch`, `engine.failed`, or `browser.unsupported` for good): the moment to fall back to your own path. A later call waits for the SDK's next try. `listen()`, `hold()` and `release()` can be called before: they apply once the models run, and again after a crash. On a microphone it opened, the SDK turns the browser's noise suppression back on after 2 s of raw. See [Errors and diagnostics](/docs/guides/errors/#modes-and-their-reasons).
 
 Creating the input rejects only when there is no sound at all (`mic.denied`, `mic.not-found`, `mic.busy`, `page.insecure`, `browser.unsupported`). See [Errors and diagnostics](/docs/guides/errors/).
 

@@ -76,6 +76,11 @@ export async function startServer(roots: Roots): Promise<{ origin: string; serve
         c.writeUInt8(c.readUInt8(i) ^ 0xff, i)
         return c
       })
+    // /held/<token>/…: waits until the token is switched on, a slow first visit
+    if ((m = p.match(/^\/held\/([\w-]+)\/(.+)$/))) {
+      while (!flaky.get(m[1]!)) await new Promise((r) => setTimeout(r, 50))
+      return send(res, file(roots.models, m[2]!))
+    }
     if ((m = p.match(/^\/flaky\/([\w-]+)\/(.+)$/))) {
       if (!flaky.get(m[1]!)) {
         res.writeHead(404, { 'content-type': 'text/plain' }).end('not found')

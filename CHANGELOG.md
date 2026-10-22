@@ -9,7 +9,7 @@ The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a pa
 - `input.listen(on)`: off drops the phrase under way (the new event `speechcancel`) and every phrase until it is on again.
 - `input.hold()` and `input.release()`: a phrase between the two whatever Cue hears, its utterance sent once Focus has given the last samples; with `near`, the far voices it holds are silenced.
 - Off by default: every output is the same to the bit.
-- `input.ready`: resolves once the models run, rejects while they cannot (`browser.unsupported`, the load's code, `engine.failed`); a later call waits for the SDK's next try.
+- `input.ready`: resolves once the models run; a failed try rejects the calls waiting on it (the load's code, `engine.failed`) and a later call waits for the SDK's next try; without SIMD (`browser.unsupported`) or once disposed, it rejects at once. `listen()`, `hold()` and `release()` called before the models run apply once they do, and again after a crash.
 - A `warn` diag nobody listens to, on an input or on `Alkove.onDiag`, goes to the console once per code.
 - Raw for 2 s on a microphone the SDK opened: the browser's noise suppression and gain control come back on, and go off once the models run (`mic.browser`). Chrome keeps a live track's processing: the SDK opens the microphone again there.
 
