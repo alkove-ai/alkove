@@ -15,6 +15,8 @@ pub(crate) fn record(e: &ChainEvent) -> [f64; 4] {
         ChainEvent::Reset { after, why: w } => [4.0, after, why(w), 0.0],
         ChainEvent::Focus { t } => [5.0, t, 0.0, 0.0],
         ChainEvent::Cue { speech, t } => [6.0, speech, t, 0.0],
+        ChainEvent::Level { voice_db, noise_db, ref_db } => [7.0, voice_db, noise_db, ref_db],
+        ChainEvent::Far { start, end } => [8.0, start, end, 0.0],
     }
 }
 
@@ -47,7 +49,7 @@ pub unsafe extern "C" fn alk_chain(
     print_len: usize,
 ) -> *mut ChainHandle {
     let speech = SpeechParams { confidence, exit_confidence, start_secs, stop_secs };
-    let opts = ChainOptions { gate: gate != 0, normalize: normalize != 0, strength, print: print(print_at, print_len).map(|p| p.to_vec()), speech, sleep: sleep != 0 };
+    let opts = ChainOptions { gate: gate != 0, normalize: normalize != 0, strength, print: print(print_at, print_len).map(|p| p.to_vec()), speech, sleep: sleep != 0, levels: false, near: None };
     match Chain::new(&shared(focus), &shared(cue), opts) {
         Ok(chain) => Box::into_raw(Box::new(ChainHandle { chain, hop: vec![0.0; 256], events: Vec::with_capacity(16), records: Vec::with_capacity(64) })),
         Err(e) => {

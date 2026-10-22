@@ -380,7 +380,7 @@ export class NativeLearner {
   }
 }
 
-export type PipelineOut = ['event', Record<string, unknown>] | ['window', Float32Array, number, number] | ['verify', number, Float32Array] | ['audio', Uint8Array] | ['utterance', Uint8Array, number, number] | ['record', Uint8Array]
+export type PipelineOut = ['event', Record<string, unknown>] | ['window', Float32Array, number, number] | ['verify', number, Float32Array] | ['audio', Uint8Array] | ['utterance', Uint8Array, number, number, Record<string, unknown>?] | ['record', Uint8Array]
 
 // a real-time input's own rules in the core: the chain, Spot, learning windows, verified wakes, utterances, enrollment, what it keeps
 export class NativePipeline {

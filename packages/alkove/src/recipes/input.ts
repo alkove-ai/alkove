@@ -1,4 +1,3 @@
-import type { ChainOptions } from '../core/chain'
 import type { SpeechParams } from '../core/cue'
 import type { Take } from '../core/spot/spot'
 import { type Context, type WakeEvent, type Word, type WordJSON, wordOf } from '../core/spot/spot'
@@ -18,10 +17,16 @@ import { openMic, processed, supported } from './mic'
 export type Mode = 'raw' | 'focus' | 'focus+print' | 'spot' | 'spot+print'
 export type RawReason = 'off' | 'loading' | 'failed' | 'overload' | 'unsupported'
 export type Status = 'starting' | 'running' | 'blocked' | 'interrupted' | 'disposed'
+// Focus's output before the leveling over the phrase, the mic's noise floor, the session's main voice (null until it has heard it twice), in dBFS
+export interface PhraseLevel {
+  voiceDb: number
+  noiseDb: number
+  refDb: number | null
+}
 
 export interface InputEvents {
   speechstart: { start: number }
-  speechend: { start: number; end: number }
+  speechend: { start: number; end: number; level?: PhraseLevel }
   mode: { mode: Mode; reason?: RawReason }
   status: Status
   voiceprint: Voiceprint
@@ -33,7 +38,7 @@ export interface InputEvents {
   heard: { speech: number; scores: { word: string; score: number }[] }
   trace: Record<string, unknown>[]
   audio: ArrayBuffer
-  utterance: { pcm: ArrayBuffer; start: number; end: number }
+  utterance: { pcm: ArrayBuffer; start: number; end: number; level?: PhraseLevel }
   take: Take
   enrolled: { word?: WordJSON; takes?: Take[]; warnings?: Warning[]; audio?: Float32Array; error?: string }
 }
@@ -57,6 +62,8 @@ export interface FocusOptions extends CommonOptions {
   normalize?: boolean
   stats?: boolean
   speech?: Partial<SpeechParams>
+  levels?: boolean
+  near?: boolean | { gapDb?: number }
 }
 
 const RETRY_MS = 5000
@@ -349,7 +356,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       if (traces.length) this.emit('trace', traces)
     } else if (m.type === 'pcm') {
       if (m.kind === 'audio') this.emit('audio', m.pcm)
-      else this.emit('utterance', { pcm: m.pcm, start: m.start, end: m.end })
+      else this.emit('utterance', { pcm: m.pcm, start: m.start, end: m.end, ...(m.level && { level: m.level }) })
     } else if (m.type === 'crash') {
       this.node.port.postMessage({ type: 'stop' })
       this.rt = null
@@ -367,7 +374,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
         this.emit('speechstart', { start: e.start })
         break
       case 'speechend':
-        this.emit('speechend', { start: e.start, end: e.end })
+        this.emit('speechend', { start: e.start, end: e.end, ...(typeof e.voiceDb === 'number' && { level: { voiceDb: e.voiceDb, noiseDb: e.noiseDb, refDb: e.refDb } }) })
         break
       case 'wake':
         this.emit('wake', e as unknown as WakeEvent)
@@ -682,9 +689,9 @@ class CallInput extends AlkoveInput {
     return ['focus', 'cue']
   }
 
-  protected chainOptions(): ChainOptions {
+  protected chainOptions(): NonNullable<RealtimeOptions['chain']> {
     const print = printOf(this.opts.voiceprint)
-    return { gate: true, normalize: this.opts.normalize ?? true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, speech: this.opts.speech }
+    return { gate: true, normalize: this.opts.normalize ?? true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, speech: this.opts.speech, levels: this.opts.levels, near: this.opts.near }
   }
 
   protected realtimeOptions(): RealtimeOptions {
@@ -784,7 +791,7 @@ class AgentInput extends AlkoveInput {
     const print = printOf(this.opts.voiceprint)
     return {
       pipeline: 'agent',
-      chain: { gate: false, normalize: this.opts.normalize ?? true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, speech: this.opts.speech },
+      chain: { gate: false, normalize: this.opts.normalize ?? true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, speech: this.opts.speech, levels: this.opts.levels, near: this.opts.near },
       learn: !!this.opts.learn,
       keepRecent: this.opts.keepRecent,
       trace: this.opts.trace,

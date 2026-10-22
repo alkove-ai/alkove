@@ -99,6 +99,8 @@ fn record(e: &ChainEvent) -> (u8, f64, f64, f64) {
         ChainEvent::Reset { after, why } => (4, after, why as u8 as f64, 0.0),
         ChainEvent::Focus { t } => (5, t, 0.0, 0.0),
         ChainEvent::Cue { speech, t } => (6, speech, t, 0.0),
+        ChainEvent::Level { voice_db, noise_db, ref_db } => (7, voice_db, noise_db, ref_db),
+        ChainEvent::Far { start, end } => (8, start, end, 0.0),
     }
 }
 
@@ -142,7 +144,7 @@ impl Chain {
     #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(focus: &Model, cue: &Model, gate: bool, normalize: bool, strength: f64, sleep: bool, speech_params: (f64, f64, f64, f64), print: Option<&[u8]>) -> PyResult<Self> {
-        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep };
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels: false, near: None };
         let inner = alkove_core::Chain::new(&focus.inner, &cue.inner, opts).map_err(error)?;
         Ok(Chain { inner, events: Vec::with_capacity(16) })
     }
@@ -220,7 +222,7 @@ impl Live {
     #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(focus: &Model, cue: &Model, rate: f64, gate: bool, normalize: bool, strength: f64, sleep: bool, speech_params: (f64, f64, f64, f64), print: Option<&[u8]>) -> PyResult<Self> {
-        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep };
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels: false, near: None };
         let inner = alkove_core::Live::new(&focus.inner, &cue.inner, rate, opts).map_err(error)?;
         Ok(Live { inner, events: Vec::new() })
     }

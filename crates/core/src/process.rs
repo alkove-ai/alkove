@@ -132,7 +132,7 @@ impl Processor {
         let model = |m: &Option<Arc<Model>>, name| m.clone().ok_or(Error::Missing(name));
         let (mut chain, mut cue, mut tracker) = (None, None, None);
         if let Some(f) = &opts.focus {
-            let o = ChainOptions { gate: false, normalize: opts.normalize, strength: f.strength, print: f.print.clone(), speech: opts.speech, sleep: true };
+            let o = ChainOptions { gate: false, normalize: opts.normalize, strength: f.strength, print: f.print.clone(), speech: opts.speech, sleep: true, levels: false, near: None };
             chain = Some(Chain::new(&model(&models.focus, "focus")?, &model(&models.cue, "cue")?, o)?);
         } else if opts.cue == Some(true) {
             cue = Some(Cue::new(&model(&models.cue, "cue")?)?);

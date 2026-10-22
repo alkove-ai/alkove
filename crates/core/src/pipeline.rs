@@ -90,14 +90,18 @@ impl PipelineOptions {
 }
 
 impl Out {
-    // [kind, …]: ['event', value] | ['window', pcm, farQuietMs, t] | ['verify', key, pcm] | ['audio', bytes] | ['utterance', bytes, start, end] | ['record', wav]
+    // [kind, …]: ['event', value] | ['window', pcm, farQuietMs, t] | ['verify', key, pcm] | ['audio', bytes] | ['utterance', bytes, start, end, level?] | ['record', wav]
     pub fn to_value(self) -> Value {
         match self {
             Out::Event(v) => Value::Arr(vec!["event".into(), v]),
             Out::Window { pcm, far_quiet_ms, t } => Value::Arr(vec!["window".into(), Value::Floats(pcm), far_quiet_ms.into(), t.into()]),
             Out::Verify { key, pcm } => Value::Arr(vec!["verify".into(), (key as f64).into(), Value::Floats(pcm)]),
             Out::Audio(b) => Value::Arr(vec!["audio".into(), Value::Bytes(b)]),
-            Out::Utterance { pcm, start, end } => Value::Arr(vec!["utterance".into(), Value::Bytes(pcm), start.into(), end.into()]),
+            Out::Utterance { pcm, start, end, level } => {
+                let mut a = vec!["utterance".into(), Value::Bytes(pcm), start.into(), end.into()];
+                a.extend(level);
+                Value::Arr(a)
+            }
             Out::Record(w) => Value::Arr(vec!["record".into(), Value::Bytes(w)]),
         }
     }
@@ -112,7 +116,7 @@ pub enum Out {
     // a wake's audio and the 0.5 s after it, for Timbre in the background
     Verify { key: u32, pcm: Vec<f32> },
     Audio(Vec<u8>),
-    Utterance { pcm: Vec<u8>, start: f64, end: f64 },
+    Utterance { pcm: Vec<u8>, start: f64, end: f64, level: Option<Value> },
     Record(Vec<u8>),
 }
 
@@ -211,6 +215,13 @@ struct Utterance {
     start: f64,
 }
 
+// a level from the chain, for the event that follows it; null before the session knows its voice
+fn level_of(e: &ChainEvent) -> Option<Value> {
+    let ChainEvent::Level { voice_db, noise_db, ref_db } = *e else { return None };
+    let ref_db = if ref_db.is_nan() { Value::Null } else { ref_db.into() };
+    Some(obj([("voiceDb", voice_db.into()), ("noiseDb", noise_db.into()), ("refDb", ref_db)]))
+}
+
 // the enroller's clock starts with it: `tape` and `stream` are where the tape and Spot's input were then, in seconds
 struct Enrolling {
     spot: Spot,
@@ -269,6 +280,7 @@ pub struct Pipeline {
     out: Vec<f32>,
     events: Vec<ChainEvent>,
     outs: Vec<Out>,
+    level: Option<Value>,
 }
 
 // a length of audio to keep: Infinity or NaN would size a buffer past memory
@@ -333,6 +345,7 @@ impl Pipeline {
             out: vec![0.0; HOP],
             events: Vec::with_capacity(16),
             outs: Vec::new(),
+            level: None,
         };
         if let Some((w, takes)) = opts.enroll {
             p.start_enroll(Some((w, takes)))?;
@@ -492,8 +505,15 @@ impl Pipeline {
                             }
                         }
                     }
+                    ChainEvent::Level { .. } => self.level = level_of(e),
                     ref e => {
-                        if let Some(v) = e.to_value() {
+                        if let Some(mut v) = e.to_value() {
+                            if let (Some(Value::Obj(l)), Value::Obj(f)) = (self.level.take(), &mut v) {
+                                match f.iter_mut().find(|(k, _)| k == "data") {
+                                    Some((_, Value::Obj(data))) => data.extend(l),
+                                    _ => f.extend(l),
+                                }
+                            }
                             self.on_event(&v);
                             self.outs.push(Out::Event(v));
                         }
@@ -750,7 +770,11 @@ impl Pipeline {
                 let keep = (all.len() as i64 - (total - self.out_index(end)).max(0)).max(0) as usize;
                 let o = self.output.expect("utterances come with an output");
                 let pcm = encode(&Resampler::all(&all[..keep], RATE, o.rate).expect("rate checked"), o.format);
-                self.outs.push(Out::Utterance { pcm, start: u.start, end });
+                let level = v.get("voiceDb").map(|_| {
+                    let field = |k: &str| v.get(k).cloned().unwrap_or(Value::Null);
+                    obj([("voiceDb", field("voiceDb")), ("noiseDb", field("noiseDb")), ("refDb", field("refDb"))])
+                });
+                self.outs.push(Out::Utterance { pcm, start: u.start, end, level });
             }
             _ => {}
         }

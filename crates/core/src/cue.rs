@@ -93,6 +93,11 @@ impl SpeechTracker {
         SpeechTracker { params, frame_secs, active: false, confirmed: false, onset: 0.0, last_speech: 0.0, speech_frames: 0, quiet_frames: 0, start_frames, stop_frames }
     }
 
+    // frame k's start and length on the frame clock, in seconds
+    pub fn frame_time(&self, k: i64) -> (f64, f64) {
+        (k as f64 * self.frame_secs, self.frame_secs)
+    }
+
     pub fn cue(params: SpeechParams) -> SpeechTracker {
         SpeechTracker::new(params, CUE.chunk as f64 / RATE)
     }

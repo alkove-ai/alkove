@@ -5,7 +5,8 @@ use alkove_engine::Model;
 use crate::cue::{Cue, SpeechEvent, SpeechParams, SpeechTracker};
 use crate::focus::Focus;
 use crate::level::{coef, Chunker, Delay, Gate, Level};
-use crate::math::pow;
+use crate::math::{log10, pow};
+use crate::near::Near;
 use crate::{js, Error, CUE, FOCUS, RATE};
 
 const HOP: usize = FOCUS.chunk;
@@ -51,6 +52,10 @@ pub enum ChainEvent {
     // Focus's output for the hop is in `Chain::focus_out`; `t` in samples
     Focus { t: f64 },
     Cue { speech: f64, t: f64 },
+    // the level of the phrase or the far voice whose event comes next, in dB; `ref_db` NaN before the session knows its voice
+    Level { voice_db: f64, noise_db: f64, ref_db: f64 },
+    // a voice far under the session's, kept out of the phrases
+    Far { start: f64, end: f64 },
 }
 
 #[derive(Debug, Clone)]
@@ -61,11 +66,14 @@ pub struct ChainOptions {
     pub print: Option<Vec<f32>>,
     pub speech: SpeechParams,
     pub sleep: bool,
+    pub levels: bool,
+    // the gap in dB under the session's voice past which a voice is far
+    pub near: Option<f64>,
 }
 
 impl Default for ChainOptions {
     fn default() -> Self {
-        ChainOptions { gate: false, normalize: true, strength: 1.0, print: None, speech: SpeechParams::default(), sleep: true }
+        ChainOptions { gate: false, normalize: true, strength: 1.0, print: None, speech: SpeechParams::default(), sleep: true, levels: false, near: None }
     }
 }
 
@@ -101,6 +109,8 @@ pub struct Chain {
     mic_level: f64,
     floor: f64,
     t: u64,
+    near: Option<Near>,
+    powers: [f64; CUE.lag_steps + 1],
 }
 
 impl Chain {
@@ -139,6 +149,8 @@ impl Chain {
             mic_level: 0.0,
             floor: 1.0,
             t: 0,
+            near: (opts.levels || opts.near.is_some()).then(|| Near::new(opts.near, &opts.speech, CUE.chunk as f64 / RATE)),
+            powers: [0.0; CUE.lag_steps + 1],
             opts,
         })
     }
@@ -149,7 +161,7 @@ impl Chain {
     }
 
     pub fn speaking(&self) -> bool {
-        self.tracker.active
+        self.tracker.active && !self.near.as_ref().is_some_and(Near::far)
     }
 
     pub fn sleeping(&self) -> bool {
@@ -244,13 +256,14 @@ impl Chain {
         if let Some(d) = &mut self.bypass_delay {
             d.apply(&mut self.bypass);
         }
+        let speaking = self.speaking();
         if self.opts.normalize {
-            self.level.frame(&self.mix, self.tracker.active);
+            self.level.frame(&self.mix, speaking);
             self.level.apply(&mut self.mix);
         }
         if let Some(d) = &mut self.gate_delay {
             d.apply(&mut self.mix);
-            self.gate.apply(&mut self.mix, self.tracker.active);
+            self.gate.apply(&mut self.mix, speaking);
         }
         let on = if self.enabled { 1.0 } else { 0.0 };
         if on == 0.0 || self.on < 1.0 {
@@ -318,8 +331,22 @@ impl Chain {
         if k >= lag {
             events.push(ChainEvent::Cue { speech: p, t: ((k - lag) as f64 * CUE.chunk as f64 - FOCUS.lag as f64) / RATE });
         }
-        let Some(e) = self.tracker.push(p, k - lag) else { return };
+        let raw = self.tracker.push(p, k - lag);
         let shift = FOCUS.lag as f64 / RATE;
+        if let Some(near) = &mut self.near {
+            let ring = self.powers.len() as i64;
+            let mut s = 0.0;
+            for &x in &self.cue_chunk {
+                s += x as f64 * x as f64;
+            }
+            self.powers[k.rem_euclid(ring) as usize] = s / CUE.chunk as f64;
+            let power = self.powers[(k - lag).rem_euclid(ring) as usize];
+            let (t, dt) = self.tracker.frame_time(k - lag);
+            let noise = 10.0 * log10(self.floor + 1e-12);
+            near.frame(self.tracker.active, self.tracker.confirmed, raw, p >= self.tracker.params.confidence, power, t, dt, noise, shift, events);
+            return;
+        }
+        let Some(e) = raw else { return };
         events.push(ChainEvent::Speech(match e {
             SpeechEvent::Start { start } => SpeechEvent::Start { start: js::max(0.0, start - shift) },
             SpeechEvent::End { start, end } => SpeechEvent::End { start: js::max(0.0, start - shift), end: js::max(0.0, end - shift) },
@@ -351,14 +378,16 @@ impl ChainEvent {
             ChainEvent::Reset { after, why } => {
                 obj([("type", "diag".into()), ("code", "focus.reset".into()), ("level", "info".into()), ("data", obj([("after", after.into()), ("why", why.as_str().into())]))])
             }
-            ChainEvent::Focus { .. } | ChainEvent::Cue { .. } => return None,
+            ChainEvent::Far { start, end } => obj([("type", "diag".into()), ("code", "speech.far".into()), ("level", "info".into()), ("data", obj([("start", start.into()), ("end", end.into())]))]),
+            ChainEvent::Focus { .. } | ChainEvent::Cue { .. } | ChainEvent::Level { .. } => return None,
         })
     }
 }
 
 impl ChainOptions {
-    // { gate, normalize, strength, print, speech, sleep }, as the web's options with their defaults
+    // { gate, normalize, strength, print, speech, sleep, levels, near: true | { gapDb } }, as the web's options with their defaults
     pub fn from_value(v: &crate::Value) -> ChainOptions {
+        use crate::near::NEAR_GAP_DB;
         use crate::Value;
         let d = ChainOptions::default();
         let flag = |k: &str, or: bool| v.get(k).and_then(Value::bool).unwrap_or(or);
@@ -381,6 +410,12 @@ impl ChainOptions {
                 stop_secs: num(&s, "stopSecs", d.speech.stop_secs),
             },
             sleep: flag("sleep", d.sleep),
+            levels: flag("levels", d.levels),
+            near: match v.get("near") {
+                Some(Value::Bool(true)) => Some(NEAR_GAP_DB),
+                Some(n @ Value::Obj(_)) => Some(num(n, "gapDb", NEAR_GAP_DB)),
+                _ => None,
+            },
         }
     }
 }

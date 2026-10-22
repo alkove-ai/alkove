@@ -33,7 +33,7 @@ export interface RealtimeOptions {
   pipeline: 'call' | 'agent' | 'wake' | 'enroll'
   enroll?: { word: WordJSON; takes: number }
   verify?: boolean
-  chain?: ChainOptions
+  chain?: ChainOptions & { levels?: boolean; near?: boolean | { gapDb?: number } }
   words?: WordJSON[]
   context?: Context
   learn?: boolean
@@ -65,6 +65,11 @@ function emitTo(r: Realtime, e: Record<string, unknown>): void {
   if (typeof e.start === 'number') e.start += s
   if (typeof e.end === 'number') e.end += s
   if (typeof e.at === 'number') e.at += s
+  const d = e.data as Record<string, unknown> | undefined
+  if (e.type === 'diag' && typeof d?.start === 'number' && typeof d.end === 'number') {
+    d.start += s
+    d.end += s
+  }
   r.events.push(e)
 }
 
@@ -119,7 +124,7 @@ function drain(r: Realtime): void {
         send(r, { type: 'audio', pcm: o[1].buffer }, [o[1].buffer])
         break
       case 'utterance':
-        send(r, { type: 'utterance', pcm: o[1].buffer, start: o[2] + r.shift, end: o[3] + r.shift }, [o[1].buffer])
+        send(r, { type: 'utterance', pcm: o[1].buffer, start: o[2] + r.shift, end: o[3] + r.shift, ...(o[4] && { level: o[4] }) }, [o[1].buffer])
         break
       case 'record':
         post({ type: 'reply', id: r.recordId, result: o[1] }, [o[1].buffer])
