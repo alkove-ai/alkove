@@ -40,6 +40,10 @@ input.farEndActive(true) // the agent starts speaking; false when it stops
 
 Nothing is cut: `audio` is continuous, `speechstart` / `speechend` tell where the user speaks.
 
+- `near: true`: a voice 10 dB under the user's, a colleague across the room or a video on another device, opens no phrase. No voiceprint: it goes by loudness.
+- `input.listen(false)` mutes (the phrase under way comes as `speechcancel`), `input.hold()` / `input.release()` hold to talk.
+- `await input.ready` once the models run; a quiet microphone is brought up before Focus by itself.
+
 ## A wake word
 
 ```ts

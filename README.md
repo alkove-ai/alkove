@@ -38,6 +38,7 @@
 ## Why Alkove
 
 - **The other voices stay out.** On meetings recorded on headset microphones (AMI), words from other people reaching the transcript drop from 17 per minute to 0.5. Denoisers let 19 or more through.
+- **Far voices stay out without a voiceprint.** With `near`, a colleague across the room or a video on another device opens no turn: it goes by loudness against the user's own voice, nothing biometric.
 - **Any word is a wake word.** Type it in one of 7 languages: no training, no recording session. 80 % recall at one false alarm per hour.
 - **Fewer false barge-ins.** Behind Focus, Cue starts on music 4× less often than Silero VAD.
 - **Small enough for a phone.** Five models under 8 MB together, Focus at 1.1 MB, an engine of 141 KB (brotli).
