@@ -525,7 +525,7 @@ class Live:
 
     @property
     def input_gain_db(self) -> float:
-        """As `Chain.input_gain_db`."""
+        """The gain a quiet mic gets before Focus, which takes a voice under -45 dBFS for noise: 0 dB at a normal level, up to 24 dB, set on loud moments only."""
         return self._l.input_gain_db
 
     @property
