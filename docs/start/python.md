@@ -42,6 +42,15 @@ The output comes back aligned with the input: the first `part.audio` is shorter 
 
 `push` releases the GIL: streams in several threads run on several cores. `alkove.Live(models, rate)` gives the chain frame by frame at the stream's own rate, as a real-time input runs it, for a pipeline that wants its audio back at the rate it came in.
 
+`Live` and `Chain` take the agent input's [`near` and `levels`](/docs/start/agent/#voices-far-from-the-microphone-near), and its [mute and hold to talk](/docs/start/agent/#mute-and-hold-to-talk) with `set_listen`, `hold` and `release`:
+
+```python
+live = alkove.Live(models, 16000, near=True)       # or near=12, a gap in dB; alkove.NEAR_GAP_DB is the default
+audio, events = live.push(frame)
+# {'type': 'speechend', 'start': …, 'end': …, 'voiceDb': -19.2, 'noiseDb': …, 'refDb': -18.7}
+# {'type': 'diag', 'code': 'speech.far', 'level': 'info', 'data': {'start': …, 'end': …, 'voiceDb': -40.2, …}}
+```
+
 ## A file
 
 ```python

@@ -187,6 +187,18 @@ impl Chain {
         self.inner.set_enabled(on);
     }
 
+    fn set_listen(&mut self, on: bool) {
+        self.inner.set_listen(on);
+    }
+
+    fn hold(&mut self) {
+        self.inner.hold();
+    }
+
+    fn release(&mut self) {
+        self.inner.release();
+    }
+
     #[getter]
     fn speaking(&self) -> bool {
         self.inner.speaking()
@@ -277,6 +289,18 @@ impl Live {
 
     fn set_enabled(&mut self, on: bool) {
         self.inner.chain_mut().set_enabled(on);
+    }
+
+    fn set_listen(&mut self, on: bool) {
+        self.inner.chain_mut().set_listen(on);
+    }
+
+    fn hold(&mut self) {
+        self.inner.chain_mut().hold();
+    }
+
+    fn release(&mut self) {
+        self.inner.chain_mut().release();
     }
 
     #[getter]

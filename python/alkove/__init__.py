@@ -193,6 +193,8 @@ def _events(records: Iterable[tuple]) -> List[dict]:
         elif kind == 8:
             out.append({"type": "diag", "code": "speech.far", "level": "info", "data": {"start": a, "end": b, **(level or {})}})
             level = None
+        elif kind == 9:
+            out.append({"type": "speechcancel", "start": a})
         elif kind < 5:
             e = _event(kind, a, b, c)
             if kind == 1 and level:
@@ -430,6 +432,18 @@ class Chain:
         """Off: the raw mic, at the same delay, with a short fade."""
         self._c.set_enabled(on)
 
+    def set_listen(self, on: bool) -> None:
+        """Off: no speech until it is on again, the phrase under way dropped (`speechcancel`); back on, the speech under way is no phrase."""
+        self._c.set_listen(on)
+
+    def hold(self) -> None:
+        """A phrase from now until `release`, whatever Cue hears (hold to talk); one Cue had opened goes on as the held one."""
+        self._c.hold()
+
+    def release(self) -> None:
+        """Its speechend comes once the output holds the whole phrase, `delay` samples later."""
+        self._c.release()
+
     @property
     def delay(self) -> int:
         """Samples between a sample going in and coming out: Focus's lag, plus the gate's look-ahead with `gate`."""
@@ -491,6 +505,18 @@ class Live:
     def set_enabled(self, on: bool) -> None:
         """Off: the raw mic, at the same delay, with a short fade."""
         self._l.set_enabled(on)
+
+    def set_listen(self, on: bool) -> None:
+        """As `Chain.set_listen`."""
+        self._l.set_listen(on)
+
+    def hold(self) -> None:
+        """As `Chain.hold`."""
+        self._l.hold()
+
+    def release(self) -> None:
+        """As `Chain.release`."""
+        self._l.release()
 
     @property
     def speaking(self) -> bool:

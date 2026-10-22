@@ -100,12 +100,31 @@ def test_levels_and_near_give_the_webs_events(models):
 
     ends = [e for e in run(levels=True) if e["type"] == "speechend"]
     assert [e["voiceDb"] for e in ends] == [-19.2, -18.3, -40.2, -18.4]
-    assert [e["refDb"] for e in ends] == [None, None, -19.2, -19.2]
+    assert [e["refDb"] for e in ends] == [None, None, -18.7, -18.7]
     near = run(near=True)
     far = [e["data"] for e in near if e.get("code") == "speech.far"]
-    assert [(f["start"], f["voiceDb"], f["refDb"]) for f in far] == [(16.814, -40.2, -19.2)]
+    assert [(f["start"], f["voiceDb"], f["refDb"]) for f in far] == [(16.814, -40.2, -18.7)]
     assert [e["start"] for e in near if e["type"] == "speechstart"] == [2.264, 9.524, 24.074]
-    assert alkove.NEAR_GAP_DB == 8.0
+    assert alkove.NEAR_GAP_DB == 10.0
+
+
+def test_listen_and_hold_make_the_phrases(models):
+    # off drops the phrase under way; a hold makes one in a silence, its end once the output holds it
+    pcm = mix().astype(np.float32) / 32768
+    pcm = np.concatenate([np.zeros(8000, np.float32), pcm, np.zeros(16000, np.float32)])
+    c = alkove.Chain(models)
+    events = []
+    for k, i in enumerate(range(0, len(pcm) - 255, 256)):
+        if k == 10:
+            c.hold()
+        if k == 20:
+            c.release()
+        if k == 160:
+            c.set_listen(False)
+        events += [e for e in c.step(pcm[i : i + 256])[1] if e["type"].startswith("speech")]
+    assert events[0] == {"type": "speechstart", "start": 10 * 256 / 16000}
+    assert events[1] == {"type": "speechend", "start": 10 * 256 / 16000, "end": 20 * 256 / 16000}
+    assert [e["type"] for e in events[2:]] == ["speechstart", "speechcancel"]
 
 
 def test_streams_in_threads_give_what_they_give_alone(models):
