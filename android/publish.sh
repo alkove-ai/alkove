@@ -22,5 +22,5 @@ fi
 ./gradlew --console=plain -q :alkove:testDebugUnitTest :livekit:testDebugUnitTest publishAllPublicationsToStagingRepository
 rsync -a build/maven/ "$tree/"
 # the repository's page shows the version to put in build.gradle.kts
-perl -pi -e "s#(ai\.alkove:alkove(-livekit)?):[0-9][0-9.]*#\$1:$v#g" "$tree/index.html"
+perl -pi -e "s#(ai\.alkove:alkove(-livekit)?):[0-9][0-9.]*#\$1:$v#g" "$tree/index.html" "$tree/../web/llms.txt"
 echo "ai.alkove $v added to $tree"
