@@ -76,6 +76,13 @@ abstract class AlkoveInput internal constructor(
     @Volatile
     internal var strength = 1.0
 
+    // the app's listen() and hold(), sent again to every new pipeline: they hold across loads and crashes
+    @Volatile
+    private var listening = true
+
+    @Volatile
+    private var holding = false
+
     // what setters changed since the pipeline's options were built: sent once it is installed
     @Volatile
     private var settings = 0
@@ -270,6 +277,7 @@ abstract class AlkoveInput internal constructor(
                     pipe = h
                     built = version
                     applySettings()
+                    if (!listening || holding) Native.pipelineSet(h, Values.encode(buildMap { if (!listening) put("listen", false); if (holding) put("hold", true) }))
                     applyWords()
                     if (rawPipe != 0L) Native.pipelineFree(rawPipe).also { rawPipe = 0 }
                     activate()
@@ -436,14 +444,14 @@ abstract class AlkoveInput internal constructor(
                     }
                 }
                 "audio" -> audio(a[1] as ByteArray)
-                "utterance" -> utterance(a[1] as ByteArray, a[2].num() + shift, a[3].num() + shift)
+                "utterance" -> utterance(a[1] as ByteArray, a[2].num() + shift, a[3].num() + shift, (a.getOrNull(4) as Map<*, *>?)?.obj()?.let(::levelOf))
                 "record" -> record?.complete(a[1] as ByteArray).also { record = null }
             }
         }
         traces?.let { emit(Event.Trace(it)) }
     }
 
-    private fun utterance(pcm: ByteArray, start: Double, end: Double) {
+    private fun utterance(pcm: ByteArray, start: Double, end: Double, level: PhraseLevel?) {
         if (heldAudio.get() + pcm.size > HELD_AUDIO) {
             if (!dropped) diag("utterance.dropped", "warn", mapOf("message" to "Utterances are not collected: dropped past 16 MB held."))
             dropped = true
@@ -451,7 +459,7 @@ abstract class AlkoveInput internal constructor(
         }
         dropped = false
         heldAudio.addAndGet(pcm.size.toLong())
-        emit(Event.Utterance(pcm, start, end))
+        emit(Event.Utterance(pcm, start, end, level))
     }
 
     // the background's answer to a learning window: events, and a better print for Focus
@@ -547,6 +555,24 @@ abstract class AlkoveInput internal constructor(
             built = settings
             Native.pipelineSet(pipe, Values.encode(change))
         }
+    }
+
+    /** Off: no phrase until it is on again, the one being said dropped ([Event.SpeechCancel]); back on, the speech under way is no phrase. Kept before the models run, and after a crash. */
+    fun listen(on: Boolean) {
+        listening = on
+        command { if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("listen" to on))) }
+    }
+
+    /** A phrase from now until [release], whatever Cue hears: hold to talk. */
+    fun hold() {
+        holding = true
+        command { if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("hold" to true))) }
+    }
+
+    /** The held phrase's end and utterance come once Focus has given its last samples. */
+    fun release() {
+        holding = false
+        command { if (pipe != 0L) Native.pipelineSet(pipe, Values.encode(mapOf("hold" to false))) }
     }
 
     /** Off: the raw microphone, at the same delay, with a short fade. */
@@ -716,6 +742,10 @@ data class AgentOptions @JvmOverloads constructor(
     val echoCancellation: Boolean = true,
     val device: AudioDeviceInfo? = null,
     val baseUrl: String? = null,
+    /** Speech ends and utterances carry their [PhraseLevel]. */
+    val levels: Boolean = false,
+    /** A voice this many dB under the session's main voice ([Alkove.NEAR_GAP_DB]) opens no phrase, but a diag `speech.far`; null: off. */
+    val near: Double? = null,
 )
 
 /**
@@ -767,7 +797,9 @@ class AgentInput private constructor(context: Context, private val opts: AgentOp
 
     override fun pipelineOptions() =
         mapOf(
-            "chain" to mapOf("gate" to false, "normalize" to opts.normalize, "strength" to strength, "print" to print?.embedding, "speech" to (opts.speech ?: SpeechParams()).value()),
+            "chain" to
+                mapOf("gate" to false, "normalize" to opts.normalize, "strength" to strength, "print" to print?.embedding, "speech" to (opts.speech ?: SpeechParams()).value(), "levels" to opts.levels) +
+                (if (opts.near != null) mapOf("near" to mapOf("gapDb" to opts.near)) else emptyMap()),
             "learn" to opts.learn,
             "keepRecent" to opts.keepRecent,
             "trace" to opts.trace,

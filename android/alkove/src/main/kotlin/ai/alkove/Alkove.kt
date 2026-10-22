@@ -12,6 +12,9 @@ object Alkove {
     /** The models' rate, and the rate of every output, in Hz. */
     const val RATE = 16000
 
+    /** `near = NEAR_GAP_DB`'s gap: a voice this many dB under the session's main voice is far. */
+    const val NEAR_GAP_DB = 10.0
+
     internal val info: Map<String, Any?> by lazy {
         native()
         Values.decode(Native.info()).obj()

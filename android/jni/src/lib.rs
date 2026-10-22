@@ -87,6 +87,7 @@ fn chain_get(c: &Chain, what: jint) -> jdouble {
         2 => c.time(),
         3 => c.gain_db(),
         4 => c.delay() as f64,
+        5 => c.input_gain_db(),
         _ => f64::NAN,
     }
 }
@@ -183,7 +184,23 @@ pub unsafe extern "system" fn Java_ai_alkove_Native_chainSetEnabled(_: *mut JNIE
     at::<ChainH>(h).chain.set_enabled(on != 0);
 }
 
-// 0 speaking, 1 sleeping, 2 time in seconds, 3 gain in dB, 4 delay in samples
+#[no_mangle]
+pub unsafe extern "system" fn Java_ai_alkove_Native_chainListen(_: *mut JNIEnv, _: jclass, h: jlong, on: jboolean) {
+    at::<ChainH>(h).chain.set_listen(on != 0);
+}
+
+// true: hold(), false: release()
+#[no_mangle]
+pub unsafe extern "system" fn Java_ai_alkove_Native_chainHold(_: *mut JNIEnv, _: jclass, h: jlong, on: jboolean) {
+    let c = &mut at::<ChainH>(h).chain;
+    if on != 0 {
+        c.hold();
+    } else {
+        c.release();
+    }
+}
+
+// 0 speaking, 1 sleeping, 2 time in seconds, 3 gain in dB, 4 delay in samples, 5 input gain in dB
 #[no_mangle]
 pub unsafe extern "system" fn Java_ai_alkove_Native_chainGet(_: *mut JNIEnv, _: jclass, h: jlong, what: jint) -> jdouble {
     chain_get(&at::<ChainH>(h).chain, what)
@@ -249,6 +266,21 @@ pub unsafe extern "system" fn Java_ai_alkove_Native_liveSetStrength(_: *mut JNIE
 #[no_mangle]
 pub unsafe extern "system" fn Java_ai_alkove_Native_liveSetEnabled(_: *mut JNIEnv, _: jclass, h: jlong, on: jboolean) {
     at::<LiveH>(h).live.chain_mut().set_enabled(on != 0);
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_ai_alkove_Native_liveListen(_: *mut JNIEnv, _: jclass, h: jlong, on: jboolean) {
+    at::<LiveH>(h).live.chain_mut().set_listen(on != 0);
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_ai_alkove_Native_liveHold(_: *mut JNIEnv, _: jclass, h: jlong, on: jboolean) {
+    let c = at::<LiveH>(h).live.chain_mut();
+    if on != 0 {
+        c.hold();
+    } else {
+        c.release();
+    }
 }
 
 #[no_mangle]

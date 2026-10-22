@@ -66,6 +66,17 @@ The SDK opens the microphone at 16 kHz with the platform's echo canceller and no
 
 `input.spot(words)` listens for words in Focus's output, on the same thread: their wakes come on `events`.
 
+As on the web ([voices far from the microphone](/docs/start/agent/#voices-far-from-the-microphone-near), [mute and hold to talk](/docs/start/agent/#mute-and-hold-to-talk)):
+
+```kotlin
+val input = AgentInput.start(context, AgentOptions(near = Alkove.NEAR_GAP_DB))   // a voice 10 dB under the user's opens no phrase
+input.listen(false)   // mute: the phrase under way comes as Event.SpeechCancel; kept before the models run
+input.hold()          // hold to talk: a phrase until release(), whatever Cue hears
+input.release()
+```
+
+With `levels` or `near`, `Event.SpeechEnd` and `Event.Utterance` carry a `PhraseLevel` (`voiceDb`, `noiseDb`, `refDb`), and a far voice comes as the diag `speech.far`. `Chain` and `Live` take `levels` and `near` too, with `setListen`, `hold`, `release` and `inputGainDb`, the gain a quiet microphone gets before Focus.
+
 When the phone cannot keep up, the input does not stutter: it sends the raw microphone (`ModeChange(RAW, OVERLOAD)`) and tries the models again after 10 s, then 20 s, up to 160 s. The `timing` diag, every 2 s, says how much of each 16 ms the models take.
 
 ## A wake word

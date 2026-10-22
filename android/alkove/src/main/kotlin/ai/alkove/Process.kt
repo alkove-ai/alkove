@@ -38,7 +38,8 @@ fun toInt16(pcm: FloatArray): ShortArray =
 internal fun eventOf(v: Map<String, Any?>): Event? =
     when (v["type"]) {
         "speechstart" -> Event.SpeechStart(v.num("start"))
-        "speechend" -> Event.SpeechEnd(v.num("start"), v.num("end"))
+        "speechend" -> Event.SpeechEnd(v.num("start"), v.num("end"), levelOf(v))
+        "speechcancel" -> Event.SpeechCancel(v.num("start"))
         "idle" -> Event.Diag("idle", "info", mapOf("asleep" to v["asleep"], "at" to v["at"]))
         "diag" -> Event.Diag(v.str("code"), v["level"] as String? ?: "info", (v["data"] as Map<*, *>?)?.obj() ?: v.filterKeys { it != "type" && it != "code" && it != "level" })
         "wake" -> Wake.of(v)
@@ -48,21 +49,37 @@ internal fun eventOf(v: Map<String, Any?>): Event? =
 
 private fun Map<String, Any?>.num(k: String): Double = (this[k] as Number).toDouble()
 
-// four numbers per event as the native chain gives them, the kind first
+internal fun levelOf(v: Map<String, Any?>?): PhraseLevel? =
+    if (v == null || "voiceDb" !in v) null else PhraseLevel((v["voiceDb"] as Number?)?.toDouble(), (v["noiseDb"] as Number).toDouble(), (v["refDb"] as Number?)?.toDouble())
+
+private fun orNull(x: Double): Double? = if (x.isNaN()) null else x
+
+// four numbers per event as the native chain gives them, the kind first; a level goes with the speech end or the far voice after it, as on the web
 internal fun chainEvents(r: DoubleArray, count: Int): List<Event> {
     if (count == 0) return emptyList()
-    return List(count) { i ->
+    val out = ArrayList<Event>(count)
+    var level: PhraseLevel? = null
+    for (i in 0 until count) {
         val a = r[4 * i + 1]
         val b = r[4 * i + 2]
         val c = r[4 * i + 3]
         when (r[4 * i].toInt()) {
-            0 -> Event.SpeechStart(a)
-            1 -> Event.SpeechEnd(a, b)
-            2 -> Event.Diag("idle", "info", mapOf("asleep" to (a == 1.0), "at" to b))
-            3 -> Event.Diag("focus.print", "info", mapOf("print" to (a == 1.0), "after" to b, "why" to WHY[c.toInt()]))
-            else -> Event.Diag("focus.reset", "info", mapOf("after" to a, "why" to WHY[b.toInt()]))
+            0 -> out.add(Event.SpeechStart(a))
+            1 -> out.add(Event.SpeechEnd(a, b, level)).also { level = null }
+            2 -> out.add(Event.Diag("idle", "info", mapOf("asleep" to (a == 1.0), "at" to b)))
+            3 -> out.add(Event.Diag("focus.print", "info", mapOf("print" to (a == 1.0), "after" to b, "why" to WHY[c.toInt()])))
+            4 -> out.add(Event.Diag("focus.reset", "info", mapOf("after" to a, "why" to WHY[b.toInt()])))
+            7 -> level = PhraseLevel(orNull(a), b, orNull(c))
+            8 -> {
+                val l = level
+                val data = mapOf("start" to a, "end" to b) + if (l == null) emptyMap() else mapOf("voiceDb" to l.voiceDb, "noiseDb" to l.noiseDb, "refDb" to l.refDb)
+                out.add(Event.Diag("speech.far", "info", data))
+                level = null
+            }
+            9 -> out.add(Event.SpeechCancel(a))
         }
     }
+    return out
 }
 
 internal fun partOf(bytes: ByteArray): Part {
@@ -171,8 +188,11 @@ fun process(
     return partOf(models.pinned { Native.process(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), x, x.size, o) })
 }
 
-private fun chainOptions(gate: Boolean, normalize: Boolean, strength: Double, voiceprint: Any?, speech: SpeechParams?, sleep: Boolean) =
-    Values.encode(mapOf("gate" to gate, "normalize" to normalize, "strength" to strength, "print" to printOf(voiceprint), "speech" to (speech ?: SpeechParams()).value(), "sleep" to sleep))
+private fun chainOptions(gate: Boolean, normalize: Boolean, strength: Double, voiceprint: Any?, speech: SpeechParams?, sleep: Boolean, levels: Boolean, near: Double?) =
+    Values.encode(
+        mapOf("gate" to gate, "normalize" to normalize, "strength" to strength, "print" to printOf(voiceprint), "speech" to (speech ?: SpeechParams()).value(), "sleep" to sleep, "levels" to levels) +
+            (if (near != null) mapOf("near" to mapOf("gapDb" to near)) else emptyMap()),
+    )
 
 /** The real-time chain, one hop of 256 samples at 16 kHz at a time: Focus, Cue, the mix with the raw mic, the level, the gate. Its output is [delay] samples late. */
 class Chain @JvmOverloads constructor(
@@ -183,13 +203,17 @@ class Chain @JvmOverloads constructor(
     voiceprint: Any? = null,
     speech: SpeechParams? = null,
     sleep: Boolean = true,
+    /** Each speech end carries its [PhraseLevel]. */
+    levels: Boolean = false,
+    /** A voice this many dB under the session's main voice ([Alkove.NEAR_GAP_DB]) is no speech, but a diag `speech.far`; null: off. */
+    near: Double? = null,
 ) : AutoCloseable {
     private val handle: Handle
     private val records = DoubleArray(4 * 16)
 
     init {
         models.need("focus", "cue")
-        val o = chainOptions(gate, normalize, strength, voiceprint, speech, sleep)
+        val o = chainOptions(gate, normalize, strength, voiceprint, speech, sleep, levels, near)
         handle = models.pinned { Handle(Native.chainNew(models.ptr("focus"), models.ptr("cue"), o), Native::chainFree) }
     }
 
@@ -208,6 +232,22 @@ class Chain @JvmOverloads constructor(
     /** Off: the raw mic, at the same delay, with a short fade. */
     @Synchronized
     fun setEnabled(on: Boolean) = Native.chainSetEnabled(handle.value, on)
+
+    /** Off: no speech until it is on again, the phrase under way dropped ([Event.SpeechCancel]); back on, the speech under way is no phrase. */
+    @Synchronized
+    fun setListen(on: Boolean) = Native.chainListen(handle.value, on)
+
+    /** A phrase from now until [release], whatever Cue hears (hold to talk); one Cue had opened goes on as the held one. */
+    @Synchronized
+    fun hold() = Native.chainHold(handle.value, true)
+
+    /** Its speech end comes once the output holds the whole phrase, [delay] samples later. */
+    @Synchronized
+    fun release() = Native.chainHold(handle.value, false)
+
+    /** The gain a quiet mic gets before Focus, which takes a voice under -45 dBFS for noise: 0 dB at a normal level, up to 24. */
+    val inputGainDb: Double
+        @Synchronized get() = Native.chainGet(handle.value, 5)
 
     /** Cue hears speech now. */
     val speaking: Boolean
@@ -247,13 +287,17 @@ class Live @JvmOverloads constructor(
     voiceprint: Any? = null,
     speech: SpeechParams? = null,
     sleep: Boolean = true,
+    /** Each speech end carries its [PhraseLevel]. */
+    levels: Boolean = false,
+    /** A voice this many dB under the session's main voice ([Alkove.NEAR_GAP_DB]) is no speech, but a diag `speech.far`; null: off. */
+    near: Double? = null,
 ) : AutoCloseable {
     private val handle: Handle
     private var out = FloatArray(0)
 
     init {
         models.need("focus", "cue")
-        val o = chainOptions(gate, normalize, strength, voiceprint, speech, sleep)
+        val o = chainOptions(gate, normalize, strength, voiceprint, speech, sleep, levels, near)
         handle = models.pinned { Handle(Native.liveNew(models.ptr("focus"), models.ptr("cue"), rate.toDouble(), o), Native::liveFree) }
     }
 
@@ -292,6 +336,22 @@ class Live @JvmOverloads constructor(
 
     @Synchronized
     fun setEnabled(on: Boolean) = Native.liveSetEnabled(handle.value, on)
+
+    /** As [Chain.setListen]. */
+    @Synchronized
+    fun setListen(on: Boolean) = Native.liveListen(handle.value, on)
+
+    /** As [Chain.hold]. */
+    @Synchronized
+    fun hold() = Native.liveHold(handle.value, true)
+
+    /** As [Chain.release]. */
+    @Synchronized
+    fun release() = Native.liveHold(handle.value, false)
+
+    /** As [Chain.inputGainDb]. */
+    val inputGainDb: Double
+        @Synchronized get() = Native.liveGet(handle.value, 5)
 
     val speaking: Boolean
         @Synchronized get() = Native.liveGet(handle.value, 0) == 1.0

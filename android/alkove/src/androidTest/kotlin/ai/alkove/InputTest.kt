@@ -53,6 +53,28 @@ class InputTest {
     }
 
     @Test
+    fun listenAndHoldAskedBeforeTheModelsHoldOnceTheyRun() = runBlocking {
+        val input = AgentInput.start(context, AgentOptions(levels = true))
+        input.listen(false)
+        input.hold()
+        val events = ArrayList<Event>()
+        val job = launch { input.events.collect { events.add(it) } }
+        withTimeout(10_000) { while (events.none { it is Event.ModeChange && it.mode == Mode.FOCUS }) kotlinx.coroutines.delay(100) }
+        kotlinx.coroutines.delay(1000)
+        input.release()
+        withTimeout(5_000) { while (events.none { it is Event.Utterance }) kotlinx.coroutines.delay(100) }
+        input.close()
+        job.join()
+        val speech = events.filter { it is Event.SpeechStart || it is Event.SpeechEnd || it is Event.SpeechCancel }
+        assertEquals(events.toString(), 2, speech.size)
+        val end = speech[1] as Event.SpeechEnd
+        assertEquals((speech[0] as Event.SpeechStart).start, end.start, 0.0)
+        assertTrue("$end", end.end - end.start > 0.9 && end.level != null)
+        val utterance = events.first { it is Event.Utterance } as Event.Utterance
+        assertEquals(end.level, utterance.level)
+    }
+
+    @Test
     fun wakeListenerStartsAndCloses() = runBlocking {
         val word = compile("/kamij/")
         val listener = WakeListener.start(context, WakeOptions(listOf(word), context = "anywhere"))

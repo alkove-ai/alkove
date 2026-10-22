@@ -17,6 +17,8 @@ internal object Native {
     @JvmStatic external fun chainSetStrength(h: Long, s: Double)
     @JvmStatic external fun chainSetEnabled(h: Long, on: Boolean)
     @JvmStatic external fun chainGet(h: Long, what: Int): Double
+    @JvmStatic external fun chainListen(h: Long, on: Boolean)
+    @JvmStatic external fun chainHold(h: Long, on: Boolean)
 
     @JvmStatic external fun liveNew(focus: Long, cue: Long, rate: Double, options: ByteArray): Long
     @JvmStatic external fun liveFree(h: Long)
@@ -26,6 +28,8 @@ internal object Native {
     @JvmStatic external fun liveSetStrength(h: Long, s: Double)
     @JvmStatic external fun liveSetEnabled(h: Long, on: Boolean)
     @JvmStatic external fun liveGet(h: Long, what: Int): Double
+    @JvmStatic external fun liveListen(h: Long, on: Boolean)
+    @JvmStatic external fun liveHold(h: Long, on: Boolean)
 
     @JvmStatic external fun trackerNew(confidence: Double, exitConfidence: Double, startSecs: Double, stopSecs: Double, frameSecs: Double): Long
     @JvmStatic external fun trackerFree(h: Long)
