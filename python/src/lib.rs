@@ -141,10 +141,21 @@ struct Chain {
 #[pymethods]
 impl Chain {
     #[new]
-    #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None))]
+    #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None))]
     #[allow(clippy::too_many_arguments)]
-    fn new(focus: &Model, cue: &Model, gate: bool, normalize: bool, strength: f64, sleep: bool, speech_params: (f64, f64, f64, f64), print: Option<&[u8]>) -> PyResult<Self> {
-        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels: false, near: None };
+    fn new(
+        focus: &Model,
+        cue: &Model,
+        gate: bool,
+        normalize: bool,
+        strength: f64,
+        sleep: bool,
+        speech_params: (f64, f64, f64, f64),
+        print: Option<&[u8]>,
+        levels: bool,
+        near: Option<f64>,
+    ) -> PyResult<Self> {
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels, near };
         let inner = alkove_core::Chain::new(&focus.inner, &cue.inner, opts).map_err(error)?;
         Ok(Chain { inner, events: Vec::with_capacity(16) })
     }
@@ -219,10 +230,22 @@ struct Live {
 #[pymethods]
 impl Live {
     #[new]
-    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None))]
+    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None))]
     #[allow(clippy::too_many_arguments)]
-    fn new(focus: &Model, cue: &Model, rate: f64, gate: bool, normalize: bool, strength: f64, sleep: bool, speech_params: (f64, f64, f64, f64), print: Option<&[u8]>) -> PyResult<Self> {
-        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels: false, near: None };
+    fn new(
+        focus: &Model,
+        cue: &Model,
+        rate: f64,
+        gate: bool,
+        normalize: bool,
+        strength: f64,
+        sleep: bool,
+        speech_params: (f64, f64, f64, f64),
+        print: Option<&[u8]>,
+        levels: bool,
+        near: Option<f64>,
+    ) -> PyResult<Self> {
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels, near };
         let inner = alkove_core::Live::new(&focus.inner, &cue.inner, rate, opts).map_err(error)?;
         Ok(Live { inner, events: Vec::new() })
     }
@@ -649,6 +672,7 @@ fn resample<'py>(py: Python<'py>, pcm: &[u8], in_rate: f64, out_rate: f64) -> Py
 fn _alkove(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MANIFEST", alkove_core::MANIFEST)?;
     m.add("VERSION", env!("CARGO_PKG_VERSION"))?;
+    m.add("NEAR_GAP_DB", alkove_core::NEAR_GAP_DB)?;
     m.add_class::<Model>()?;
     m.add_class::<Chain>()?;
     m.add_class::<Processor>()?;

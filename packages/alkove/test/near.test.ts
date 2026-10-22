@@ -69,6 +69,9 @@ describe('the level of each phrase', () => {
     }
     expect(mean(copies[0]!) - mean(copies[1]!)).toBeGreaterThan(15)
     expect(Math.abs(mean(copies[0]!) - mean(copies[2]!))).toBeLessThan(1)
+    // the same numbers in Python (test_levels_and_near_give_the_webs_events)
+    expect(levels.utterances.map((u) => u.level!.voiceDb)).toEqual([-19.2, -18.3, -40.2, -18.4])
+    expect(levels.utterances.map((u) => u.level!.refDb)).toEqual([null, null, -19.2, -19.2])
   })
 })
 

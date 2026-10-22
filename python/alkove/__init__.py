@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import math
 from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -13,10 +14,12 @@ from .errors import AlkoveError
 from .models import MANIFEST, Models, cache_dir, fetch
 
 __version__ = _alkove.VERSION
-__all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "Lex", "Listener", "Live", "MANIFEST", "Models", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Timbre", "Voiceprint", "VoiceprintLearner", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
+__all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "Lex", "Listener", "Live", "MANIFEST", "Models", "NEAR_GAP_DB", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Timbre", "Voiceprint", "VoiceprintLearner", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
 
 RATE = 16000
 """The models' rate, and the rate of every output, in Hz."""
+NEAR_GAP_DB: float = _alkove.NEAR_GAP_DB
+"""`near=True`'s gap: a voice this many dB under the session's main voice is far."""
 WHY = ("silence", "forced", "wake")
 
 
@@ -178,6 +181,31 @@ def _event(kind: int, a: float, b: float, c: float) -> dict:
     if kind == 3:
         return {"type": "diag", "code": "focus.print", "level": "info", "data": {"print": a == 1, "after": b, "why": WHY[int(c)]}}
     return {"type": "diag", "code": "focus.reset", "level": "info", "data": {"after": a, "why": WHY[int(b)]}}
+
+
+def _events(records: Iterable[tuple]) -> List[dict]:
+    # a level goes with the speechend or the far voice that follows it, as on the web
+    out: List[dict] = []
+    level: Optional[dict] = None
+    for kind, a, b, c in records:
+        if kind == 7:
+            level = {"voiceDb": a, "noiseDb": b, "refDb": None if math.isnan(c) else c}
+        elif kind == 8:
+            out.append({"type": "diag", "code": "speech.far", "level": "info", "data": {"start": a, "end": b, **(level or {})}})
+            level = None
+        elif kind < 5:
+            e = _event(kind, a, b, c)
+            if kind == 1 and level:
+                e.update(level)
+                level = None
+            out.append(e)
+    return out
+
+
+def _near(near: Union[bool, float]) -> Optional[float]:
+    if near is True:
+        return NEAR_GAP_DB
+    return None if near is False or near is None else float(near)
 
 
 def _part(raw: tuple) -> Part:
@@ -377,15 +405,18 @@ class Chain:
         voiceprint: Any = None,
         speech: Optional[SpeechParams] = None,
         sleep: bool = True,
+        levels: bool = False,
+        near: Union[bool, float] = False,
     ):
+        """`levels`: each speechend carries its level (`voiceDb`, Focus's output before the leveling; `noiseDb`, the mic's floor; `refDb`, the session's main voice, None until heard twice). `near`: a voice that far under the session's (True: `NEAR_GAP_DB`, or a gap in dB) is no speech, but a diag `speech.far`."""
         _needs(models, "focus", "cue")
         print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
-        self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_)
+        self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_, levels, _near(near))
 
     def step(self, hop: Any) -> Tuple[np.ndarray, List[dict]]:
         """One hop in, one hop out, and the events it gave (speech, idle, diag)."""
         out, events, _ = self._c.step(_samples(hop))
-        return _audio(out), [_event(*e) for e in events if e[0] < 5]
+        return _audio(out), _events(events)
 
     def set_voiceprint(self, embedding: Any) -> None:
         """Applied at the next silence, from a fresh state; None goes back to the closest voice."""
@@ -434,17 +465,20 @@ class Live:
         voiceprint: Any = None,
         speech: Optional[SpeechParams] = None,
         sleep: bool = True,
+        levels: bool = False,
+        near: Union[bool, float] = False,
     ):
+        """`levels` and `near` as for `Chain`."""
         _needs(models, "focus", "cue")
         print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
         self.rate = rate
         """The stream's rate, in and out, in Hz."""
-        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_)
+        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_, levels, _near(near))
 
     def push(self, pcm: Any) -> Tuple[np.ndarray, List[dict]]:
         """Samples in (float32, or int16), the ones ready out, and the events (speech, idle, diag), in seconds from the stream's start."""
         out, events = self._l.push(_samples(pcm))
-        return _audio(out), [_event(*e) for e in events if e[0] < 5]
+        return _audio(out), _events(events)
 
     def set_voiceprint(self, embedding: Any) -> None:
         """Applied at the next silence, from a fresh state; None goes back to the closest voice."""

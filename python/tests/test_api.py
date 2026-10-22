@@ -84,6 +84,30 @@ def test_chain_hop_by_hop(models):
         c.set_voiceprint(np.zeros(193, np.float32))
 
 
+def test_levels_and_near_give_the_webs_events(models):
+    # speech.wav loud twice, 20 dB under, then loud: test/near.test.ts in the web SDK, the same numbers
+    with wave.open(str(FIXTURES / "speech.wav")) as w:
+        x = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float32) / 32768
+    gap = np.zeros(int(1.5 * 16000), np.float32)
+    pcm = np.concatenate([np.zeros(16000, np.float32), x, gap, x, gap, x * np.float32(0.1), gap, x, gap])
+
+    def run(**kw):
+        c = alkove.Chain(models, **kw)
+        events = []
+        for i in range(0, len(pcm) - 255, 256):
+            events += c.step(pcm[i : i + 256])[1]
+        return events
+
+    ends = [e for e in run(levels=True) if e["type"] == "speechend"]
+    assert [e["voiceDb"] for e in ends] == [-19.2, -18.3, -40.2, -18.4]
+    assert [e["refDb"] for e in ends] == [None, None, -19.2, -19.2]
+    near = run(near=True)
+    far = [e["data"] for e in near if e.get("code") == "speech.far"]
+    assert [(f["start"], f["voiceDb"], f["refDb"]) for f in far] == [(16.814, -40.2, -19.2)]
+    assert [e["start"] for e in near if e["type"] == "speechstart"] == [2.264, 9.524, 24.074]
+    assert alkove.NEAR_GAP_DB == 8.0
+
+
 def test_streams_in_threads_give_what_they_give_alone(models):
     pcm = [stream(s, 8) for s in (21, 22, 23, 24)]
     alone = [alkove.process(models, x, focus=True, cue=True).audio for x in pcm]
