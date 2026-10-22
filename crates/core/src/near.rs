@@ -29,7 +29,11 @@ impl Acc {
         self.n += other.n;
     }
 
+    // NaN for nothing voiced, a held phrase in a silence
     fn db(&self) -> f64 {
+        if self.n == 0 {
+            return f64::NAN;
+        }
         db(self.sum / self.n as f64)
     }
 }
@@ -161,7 +165,8 @@ impl Near {
 
     fn told(&mut self, acc: Acc, noise_db: f64, events: &mut Vec<ChainEvent>) {
         let r = self.reference();
-        events.push(ChainEvent::Level { voice_db: js::to_fixed(acc.db(), 1), noise_db: js::to_fixed(noise_db, 1), ref_db: if r.is_nan() { r } else { js::to_fixed(r, 1) } });
+        let fixed = |x: f64| if x.is_nan() { x } else { js::to_fixed(x, 1) };
+        events.push(ChainEvent::Level { voice_db: fixed(acc.db()), noise_db: fixed(noise_db), ref_db: fixed(r) });
         self.keep(acc);
     }
 

@@ -127,6 +127,19 @@ def test_listen_and_hold_make_the_phrases(models):
     assert [e["type"] for e in events[2:]] == ["speechstart", "speechcancel"]
 
 
+def test_a_hold_in_a_silence_has_no_voice_level(models):
+    c = alkove.Chain(models, levels=True)
+    silence = np.zeros(256, np.float32)
+    events = []
+    for k in range(60):
+        if k == 5:
+            c.hold()
+        if k == 20:
+            c.release()
+        events += [e for e in c.step(silence)[1] if e["type"] == "speechend"]
+    assert len(events) == 1 and events[0]["voiceDb"] is None and events[0]["refDb"] is None
+
+
 def test_streams_in_threads_give_what_they_give_alone(models):
     pcm = [stream(s, 8) for s in (21, 22, 23, 24)]
     alone = [alkove.process(models, x, focus=True, cue=True).audio for x in pcm]

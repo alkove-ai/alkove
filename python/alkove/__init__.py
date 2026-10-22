@@ -189,7 +189,7 @@ def _events(records: Iterable[tuple]) -> List[dict]:
     level: Optional[dict] = None
     for kind, a, b, c in records:
         if kind == 7:
-            level = {"voiceDb": a, "noiseDb": b, "refDb": None if math.isnan(c) else c}
+            level = {"voiceDb": None if math.isnan(a) else a, "noiseDb": b, "refDb": None if math.isnan(c) else c}
         elif kind == 8:
             out.append({"type": "diag", "code": "speech.far", "level": "info", "data": {"start": a, "end": b, **(level or {})}})
             level = None

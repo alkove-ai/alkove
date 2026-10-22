@@ -231,11 +231,11 @@ fn silence(pcm: &mut [f32], from: usize, to: usize) {
     }
 }
 
-// a level from the chain, for the event that follows it; null before the session knows its voice
+// a level from the chain, for the event that follows it; null before the session knows its voice, or for a held phrase without voice
 fn level_of(e: &ChainEvent) -> Option<Value> {
     let ChainEvent::Level { voice_db, noise_db, ref_db } = *e else { return None };
-    let ref_db = if ref_db.is_nan() { Value::Null } else { ref_db.into() };
-    Some(obj([("voiceDb", voice_db.into()), ("noiseDb", noise_db.into()), ("refDb", ref_db)]))
+    let db = |x: f64| if x.is_nan() { Value::Null } else { x.into() };
+    Some(obj([("voiceDb", db(voice_db)), ("noiseDb", db(noise_db)), ("refDb", db(ref_db))]))
 }
 
 // the enroller's clock starts with it: `tape` and `stream` are where the tape and Spot's input were then, in seconds

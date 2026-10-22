@@ -52,7 +52,7 @@ pub enum ChainEvent {
     // Focus's output for the hop is in `Chain::focus_out`; `t` in samples
     Focus { t: f64 },
     Cue { speech: f64, t: f64 },
-    // the level of the phrase or the far voice whose event comes next, in dB; `ref_db` NaN before the session knows its voice
+    // the level of the phrase or the far voice whose event comes next, in dB; `ref_db` NaN before the session knows its voice, `voice_db` for a held phrase without voice
     Level { voice_db: f64, noise_db: f64, ref_db: f64 },
     // a voice far under the session's, kept out of the phrases
     Far { start: f64, end: f64 },
@@ -123,10 +123,12 @@ pub struct Chain {
     powers: [f64; CUE.lag_steps + 1],
     listen: Listen,
     before_hold: Listen,
-    // the phrase sent out and not ended yet, from its start
+    // Cue's phrase sent out and not ended yet, from its start
     said: Option<f64>,
-    // Cue's run under way when listening came back or a hold ended: not a phrase of the app's
-    skip: bool,
+    // the held phrase, from its start, until its end is sent
+    held: Option<f64>,
+    // Cue's phrases that started before listening came back or a hold ended are not the app's
+    skip_before: f64,
     // a held phrase's start, sent with the next hop
     hold_at: Option<f64>,
     // a released phrase's end, sent once the output holds it all
@@ -175,7 +177,8 @@ impl Chain {
             listen: Listen::Cue,
             before_hold: Listen::Cue,
             said: None,
-            skip: false,
+            held: None,
+            skip_before: f64::NEG_INFINITY,
             hold_at: None,
             release_at: None,
             cancel: None,
@@ -230,16 +233,23 @@ impl Chain {
     // off: no phrase until it is on again, the one being said dropped (`Cancel`); back on, the speech under way is not a phrase
     pub fn set_listen(&mut self, on: bool) {
         if !on {
-            if let Some(start) = self.said.take() {
+            // a held start not sent yet has nothing to cancel
+            let unsent = self.hold_at.take().is_some();
+            let open = self.said.take().or(self.held.take());
+            if let (false, Some(start)) = (unsent, open) {
                 self.cancel = Some(start);
             }
-            self.hold_at = None;
+            self.held = None;
             self.release_at = None;
-            self.near.as_mut().map(Near::hold_reset);
+            if let Some(n) = &mut self.near {
+                n.hold_reset();
+            }
             self.listen = Listen::Off;
         } else if self.listen == Listen::Off {
             self.listen = Listen::Cue;
-            self.skip = self.tracker.active;
+            self.skip_before = self.t as f64 / RATE;
+        } else if self.listen == Listen::Hold {
+            self.before_hold = Listen::Cue;
         }
     }
 
@@ -250,11 +260,11 @@ impl Chain {
         }
         if self.release_at.take().is_none() {
             self.before_hold = self.listen;
-            if self.said.is_none() {
+            self.held = self.said.take().or_else(|| {
                 let start = self.t as f64 / RATE;
-                self.said = Some(start);
                 self.hold_at = Some(start);
-            }
+                Some(start)
+            });
         }
         self.listen = Listen::Hold;
     }
@@ -263,9 +273,10 @@ impl Chain {
         if self.listen != Listen::Hold {
             return;
         }
-        self.release_at = Some(self.t as f64 / RATE);
+        let now = self.t as f64 / RATE;
+        self.release_at = Some(now);
         self.listen = self.before_hold;
-        self.skip = self.listen == Listen::Cue && self.tracker.active;
+        self.skip_before = now;
     }
 
     // exactly one hop of 256 samples; the result is valid until the next call
@@ -282,16 +293,21 @@ impl Chain {
     // what the app sees of Cue's phrases, and its own held ones
     fn heard(&mut self, events: &mut Vec<ChainEvent>, from: usize) {
         let mut w = from;
-        let cue = self.listen == Listen::Cue && !self.skip;
+        let cue = self.listen == Listen::Cue;
+        // a held end not sent yet keeps the utterance it closes
+        let releasing = self.release_at.is_some();
+        // a start once listening, an end only after a start sent: a held phrase keeps the far voices it holds, to silence them
+        let keeps = |e: &ChainEvent, said: Option<f64>, listen: Listen, skip_before: f64| match *e {
+            ChainEvent::Speech(SpeechEvent::Start { start }) => cue && !releasing && said.is_none() && start >= skip_before,
+            ChainEvent::Speech(SpeechEvent::End { .. }) => cue && said.is_some(),
+            ChainEvent::Far { .. } => cue || listen == Listen::Hold,
+            _ => true,
+        };
         for r in from..events.len() {
             let e = events[r];
-            // a held phrase keeps the far voices it holds, to silence them
-            let far = |e: Option<&ChainEvent>| matches!(e, Some(ChainEvent::Far { .. }));
             let keep = match e {
-                ChainEvent::Speech(_) => cue,
-                ChainEvent::Level { .. } => cue || (self.listen == Listen::Hold && far(events.get(r + 1))),
-                ChainEvent::Far { .. } => cue || self.listen == Listen::Hold,
-                _ => true,
+                ChainEvent::Level { .. } => events.get(r + 1).is_some_and(|n| keeps(n, self.said, self.listen, self.skip_before)),
+                _ => keeps(&e, self.said, self.listen, self.skip_before),
             };
             if !keep {
                 continue;
@@ -306,9 +322,6 @@ impl Chain {
             w += 1;
         }
         events.truncate(w);
-        if self.skip && !self.tracker.active {
-            self.skip = false;
-        }
     }
 
     fn told(&mut self, events: &mut Vec<ChainEvent>) {
@@ -323,7 +336,7 @@ impl Chain {
             return;
         }
         self.release_at = None;
-        let start = self.said.take().unwrap_or(end);
+        let start = self.held.take().unwrap_or(end);
         let noise = 10.0 * log10(self.floor + 1e-12);
         if let Some(n) = &mut self.near {
             n.far_until(end, FOCUS.lag as f64 / RATE, noise, events);

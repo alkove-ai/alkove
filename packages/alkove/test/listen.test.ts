@@ -134,3 +134,74 @@ describe('hold with near', () => {
     expect(db(quiet + 0.2, quiet + 2.4)).toBeLessThan(-80)
   })
 })
+
+describe('the review’s cases', () => {
+  const t = (s: number) => (hop(s) * HOP) / 16000
+
+  it('with near, back on during a far voice that never stops: the user near it opens a phrase', () => {
+    // a TV 20 dB under, speech.wav's spoken part looped without a pause; the user over it from 6 s into it
+    const spoken = speech.subarray(Math.round(1.2 * 16000), Math.round(3.9 * 16000))
+    const tv = concat(...Array.from({ length: 5 }, () => spoken.map((v) => v * 0.1)))
+    const from = 15.5
+    const user = 6
+    const mixed = concat(audio.subarray(0, Math.round(from * 16000)), tv, silence(1))
+    mixed.set(
+      spoken.map((v, i) => v + mixed[Math.round((from + user) * 16000) + i]!),
+      Math.round((from + user) * 16000),
+    )
+    const p = engine.pipeline({ chain: { near: true }, output: OUTPUT })
+    const events: Event[] = []
+    for (let k = 0; (k + 1) * HOP <= mixed.length; k++) {
+      if (k === hop(from - 0.5)) p.set({ listen: false })
+      if (k === hop(from + 3)) p.set({ listen: true })
+      p.step(mixed.subarray(k * HOP, (k + 1) * HOP), 0)
+      for (const o of p.outs()) if (o[0] === 'event' && String(o[1].type).startsWith('speech')) events.push(o[1])
+    }
+    const late = events.filter((e) => e.type === 'speechstart' && (e.start as number) > from)
+    expect(late).toHaveLength(1)
+    expect(Math.abs((late[0]!.start as number) - (from + user))).toBeLessThan(0.3)
+  })
+
+  it('listen(true) during a hold holds after the release', () => {
+    const { events } = feed(agent(), { [hop(0.2)]: { listen: false }, [hop(9)]: { hold: true }, [hop(9.2)]: { listen: true }, [hop(9.4)]: { hold: false } })
+    expect(kinds(events)).toEqual([`speechstart ${t(9)}`, `speechend ${t(9)} ${t(9.4)}`, ...phrase(1), ...phrase(2)])
+  })
+
+  it('a hold dropped before its start went out sends nothing', () => {
+    const p = agent()
+    const events: Event[] = []
+    for (let k = 0; (k + 1) * HOP <= audio.length; k++) {
+      if (k === hop(0.2)) {
+        p.set({ hold: true })
+        p.set({ listen: false })
+      }
+      p.step(audio.subarray(k * HOP, (k + 1) * HOP), 0)
+      for (const o of p.outs()) if (o[0] === 'event' && String(o[1].type).startsWith('speech')) events.push(o[1])
+    }
+    expect(events).toEqual([])
+  })
+
+  it('a hold in a silence has no voice level', () => {
+    const { events } = feed(agent({ levels: true }), { [hop(0.2)]: { hold: true }, [hop(0.6)]: { hold: false } })
+    const end = events.find((e) => e.type === 'speechend')!
+    expect(end.voiceDb).toBeNull()
+    expect(typeof end.noiseDb).toBe('number')
+  })
+
+  it('on a call, Cue starting right after a release leaves the held phrase whole', () => {
+    // the gate's 1856 samples delay the held end: a Cue start with a short startSecs comes before it
+    const p = engine.pipeline({ chain: { gate: true, speech: { startSecs: 0.03 } }, output: OUTPUT })
+    const events: Event[] = []
+    const rel = cue[0]![0] - 0.03
+    for (let k = 0; (k + 1) * HOP <= audio.length; k++) {
+      if (k === hop(0.5)) p.set({ hold: true })
+      if (k === hop(rel)) p.set({ hold: false })
+      p.step(audio.subarray(k * HOP, (k + 1) * HOP), 0)
+      for (const o of p.outs()) if (o[0] === 'event' && String(o[1].type).startsWith('speech')) events.push(o[1])
+    }
+    expect(events[0]).toEqual({ type: 'speechstart', start: t(0.5) })
+    expect(events[1]).toEqual({ type: 'speechend', start: t(0.5), end: t(rel) })
+    for (const e of events.filter((e) => e.type === 'speechend')) expect(e.end as number).toBeGreaterThanOrEqual(e.start as number)
+    expect(events.filter((e) => e.type === 'speechstart')).toHaveLength(events.filter((e) => e.type === 'speechend').length)
+  })
+})
