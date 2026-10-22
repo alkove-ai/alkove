@@ -2,6 +2,14 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
+## Unreleased
+
+- `near` on the agent and call inputs: a voice 10 dB under the session's main voice (`near: { gapDb }` to change it) opens no phrase and comes as the diag `speech.far`, without any voiceprint. The session's voice is the median of its last phrases within the gap of the loudest. A far voice right after the user ends the phrase on the user's last near frame; the leveling, a call's gate and a print's learning follow the near voice.
+- `levels`, implied by `near`: `speechend` and `utterance` carry the phrase's `level` (`voiceDb`, Focus's output before the leveling; `noiseDb`; `refDb`, the session's voice).
+- `input.listen(on)`: off drops the phrase under way (the new event `speechcancel`) and every phrase until it is on again.
+- `input.hold()` and `input.release()`: a phrase between the two whatever Cue hears, its utterance sent once Focus has given the last samples; with `near`, the far voices it holds are silenced.
+- Off by default: every output is the same to the bit.
+
 ## 0.2.1 (2026-10-21)
 
 - A wake listener with `onlyMyVoice` checks a word longer than one second: the word and its 0.5 s past Timbre's 1.5 s window were refused, and the wake waited forever. It is now checked on Timbre's windows, as a print is; shorter words give the same result as before.

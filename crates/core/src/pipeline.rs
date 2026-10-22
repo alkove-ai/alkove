@@ -213,6 +213,22 @@ struct History {
 struct Utterance {
     parts: Vec<Vec<f32>>,
     start: f64,
+    // far voices in a held phrase, silenced in it
+    far: Vec<(f64, f64)>,
+}
+
+// samples faded in and out around a silenced far voice
+const FAR_FADE: usize = 160;
+
+fn silence(pcm: &mut [f32], from: usize, to: usize) {
+    let to = to.min(pcm.len());
+    for i in from.saturating_sub(FAR_FADE)..to.min(pcm.len()) {
+        let into = (from.saturating_sub(i)) as f64 / FAR_FADE as f64;
+        pcm[i] = (pcm[i] as f64 * js::min(1.0, into)) as f32;
+    }
+    for i in to..(to + FAR_FADE).min(pcm.len()) {
+        pcm[i] = (pcm[i] as f64 * ((i - to + 1) as f64 / FAR_FADE as f64)) as f32;
+    }
 }
 
 // a level from the chain, for the event that follows it; null before the session knows its voice
@@ -771,13 +787,22 @@ impl Pipeline {
                 let from = (total - len).max(at - js::round(PREROLL * RATE) as i64);
                 let n = (total - from).max(0) as usize;
                 let head: Vec<f32> = (0..n).map(|i| h.buf[(h.pos + h.buf.len() * 2 - n + i) % h.buf.len()]).collect();
-                self.utterance = Some(Utterance { parts: vec![head], start: start - (at - from) as f64 / RATE });
+                self.utterance = Some(Utterance { parts: vec![head], start: start - (at - from) as f64 / RATE, far: Vec::new() });
             }
             Some("speechcancel") => self.utterance = None,
+            Some("diag") if v.get("code").and_then(Value::str) == Some("speech.far") => {
+                let (Some(u), Some(d)) = (&mut self.utterance, v.get("data")) else { return };
+                let t = |k: &str| d.get(k).and_then(Value::num).unwrap_or(0.0);
+                u.far.push((t("start"), t("end")));
+            }
             Some("speechend") => {
                 let Some(u) = self.utterance.take() else { return };
                 let end = v.get("end").and_then(Value::num).unwrap_or(0.0);
-                let all = u.parts.concat();
+                let mut all = u.parts.concat();
+                for &(a, b) in &u.far {
+                    let at = |t: f64| js::round(js::max(0.0, t - u.start) * RATE) as usize;
+                    silence(&mut all, at(a), at(b));
+                }
                 let keep = (all.len() as i64 - (total - self.out_index(end)).max(0)).max(0) as usize;
                 let o = self.output.expect("utterances come with an output");
                 let pcm = encode(&Resampler::all(&all[..keep], RATE, o.rate).expect("rate checked"), o.format);

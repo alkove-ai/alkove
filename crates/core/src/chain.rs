@@ -282,10 +282,15 @@ impl Chain {
     // what the app sees of Cue's phrases, and its own held ones
     fn heard(&mut self, events: &mut Vec<ChainEvent>, from: usize) {
         let mut w = from;
+        let cue = self.listen == Listen::Cue && !self.skip;
         for r in from..events.len() {
             let e = events[r];
+            // a held phrase keeps the far voices it holds, to silence them
+            let far = |e: Option<&ChainEvent>| matches!(e, Some(ChainEvent::Far { .. }));
             let keep = match e {
-                ChainEvent::Speech(_) | ChainEvent::Level { .. } | ChainEvent::Far { .. } => self.listen == Listen::Cue && !self.skip,
+                ChainEvent::Speech(_) => cue,
+                ChainEvent::Level { .. } => cue || (self.listen == Listen::Hold && far(events.get(r + 1))),
+                ChainEvent::Far { .. } => cue || self.listen == Listen::Hold,
                 _ => true,
             };
             if !keep {
@@ -321,6 +326,7 @@ impl Chain {
         let start = self.said.take().unwrap_or(end);
         let noise = 10.0 * log10(self.floor + 1e-12);
         if let Some(n) = &mut self.near {
+            n.far_until(end, FOCUS.lag as f64 / RATE, noise, events);
             n.hold_told(noise, events);
         }
         events.push(ChainEvent::Speech(SpeechEvent::End { start, end }));
@@ -463,10 +469,10 @@ impl Chain {
             let (t, dt) = self.tracker.frame_time(k - lag);
             let noise = 10.0 * log10(self.floor + 1e-12);
             let voiced = p >= self.tracker.params.confidence;
-            if self.listen == Listen::Hold {
+            near.frame(self.tracker.active, self.tracker.confirmed, raw, voiced, power, t, dt, noise, shift, events);
+            if self.listen == Listen::Hold && !near.far() {
                 near.hold_frame(voiced, power);
             }
-            near.frame(self.tracker.active, self.tracker.confirmed, raw, p >= self.tracker.params.confidence, power, t, dt, noise, shift, events);
             return;
         }
         let Some(e) = raw else { return };

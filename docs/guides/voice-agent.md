@@ -109,6 +109,8 @@ input.on('speechstart', () => {
 
 With a print (`voiceprint`, or `learn` once ready), Focus keeps only the user's voice, so another person near the phone does not interrupt the agent.
 
+Without a print, `near: true` keeps a voice far under the user's from interrupting: it never fires `speechstart`. It goes by loudness, so it keeps out a colleague across the room or a video on another device, not someone beside the user. See [Voices far from the microphone](/docs/start/agent/#voices-far-from-the-microphone-near).
+
 ## A wake word, then the sentence
 
 ```ts

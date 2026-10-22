@@ -77,7 +77,7 @@ describe('listen', () => {
 describe('hold and release', () => {
   it('make a phrase in a silence, its end sent once the output holds it', () => {
     const { events, utterances } = feed(agent(), { [hop(0.5)]: { hold: true }, [hop(1.5)]: { hold: false } })
-    const [start, end] = [hop(0.5) * HOP, hop(1.5) * HOP].map((s) => s / 16000)
+    const [start, end] = [(hop(0.5) * HOP) / 16000, (hop(1.5) * HOP) / 16000]
     expect(kinds(events).slice(0, 2)).toEqual([`speechstart ${start}`, `speechend ${start} ${end}`])
     expect(utterances[0]!.samples).toBe(Math.round((end - start + 0.3) * 16000))
   })
@@ -100,5 +100,37 @@ describe('hold and release', () => {
     const end = events.find((e) => e.type === 'speechend')!
     expect(end.voiceDb).toBeGreaterThan(-25)
     expect(end.voiceDb).toBeLessThan(-15)
+  })
+})
+
+describe('hold with near', () => {
+  it('silences the far voices the held phrase holds', () => {
+    // two loud copies set the session's voice, then a hold over a loud copy and the same 20 dB under
+    const held = concat(audio.subarray(0, Math.round(15.5 * 16000)), speech, speech.map((v) => v * 0.1), silence(1))
+    const p = engine.pipeline({ chain: { near: true }, output: OUTPUT })
+    const events: Event[] = []
+    let pcm: Float32Array | null = null
+    let start = 0
+    for (let k = 0; (k + 1) * HOP <= held.length; k++) {
+      if (k === hop(0.2)) p.set({ listen: false })
+      if (k === hop(9)) p.set({ listen: true })
+      if (k === hop(15.2)) p.set({ hold: true })
+      if (k === hop(27)) p.set({ hold: false })
+      p.step(held.subarray(k * HOP, (k + 1) * HOP), 0)
+      for (const o of p.outs()) {
+        if (o[0] === 'event') events.push(o[1])
+        if (o[0] === 'utterance' && o[2] > 14) [pcm, start] = [new Float32Array(o[1].buffer.slice(o[1].byteOffset, o[1].byteOffset + o[1].byteLength)), o[2]]
+      }
+    }
+    expect(pcm).not.toBeNull()
+    const db = (from: number, to: number) => {
+      const x = pcm!.subarray(Math.round((from - start) * 16000), Math.round((to - start) * 16000))
+      return 10 * Math.log10(x.reduce((s, v) => s + v * v, 0) / x.length + 1e-12)
+    }
+    const loud = 15.5 + 1.264
+    const quiet = 15.5 + 5.772 + 1.264
+    expect(events.some((e) => e.code === 'speech.far')).toBe(true)
+    expect(db(loud + 0.2, loud + 2.4)).toBeGreaterThan(-35)
+    expect(db(quiet + 0.2, quiet + 2.4)).toBeLessThan(-80)
   })
 })

@@ -71,7 +71,7 @@ describe('the level of each phrase', () => {
     expect(Math.abs(mean(copies[0]!) - mean(copies[2]!))).toBeLessThan(1)
     // the same numbers in Python (test_levels_and_near_give_the_webs_events)
     expect(levels.utterances.map((u) => u.level!.voiceDb)).toEqual([-19.2, -18.3, -40.2, -18.4])
-    expect(levels.utterances.map((u) => u.level!.refDb)).toEqual([null, null, -19.2, -19.2])
+    expect(levels.utterances.map((u) => u.level!.refDb)).toEqual([null, null, -18.7, -18.7])
   })
 })
 
@@ -94,5 +94,19 @@ describe('near', () => {
   it('lets it through with a wider gap', () => {
     const { utterances } = feed(engine.pipeline({ chain: { near: { gapDb: 30 } }, output: OUTPUT }), audio)
     expect(utterances.some((u) => within(u.start, copies[1]!))).toBe(true)
+  })
+})
+
+describe('near on a call', () => {
+  it('keeps the gate shut on a far voice', () => {
+    const rms = (x: Float32Array, c: { from: number }) => {
+      const y = x.subarray(Math.round((c.from + 1.4) * 16000), Math.round((c.from + 3.8) * 16000))
+      return 10 * Math.log10(y.reduce((s, v) => s + v * v, 0) / y.length + 1e-12)
+    }
+    const open = feed(engine.pipeline({ chain: { gate: true }, output: null }), audio).out
+    const shut = feed(engine.pipeline({ chain: { gate: true, near: true }, output: null }), audio).out
+    expect(rms(open, copies[1]!)).toBeGreaterThan(-45)
+    expect(rms(shut, copies[1]!)).toBeLessThan(-80)
+    expect(rms(shut, copies[2]!)).toBeGreaterThan(-45)
   })
 })

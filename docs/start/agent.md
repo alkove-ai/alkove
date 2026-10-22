@@ -37,6 +37,36 @@ input.on('speechend', ({ start, end }) => ui.listening(false))
 
 Times are in seconds from the start of the input. Tune how fast speech opens and closes with `speech` (`startSecs`, `stopSecs`, `confidence`, `exitConfidence`); see [`SpeechParams`](/docs/reference/interfaces/speechparams/).
 
+## Voices far from the microphone: `near`
+
+```ts
+const input = await createAgentInput({ near: true })
+input.on('diag', (d) => d.code === 'speech.far' && console.log('kept out', d))
+```
+
+Without a voiceprint, Focus keeps the closest voice. When the user is silent, the closest voice can be a video on another device or a colleague across the room. With `near: true`, a voice 10 dB under the session's main voice opens no phrase: no `speechstart`, no `utterance`, but a diag `speech.far` with its times and levels. It measures loudness, not a person: no voiceprint is made.
+
+- The session's voice is learned from its phrases: the median of the last ones within the gap of the loudest. Until it has heard two phrases, nothing is far.
+- A far voice right after the user ends the phrase on the user's last near frame. The user right after a far voice starts a phrase where their voice comes near.
+- `near: { gapDb: 12 }` lets more through, `8` keeps more out. The quiet phrases a person says, a "yeah" or an aside, are the first ones a smaller gap takes.
+- A gain control that follows the voice brings a far voice back up. The SDK opens the microphone without the browser's (`autoGainControl: false`): do the same if you pass your own stream.
+- It cannot tell apart two voices at the same distance, or a loud speaker beside the microphone. That takes a voiceprint.
+
+`levels: true`, implied by `near`, gives each phrase its `level` on `speechend` and `utterance`: `voiceDb`, Focus's output before the leveling; `noiseDb`, the microphone's noise floor; `refDb`, the session's voice, `null` until it is known. They are dBFS: compare them within a session, not between devices.
+
+## Mute and hold to talk
+
+```ts
+mute.onclick = () => input.listen(false) // the phrase under way is dropped: speechcancel
+unmute.onclick = () => input.listen(true) // what is said right then is not a phrase
+talk.onpointerdown = () => input.hold() // a phrase from now, whatever Cue hears
+talk.onpointerup = () => input.release() // its utterance, once Focus has given the last samples
+```
+
+- `listen(false)` drops the phrase being said: `speechcancel` comes instead of its `speechend` and `utterance`. `audio` and the track go on: listening is about phrases, not sound.
+- `hold()` takes over a phrase Cue opened, and Cue's ends are ignored until `release()`. For hold to talk alone, call `listen(false)` first: then only held phrases come.
+- With `near`, the far voices inside a held phrase are silenced in its utterance.
+
 ## Your agent's voice: `farEnd`
 
 When your agent talks through the speakers, tell the SDK, so that its voice never teaches the user's voiceprint:

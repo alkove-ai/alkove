@@ -3,13 +3,14 @@ use crate::cue::{SpeechEvent, SpeechParams};
 use crate::js;
 use crate::math::log10;
 
-// the voiced frames a judgment looks at: 0.3 s of Cue's frames
-const SHORT: usize = 10;
-// the stretches the reference comes from; it is the second loudest, so one shout does not set it
+// the voiced frames a judgment looks at: 1 s of Cue's frames, so the quiet end of a sentence stays in it
+const SHORT: usize = 33;
+// the last stretches the reference comes from: the median, by voiced time, of those within the gap of the loudest tenth of that time; the session's voice even when a far one talks more, its laughs not
 const KEEP: usize = 16;
+const ANCHOR: f64 = 0.1;
 // a stretch with fewer voiced frames says nothing of a voice
 const MIN_FRAMES: usize = 7;
-pub const NEAR_GAP_DB: f64 = 8.0;
+pub const NEAR_GAP_DB: f64 = 10.0;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Acc {
@@ -40,6 +41,7 @@ fn db(power: f64) -> f64 {
 // the level of each phrase of Focus's output before the leveling, against the session's main voice; with a gap, a voice that far under it is no phrase
 pub(crate) struct Near {
     gap: Option<f64>,
+    start_frames: usize,
     stop_frames: usize,
     short: [f64; SHORT],
     short_n: usize,
@@ -52,10 +54,14 @@ pub(crate) struct Near {
     far: bool,
     far_from: f64,
     far_acc: Acc,
+    // a far stretch that ended on a near voice: told once that voice opens a phrase, else the far voice goes on
+    prior: Option<(f64, Acc)>,
+    // in a far stretch, the frames near by themselves since the last far one: where a near voice starts before the window turns
+    rising: Option<(f64, Acc)>,
     open: Option<f64>,
     last_near: f64,
     since_near: usize,
-    seen: [f64; KEEP],
+    seen: [(f64, usize); KEEP],
     seen_n: usize,
     seen_at: usize,
     hold: Acc,
@@ -65,6 +71,7 @@ impl Near {
     pub(crate) fn new(gap: Option<f64>, speech: &SpeechParams, frame_secs: f64) -> Near {
         Near {
             gap,
+            start_frames: js::max(1.0, (speech.start_secs / frame_secs - 1e-9).ceil()) as usize,
             stop_frames: js::max(1.0, js::round(speech.stop_secs / frame_secs)) as usize,
             short: [0.0; SHORT],
             short_n: 0,
@@ -76,10 +83,12 @@ impl Near {
             far: false,
             far_from: 0.0,
             far_acc: Acc::default(),
+            prior: None,
+            rising: None,
             open: None,
             last_near: 0.0,
             since_near: 0,
-            seen: [0.0; KEEP],
+            seen: [(0.0, 0); KEEP],
             seen_n: 0,
             seen_at: 0,
             hold: Acc::default(),
@@ -92,26 +101,49 @@ impl Near {
     }
 
     fn reference(&self) -> f64 {
-        if self.seen_n < 2 {
+        let n = self.seen_n;
+        if n < 2 {
             return f64::NAN;
         }
-        let (mut a, mut b) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-        for &x in &self.seen[..self.seen_n] {
-            if x > a {
-                b = a;
-                a = x;
-            } else if x > b {
-                b = x;
+        let mut v = self.seen;
+        let v = &mut v[..n];
+        for i in 1..n {
+            let mut j = i;
+            while j > 0 && v[j - 1].0 > v[j].0 {
+                v.swap(j - 1, j);
+                j -= 1;
             }
         }
-        b
+        // the anchor: at least two stretches and a tenth of the voiced time over it, so one shout does not set it
+        let total: usize = v.iter().map(|x| x.1).sum();
+        let (mut acc, mut anchor) = (0, v[n - 1].0);
+        for (k, &(db, w)) in v.iter().rev().enumerate() {
+            acc += w;
+            anchor = db;
+            if k >= 1 && acc as f64 >= ANCHOR * total as f64 {
+                break;
+            }
+        }
+        let c = &v[v.iter().position(|x| x.0 >= anchor - self.gap.unwrap_or(NEAR_GAP_DB)).unwrap_or(0)..];
+        let half = c.iter().map(|x| x.1).sum::<usize>();
+        let mut acc = 0;
+        for (k, &(db, w)) in c.iter().enumerate() {
+            acc += 2 * w;
+            if acc == half && k + 1 < c.len() {
+                return (db + c[k + 1].0) / 2.0;
+            }
+            if acc > half {
+                return db;
+            }
+        }
+        c[c.len() - 1].0
     }
 
     fn keep(&mut self, acc: Acc) {
         if acc.n < MIN_FRAMES {
             return;
         }
-        self.seen[self.seen_at] = acc.db();
+        self.seen[self.seen_at] = (acc.db(), acc.n);
         self.seen_at = (self.seen_at + 1) % KEEP;
         self.seen_n = (self.seen_n + 1).min(KEEP);
     }
@@ -145,6 +177,24 @@ impl Near {
         self.told(acc, noise_db, events);
     }
 
+    // a far stretch under way when a held phrase ends, told up to its end (on the events' clock) so the phrase can silence it
+    pub(crate) fn far_until(&mut self, end: f64, shift: f64, noise_db: f64, events: &mut Vec<ChainEvent>) {
+        if let Some((_, r)) = self.rising.take() {
+            self.far_acc.merge(r);
+        }
+        if let Some((from, acc)) = self.prior.take() {
+            self.told(acc, noise_db, events);
+            events.push(ChainEvent::Far { start: js::max(0.0, from - shift), end: js::max(0.0, self.stretch - shift) });
+        }
+        if !self.far || self.far_acc.n == 0 {
+            return;
+        }
+        let acc = std::mem::take(&mut self.far_acc);
+        self.told(acc, noise_db, events);
+        events.push(ChainEvent::Far { start: js::max(0.0, self.far_from - shift), end });
+        self.far_from = end + shift;
+    }
+
     pub(crate) fn hold_reset(&mut self) {
         self.hold = Acc::default();
     }
@@ -157,6 +207,8 @@ impl Near {
         self.tail = Acc::default();
         self.far = false;
         self.far_acc = Acc::default();
+        self.prior = None;
+        self.rising = None;
         self.open = None;
         self.since_near = 0;
     }
@@ -194,18 +246,17 @@ impl Near {
                 self.short_n = (self.short_n + 1).min(SHORT);
                 let r = self.reference();
                 let near = self.judge(r, gap);
+                let alone = r.is_nan() || db(power) >= r - gap;
                 if self.far && near {
+                    let (from, rising) = self.rising.take().unwrap_or((t0, Acc::default()));
                     if self.open.is_some() {
                         let dip = self.far_acc;
                         self.near.merge(dip);
+                        self.near.merge(rising);
                     } else {
-                        if self.far_acc.n >= MIN_FRAMES {
-                            let acc = self.far_acc;
-                            self.told(acc, noise_db, events);
-                            events.push(ChainEvent::Far { start: at(self.far_from), end: at(t0) });
-                        }
-                        self.stretch = t0;
-                        self.near = Acc::default();
+                        self.prior = Some((self.far_from, self.far_acc));
+                        self.stretch = from;
+                        self.near = rising;
                     }
                     self.far_acc = Acc::default();
                     self.far = false;
@@ -220,12 +271,23 @@ impl Near {
                         self.far_acc = self.near;
                         self.far_acc.merge(self.tail);
                         self.near = Acc::default();
+                        if let Some((from, acc)) = self.prior.take() {
+                            self.far_from = from;
+                            self.far_acc.merge(acc);
+                        }
                     }
                     self.tail = Acc::default();
                 }
                 if self.far {
-                    self.far_acc.add(power);
-                } else if r.is_nan() || db(power) >= r - gap {
+                    if alone {
+                        self.rising.get_or_insert((t0, Acc::default())).1.add(power);
+                    } else {
+                        if let Some((_, r)) = self.rising.take() {
+                            self.far_acc.merge(r);
+                        }
+                        self.far_acc.add(power);
+                    }
+                } else if alone {
                     // the window lags: the phrase ends on the last frame near by itself
                     let tail = self.tail;
                     self.near.merge(tail);
@@ -246,12 +308,22 @@ impl Near {
                     self.near = Acc::default();
                 }
             }
-            if self.open.is_none() && !self.far && confirmed {
+            // as Cue opens a phrase: a loud syllable of a far voice is no phrase
+            if self.open.is_none() && !self.far && confirmed && self.near.n >= self.start_frames {
+                if let Some((from, acc)) = self.prior.take() {
+                    if acc.n >= MIN_FRAMES {
+                        self.told(acc, noise_db, events);
+                        events.push(ChainEvent::Far { start: at(from), end: at(self.stretch) });
+                    }
+                }
                 self.open = Some(self.stretch);
                 events.push(ChainEvent::Speech(SpeechEvent::Start { start: at(self.stretch) }));
             }
         }
         if let Some(SpeechEvent::End { end, .. }) = raw {
+            if let Some((_, r)) = self.rising.take() {
+                self.far_acc.merge(r);
+            }
             if let Some(start) = self.open {
                 let end = if self.far { self.last_near } else { end };
                 let mut acc = self.near;
@@ -260,10 +332,22 @@ impl Near {
                 }
                 self.told(acc, noise_db, events);
                 events.push(ChainEvent::Speech(SpeechEvent::End { start: at(start), end: at(end) }));
-            } else if self.far && self.far_acc.n >= MIN_FRAMES {
-                let acc = self.far_acc;
-                self.told(acc, noise_db, events);
-                events.push(ChainEvent::Far { start: at(self.far_from), end: at(end) });
+            } else {
+                let mut acc = self.far_acc;
+                let mut from = self.far_from;
+                if !self.far {
+                    acc = self.near;
+                    acc.merge(self.tail);
+                    from = self.stretch;
+                }
+                if let Some((f, a)) = self.prior.take() {
+                    acc.merge(a);
+                    from = f;
+                }
+                if acc.n >= MIN_FRAMES && (self.far || from < self.stretch) {
+                    self.told(acc, noise_db, events);
+                    events.push(ChainEvent::Far { start: at(from), end: at(end) });
+                }
             }
         }
         if !active {
@@ -330,14 +414,14 @@ mod tests {
         assert_eq!(l[1].0, -26.0);
         assert_eq!(l[2].0, -40.0);
         assert!(l[0].1.is_nan() && l[1].1.is_nan());
-        assert_eq!(l[2].1, -26.0);
+        assert_eq!(l[2].1, -23.0);
     }
 
     #[test]
     fn a_voice_far_under_the_sessions_is_no_phrase() {
         let events = run(Some(8.0), &stream(&[quiet(0.5), voice(-20.0, 1.0), quiet(1.0), voice(-21.0, 1.0), quiet(1.0), voice(-35.0, 1.5), quiet(1.0), voice(-22.0, 1.0), quiet(1.0)]));
         assert_eq!(kinds(&events), ["start", "level", "end", "start", "level", "end", "level", "far", "start", "level", "end"]);
-        assert_eq!(levels(&events)[2], (-35.0, -21.0));
+        assert_eq!(levels(&events)[2], (-35.0, -20.5));
     }
 
     #[test]
@@ -364,6 +448,12 @@ mod tests {
     }
 
     #[test]
+    fn a_far_voices_loud_syllable_is_no_phrase() {
+        let events = run(Some(8.0), &stream(&[quiet(0.5), voice(-20.0, 1.0), quiet(1.0), voice(-20.0, 1.0), quiet(1.0), voice(-35.0, 1.0), voice(-20.0, 0.09), voice(-35.0, 1.0), quiet(1.0)]));
+        assert_eq!(kinds(&events), ["start", "level", "end", "start", "level", "end", "level", "far"]);
+    }
+
+    #[test]
     fn a_short_dip_stays_in_the_phrase() {
         let events = run(Some(8.0), &stream(&[quiet(0.5), voice(-20.0, 1.0), quiet(1.0), voice(-20.0, 1.0), quiet(1.0), voice(-20.0, 1.0), voice(-35.0, 0.4), voice(-20.0, 1.0), quiet(1.0)]));
         assert_eq!(kinds(&events), ["start", "level", "end", "start", "level", "end", "start", "level", "end"]);
@@ -371,8 +461,8 @@ mod tests {
 
     #[test]
     fn one_shout_does_not_set_the_reference() {
-        let events = run(Some(8.0), &stream(&[quiet(0.5), voice(-20.0, 1.0), quiet(1.0), voice(-8.0, 1.0), quiet(1.0), voice(-21.0, 1.0), quiet(1.0)]));
-        assert_eq!(kinds(&events), ["start", "level", "end", "start", "level", "end", "start", "level", "end"]);
-        assert_eq!(levels(&events)[2].1, -20.0);
+        let events = run(Some(8.0), &stream(&[quiet(0.5), voice(-20.0, 1.0), quiet(1.0), voice(-21.0, 1.0), quiet(1.0), voice(-8.0, 1.0), quiet(1.0), voice(-26.0, 1.0), quiet(1.0)]));
+        assert_eq!(kinds(&events), ["start", "level", "end", "start", "level", "end", "start", "level", "end", "start", "level", "end"]);
+        assert_eq!(levels(&events)[3].1, -20.0);
     }
 }
