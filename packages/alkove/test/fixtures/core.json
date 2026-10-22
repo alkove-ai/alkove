@@ -1,6 +1,6 @@
 {
- "chain: defaults, left alone past the 30 s reset": "adb8509c157b71228a459ecca1cdfb684a5d176e9d3b441c261d6a6e683ca36c",
- "chain: gate, a print, other speech settings, settings changed often": "382cc538273d6d62aadc8fe51ad57ddc5183fb13fdd38a38282bf15b44bb0f71",
+ "chain: defaults, left alone past the 30 s reset": "cefdb81327535669af81beae7dba2029c9714705a892a9901306ebb4a24cc114",
+ "chain: gate, a print, other speech settings, settings changed often": "fdb7af286d65244e7350c6b97fa8756284d4694260e445f0a32787d6d0d4c383",
  "chain: no normalize, no sleep, half strength": "770e393b5860cb7fe0c0d11c4f44e105adfb7ae6ad28b5f8ec324f3bdca6b3b7",
  "chain: speech that never stops, past the forced reset": "74edb4e7943361b39864d45f340bc0fc5d2a60d79ee3051bd5ade727194c4302",
  "process: focus and cue": "6661ff88530ebffd7a8cf0f7ea91e767edc2c4edd63c43d5760d1c52035b896e",
@@ -14,7 +14,7 @@
  "lex: compile": "6c67daf5617d767d62633740f9a123c54a1da8ff1806c9bb4fa06361726b12c2",
  "spot: process, raw, anywhere, traced": "6199ba1f929257cdd4c13f9d0ef2234059fc120ce295082206ada06c937d297b",
  "spot: process, raw, after a pause": "1a8438815dd04bca323ae22af2b36b9a97f24e85166defbff49ca5ed4b7f62c6",
- "spot: process, behind Focus, both, traced": "cdc6095e85c7ee8f130d4cc7d7d307f879d7927f51d20fb0fc705be57dde32be",
+ "spot: process, behind Focus, both, traced": "4c9c11be8bcc50e8f026d7fdfdc4f7f014b0d579b34aa7078abcdeb13f204ca0",
  "spot: process, behind Focus with Cue, pause, normalize": "745dd850643fcaa9f02a2dc85f0f7cb7a66c1be6af57daf4af7845eaab52bcc7",
  "spot: listening frame by frame": "714fa04c64886fa4940a7b659b58c37d2679d39f857ba2c1c72d69e2a6179041",
  "spot: enrolling": "8189b651c9410d91c915b02aee333370465f0a81ad81d0550d5db817af2b09be",

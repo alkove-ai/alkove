@@ -90,7 +90,7 @@ Measured with the published file. The model card gives the full tables, with ope
 - Made for a microphone close to the speaker (phone, headset, laptop in front of you). With a distant room microphone (several meters), where every voice is far, Focus removes much of the target's speech too: do not use it there.
 - Without a print, the voice kept is the closest one: a farther speaker is treated as interference.
 - With a print, when another voice starts on its own, its first ~150 ms can pass, 25 to 35 dB under it.
-- Under about -45 dBFS, Focus takes a voice for noise. The SDK brings a quiet microphone up before it: at most 24 dB, rising 4 dB a second, set on loud moments only so a silence never raises it, and none at a normal level. On AMI's headsets brought down to -60 dBFS, most of the speech is kept again; the first seconds, while the gain rises, are not.
+- Under about -45 dBFS, Focus takes a voice for noise. The SDK brings a quiet microphone up before it, to about -30 dBFS on its loud moments: at most 24 dB, rising 4 dB a second, set on loud moments only so a silence never raises it, and none at a speaking level. It goes no higher: louder, the other voices come through Focus too. On AMI's headsets brought down to -60 dBFS, most of the speech is kept again; the first seconds, while the gain rises, are not.
 - Built for speech; it is not meant to process music.
 
 Out of scope: distant microphones (conference rooms, smart speakers across the room), keeping several speakers at once, music or high-fidelity listening, and isolating someone's voice in a recording without their consent.

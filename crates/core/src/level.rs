@@ -162,8 +162,8 @@ impl Chunker {
     }
 }
 
-// a quiet mic brought up before Focus, which takes a voice under -45 dBFS for noise; set on loud hops only, so a silence never raises it, and exactly 1 at a normal level
-const INPUT_TARGET_DB: f64 = -20.0;
+// a quiet mic brought up before Focus, which takes a voice under -45 dBFS for noise; no higher than -30: at -20 a mic at a speaking level got +5 dB and the others' voices came through Focus twice as often (AMI)
+const INPUT_TARGET_DB: f64 = -30.0;
 const INPUT_MAX_DB: f64 = 24.0;
 // 10 s of loud hops, the 99th percentile of their level: one syllable at a normal level and there is no gain; 3 s of them before any
 const INPUT_WINDOW: usize = 625;
@@ -271,15 +271,17 @@ mod tests {
 
     #[test]
     fn a_normal_level_is_left_alone_to_the_bit() {
-        let mut g = InputGain::default();
-        let mut out = vec![0.0; HOP];
-        for k in 0..1000 {
-            let h = hop(Some(-15.0), k);
-            g.hop(&h, 1e-8);
-            g.apply(&h, &mut out);
-            assert_eq!(out, h);
+        for db in [-15.0, -30.0] {
+            let mut g = InputGain::default();
+            let mut out = vec![0.0; HOP];
+            for k in 0..1000 {
+                let h = hop(Some(db), k);
+                g.hop(&h, 1e-8);
+                g.apply(&h, &mut out);
+                assert_eq!(out, h, "{db}");
+            }
+            assert_eq!(g.gain(), 1.0);
         }
-        assert_eq!(g.gain(), 1.0);
     }
 
     #[test]
@@ -300,7 +302,7 @@ mod tests {
         let mut levels = vec![Some(-40.0); 1000];
         levels.extend(vec![None; 2000]);
         let db = run(&mut g, &levels);
-        assert!((db[999] - 20.0).abs() < 0.5, "{}", db[999]);
+        assert!((db[999] - 10.0).abs() < 0.5, "{}", db[999]);
         assert!(db[1000..].iter().all(|&d| (d - db[999]).abs() < 1e-6));
         let back = run(&mut g, &[Some(-10.0); 200]);
         assert!(back[199] < 0.01, "{}", back[199]);
