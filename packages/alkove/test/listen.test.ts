@@ -1,0 +1,104 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { beforeAll, describe, expect, it } from 'vitest'
+
+import { WasmEngine } from '../src/core/engine'
+import type { NativePipeline } from '../src/core/native'
+import { Alk } from '../src/engine/alk'
+import { modelBytes, wav } from './helpers'
+
+// who makes the agent's phrases: Cue, nobody (listen off, the phrase under way dropped), or the app between hold and release
+const HOP = 256
+const OUTPUT = { format: 'f32', rate: 16000, chunkMs: 32, audio: false, utterance: true }
+
+let engine: WasmEngine
+beforeAll(async () => {
+  engine = new WasmEngine(await Alk.create(await WebAssembly.compile(readFileSync(join(import.meta.dirname, '../dist/alkove-engine.wasm')))), modelBytes)
+})
+
+const silence = (seconds: number) => new Float32Array(Math.round(seconds * 16000))
+const concat = (...parts: Float32Array[]) => {
+  const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
+  let o = 0
+  for (const p of parts) {
+    out.set(p, o)
+    o += p.length
+  }
+  return out
+}
+
+// three copies of speech.wav, one phrase each for Cue
+const speech = wav('speech.wav')
+const audio = concat(silence(1), speech, silence(1.5), speech, silence(1.5), speech, silence(1.5))
+const hop = (t: number) => Math.round((t * 16000) / HOP)
+
+type Event = Record<string, unknown>
+
+function feed(p: NativePipeline, at: Record<number, Event> = {}) {
+  const events: Event[] = []
+  const utterances: { start: number; end: number; samples: number }[] = []
+  for (let k = 0; (k + 1) * HOP <= audio.length; k++) {
+    if (at[k]) p.set(at[k]!)
+    p.step(audio.subarray(k * HOP, (k + 1) * HOP), 0)
+    for (const o of p.outs()) {
+      if (o[0] === 'event' && String(o[1].type).startsWith('speech')) events.push(o[1])
+      if (o[0] === 'utterance') utterances.push({ start: o[2], end: o[3], samples: o[1].byteLength / 4 })
+    }
+  }
+  return { events, utterances }
+}
+
+const agent = (chain = {}) => engine.pipeline({ chain, output: OUTPUT })
+const kinds = (events: Event[]) => events.map((e) => `${e.type} ${e.start}${e.end === undefined ? '' : ` ${e.end}`}`)
+// Cue's phrases, alone: [start, end] of each copy's
+let cue: [number, number][]
+beforeAll(() => {
+  const ends = feed(agent()).events.filter((e) => e.type === 'speechend')
+  cue = ends.map((e) => [e.start as number, e.end as number])
+})
+const phrase = (i: number) => [`speechstart ${cue[i]![0]}`, `speechend ${cue[i]![0]} ${cue[i]![1]}`]
+
+describe('listen', () => {
+  it('Cue alone gives one phrase per copy', () => {
+    expect(cue).toHaveLength(3)
+    expect(cue[0]![0]).toBeLessThan(3)
+    expect(cue[1]![0]).toBeGreaterThan(9)
+    expect(cue[2]![1]).toBeLessThan(20)
+  })
+
+  it('off drops the phrase under way, back on mid-speech skips that speech, the next phrase comes', () => {
+    const { events, utterances } = feed(agent(), { [hop(3)]: { listen: false }, [hop(10.5)]: { listen: true } })
+    expect(kinds(events)).toEqual([phrase(0)[0], `speechcancel ${cue[0]![0]}`, ...phrase(2)])
+    expect(utterances.map((u) => u.start)).toEqual([cue[2]![0] - 0.3])
+  })
+})
+
+describe('hold and release', () => {
+  it('make a phrase in a silence, its end sent once the output holds it', () => {
+    const { events, utterances } = feed(agent(), { [hop(0.5)]: { hold: true }, [hop(1.5)]: { hold: false } })
+    const [start, end] = [hop(0.5) * HOP, hop(1.5) * HOP].map((s) => s / 16000)
+    expect(kinds(events).slice(0, 2)).toEqual([`speechstart ${start}`, `speechend ${start} ${end}`])
+    expect(utterances[0]!.samples).toBe(Math.round((end - start + 0.3) * 16000))
+  })
+
+  it('take over the phrase Cue opened and keep it past Cue’s end, then skip the speech under way', () => {
+    const { events, utterances } = feed(agent(), { [hop(3)]: { hold: true }, [hop(6)]: { hold: false }, [hop(9.4)]: { hold: true }, [hop(10.5)]: { hold: false } })
+    const t = (s: number) => (hop(s) * HOP) / 16000
+    expect(kinds(events)).toEqual([phrase(0)[0], `speechend ${cue[0]![0]} ${t(6)}`, `speechstart ${t(9.4)}`, `speechend ${t(9.4)} ${t(10.5)}`, ...phrase(2)])
+    expect(utterances[0]!.samples).toBe(Math.round((t(6) - cue[0]![0] + 0.3) * 16000))
+  })
+
+  it('with listening off, only the held phrases', () => {
+    const { events } = feed(agent(), { [hop(0.2)]: { listen: false }, [hop(9.4)]: { hold: true }, [hop(10.5)]: { hold: false } })
+    const t = (s: number) => (hop(s) * HOP) / 16000
+    expect(kinds(events)).toEqual([`speechstart ${t(9.4)}`, `speechend ${t(9.4)} ${t(10.5)}`])
+  })
+
+  it('a held phrase carries its level', () => {
+    const { events } = feed(agent({ levels: true }), { [hop(0.2)]: { listen: false }, [hop(9.4)]: { hold: true }, [hop(12.5)]: { hold: false } })
+    const end = events.find((e) => e.type === 'speechend')!
+    expect(end.voiceDb).toBeGreaterThan(-25)
+    expect(end.voiceDb).toBeLessThan(-15)
+  })
+})

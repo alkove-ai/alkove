@@ -17,6 +17,7 @@ pub(crate) fn record(e: &ChainEvent) -> [f64; 4] {
         ChainEvent::Cue { speech, t } => [6.0, speech, t, 0.0],
         ChainEvent::Level { voice_db, noise_db, ref_db } => [7.0, voice_db, noise_db, ref_db],
         ChainEvent::Far { start, end } => [8.0, start, end, 0.0],
+        ChainEvent::Cancel { start } => [9.0, start, 0.0, 0.0],
     }
 }
 

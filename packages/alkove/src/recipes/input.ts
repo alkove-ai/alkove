@@ -27,6 +27,7 @@ export interface PhraseLevel {
 export interface InputEvents {
   speechstart: { start: number }
   speechend: { start: number; end: number; level?: PhraseLevel }
+  speechcancel: { start: number }
   mode: { mode: Mode; reason?: RawReason }
   status: Status
   voiceprint: Voiceprint
@@ -195,7 +196,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     this.watchTrack(track)
     if (this.ownStream && o.followDefault !== false && !o.deviceId) this.followDefault()
     void this.startModels()
-    this.release()
+    this.flushHeld()
   }
 
   private async build(): Promise<void> {
@@ -257,7 +258,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     else super.emit(type, value)
   }
 
-  protected release(): void {
+  protected flushHeld(): void {
     setTimeout(() => {
       const q = this.held ?? []
       this.held = null
@@ -373,6 +374,9 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       case 'speechstart':
         this.emit('speechstart', { start: e.start })
         break
+      case 'speechcancel':
+        this.emit('speechcancel', { start: e.start })
+        break
       case 'speechend':
         this.emit('speechend', { start: e.start, end: e.end, ...(typeof e.voiceDb === 'number' && { level: { voiceDb: e.voiceDb, noiseDb: e.noiseDb, refDb: e.refDb } }) })
         break
@@ -422,6 +426,20 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     if (!on) this.setMode('raw', 'off')
     else if (this.rt && this._mode.reason === 'off') this.setMode(this.activeMode())
     return on && !!this.rt
+  }
+
+  // off: no phrase until it is on again, the one being said dropped (speechcancel); back on, the speech under way is no phrase
+  listen(on: boolean): void {
+    this.rt?.post({ type: 'set', input: this.id, listen: on })
+  }
+
+  // a phrase from now until release(), whatever Cue hears: hold to talk
+  hold(): void {
+    this.rt?.post({ type: 'set', input: this.id, hold: true })
+  }
+
+  release(): void {
+    this.rt?.post({ type: 'set', input: this.id, hold: false })
   }
 
   setStrength(s: number): void {

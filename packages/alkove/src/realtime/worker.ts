@@ -317,6 +317,8 @@ self.onmessage = async (e: MessageEvent) => {
         if ('print' in m) change.print = m.print
         if ('words' in m) Object.assign(change, { words: words(m.words), context: m.context ?? 'anywhere' })
         if ('enroll' in m) change.enroll = enrolling(m.enroll)
+        if ('listen' in m) change.listen = m.listen
+        if ('hold' in m) change.hold = m.hold
         if ('words' in m || ('enroll' in m && m.enroll))
           withSpot(r, () => {
             r.p.spot(engine!.model('spot'))

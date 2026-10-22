@@ -419,7 +419,7 @@ impl Pipeline {
         Ok(())
     }
 
-    // { strength?, enabled?, print?, words?, context?, enroll? }, applied in that order
+    // { strength?, enabled?, print?, words?, context?, enroll?, listen?, hold? }, applied in that order
     pub fn set(&mut self, v: &Value) -> Result<(), Error> {
         if let Some(s) = v.get("strength").and_then(Value::num) {
             if let Some(c) = self.chain_mut() {
@@ -451,6 +451,16 @@ impl Pipeline {
                 _ => None,
             };
             self.start_enroll(spec)?;
+        }
+        if let (Some(on), Some(c)) = (v.get("listen").and_then(Value::bool), self.chain.as_mut()) {
+            c.set_listen(on);
+        }
+        if let (Some(on), Some(c)) = (v.get("hold").and_then(Value::bool), self.chain.as_mut()) {
+            if on {
+                c.hold();
+            } else {
+                c.release();
+            }
         }
         Ok(())
     }
@@ -763,6 +773,7 @@ impl Pipeline {
                 let head: Vec<f32> = (0..n).map(|i| h.buf[(h.pos + h.buf.len() * 2 - n + i) % h.buf.len()]).collect();
                 self.utterance = Some(Utterance { parts: vec![head], start: start - (at - from) as f64 / RATE });
             }
+            Some("speechcancel") => self.utterance = None,
             Some("speechend") => {
                 let Some(u) = self.utterance.take() else { return };
                 let end = v.get("end").and_then(Value::num).unwrap_or(0.0);

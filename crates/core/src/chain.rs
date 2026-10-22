@@ -56,6 +56,16 @@ pub enum ChainEvent {
     Level { voice_db: f64, noise_db: f64, ref_db: f64 },
     // a voice far under the session's, kept out of the phrases
     Far { start: f64, end: f64 },
+    // the phrase sent out from `start` will have no end: the app stopped listening
+    Cancel { start: f64 },
+}
+
+// who makes the phrases: Cue, nobody, or the app between hold and release
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Listen {
+    Cue,
+    Off,
+    Hold,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +121,17 @@ pub struct Chain {
     t: u64,
     near: Option<Near>,
     powers: [f64; CUE.lag_steps + 1],
+    listen: Listen,
+    before_hold: Listen,
+    // the phrase sent out and not ended yet, from its start
+    said: Option<f64>,
+    // Cue's run under way when listening came back or a hold ended: not a phrase of the app's
+    skip: bool,
+    // a held phrase's start, sent with the next hop
+    hold_at: Option<f64>,
+    // a released phrase's end, sent once the output holds it all
+    release_at: Option<f64>,
+    cancel: Option<f64>,
 }
 
 impl Chain {
@@ -151,6 +172,13 @@ impl Chain {
             t: 0,
             near: (opts.levels || opts.near.is_some()).then(|| Near::new(opts.near, &opts.speech, CUE.chunk as f64 / RATE)),
             powers: [0.0; CUE.lag_steps + 1],
+            listen: Listen::Cue,
+            before_hold: Listen::Cue,
+            said: None,
+            skip: false,
+            hold_at: None,
+            release_at: None,
+            cancel: None,
             opts,
         })
     }
@@ -199,6 +227,47 @@ impl Chain {
         self.enabled = on;
     }
 
+    // off: no phrase until it is on again, the one being said dropped (`Cancel`); back on, the speech under way is not a phrase
+    pub fn set_listen(&mut self, on: bool) {
+        if !on {
+            if let Some(start) = self.said.take() {
+                self.cancel = Some(start);
+            }
+            self.hold_at = None;
+            self.release_at = None;
+            self.near.as_mut().map(Near::hold_reset);
+            self.listen = Listen::Off;
+        } else if self.listen == Listen::Off {
+            self.listen = Listen::Cue;
+            self.skip = self.tracker.active;
+        }
+    }
+
+    // a phrase from now until `release`, whatever Cue hears; one Cue had opened goes on as the held one
+    pub fn hold(&mut self) {
+        if self.listen == Listen::Hold {
+            return;
+        }
+        if self.release_at.take().is_none() {
+            self.before_hold = self.listen;
+            if self.said.is_none() {
+                let start = self.t as f64 / RATE;
+                self.said = Some(start);
+                self.hold_at = Some(start);
+            }
+        }
+        self.listen = Listen::Hold;
+    }
+
+    pub fn release(&mut self) {
+        if self.listen != Listen::Hold {
+            return;
+        }
+        self.release_at = Some(self.t as f64 / RATE);
+        self.listen = self.before_hold;
+        self.skip = self.listen == Listen::Cue && self.tracker.active;
+    }
+
     // exactly one hop of 256 samples; the result is valid until the next call
     pub fn step(&mut self, hop: &[f32], events: &mut Vec<ChainEvent>) -> &[f32] {
         assert_eq!(hop.len(), HOP, "step() takes whole hops only");
@@ -210,7 +279,56 @@ impl Chain {
         self.mic_level > WAKE_MIN && self.mic_level > self.floor * pow(10.0, WAKE_DB / 10.0)
     }
 
+    // what the app sees of Cue's phrases, and its own held ones
+    fn heard(&mut self, events: &mut Vec<ChainEvent>, from: usize) {
+        let mut w = from;
+        for r in from..events.len() {
+            let e = events[r];
+            let keep = match e {
+                ChainEvent::Speech(_) | ChainEvent::Level { .. } | ChainEvent::Far { .. } => self.listen == Listen::Cue && !self.skip,
+                _ => true,
+            };
+            if !keep {
+                continue;
+            }
+            if let ChainEvent::Speech(s) = e {
+                self.said = match s {
+                    SpeechEvent::Start { start } => Some(start),
+                    SpeechEvent::End { .. } => None,
+                };
+            }
+            events[w] = e;
+            w += 1;
+        }
+        events.truncate(w);
+        if self.skip && !self.tracker.active {
+            self.skip = false;
+        }
+    }
+
+    fn told(&mut self, events: &mut Vec<ChainEvent>) {
+        if let Some(start) = self.cancel.take() {
+            events.push(ChainEvent::Cancel { start });
+        }
+        if let Some(start) = self.hold_at.take() {
+            events.push(ChainEvent::Speech(SpeechEvent::Start { start }));
+        }
+        let Some(end) = self.release_at else { return };
+        if self.t < js::round(end * RATE) as u64 + self.delay() as u64 {
+            return;
+        }
+        self.release_at = None;
+        let start = self.said.take().unwrap_or(end);
+        let noise = 10.0 * log10(self.floor + 1e-12);
+        if let Some(n) = &mut self.near {
+            n.hold_told(noise, events);
+        }
+        events.push(ChainEvent::Speech(SpeechEvent::End { start, end }));
+    }
+
     fn hop(&mut self, hop: &[f32], events: &mut Vec<ChainEvent>) {
+        self.told(events);
+        let from = events.len();
         let at = self.t as f64 / RATE;
         self.raw.copy_from_slice(hop);
         self.raw_delay.apply(&mut self.raw);
@@ -256,6 +374,7 @@ impl Chain {
         if let Some(d) = &mut self.bypass_delay {
             d.apply(&mut self.bypass);
         }
+        self.heard(events, from);
         let speaking = self.speaking();
         if self.opts.normalize {
             self.level.frame(&self.mix, speaking);
@@ -263,7 +382,7 @@ impl Chain {
         }
         if let Some(d) = &mut self.gate_delay {
             d.apply(&mut self.mix);
-            self.gate.apply(&mut self.mix, speaking);
+            self.gate.apply(&mut self.mix, speaking || self.listen == Listen::Hold);
         }
         let on = if self.enabled { 1.0 } else { 0.0 };
         if on == 0.0 || self.on < 1.0 {
@@ -343,6 +462,10 @@ impl Chain {
             let power = self.powers[(k - lag).rem_euclid(ring) as usize];
             let (t, dt) = self.tracker.frame_time(k - lag);
             let noise = 10.0 * log10(self.floor + 1e-12);
+            let voiced = p >= self.tracker.params.confidence;
+            if self.listen == Listen::Hold {
+                near.hold_frame(voiced, power);
+            }
             near.frame(self.tracker.active, self.tracker.confirmed, raw, p >= self.tracker.params.confidence, power, t, dt, noise, shift, events);
             return;
         }
@@ -378,6 +501,7 @@ impl ChainEvent {
             ChainEvent::Reset { after, why } => {
                 obj([("type", "diag".into()), ("code", "focus.reset".into()), ("level", "info".into()), ("data", obj([("after", after.into()), ("why", why.as_str().into())]))])
             }
+            ChainEvent::Cancel { start } => obj([("type", "speechcancel".into()), ("start", start.into())]),
             ChainEvent::Far { start, end } => obj([("type", "diag".into()), ("code", "speech.far".into()), ("level", "info".into()), ("data", obj([("start", start.into()), ("end", end.into())]))]),
             ChainEvent::Focus { .. } | ChainEvent::Cue { .. } | ChainEvent::Level { .. } => return None,
         })

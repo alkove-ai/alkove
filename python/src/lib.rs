@@ -101,6 +101,7 @@ fn record(e: &ChainEvent) -> (u8, f64, f64, f64) {
         ChainEvent::Cue { speech, t } => (6, speech, t, 0.0),
         ChainEvent::Level { voice_db, noise_db, ref_db } => (7, voice_db, noise_db, ref_db),
         ChainEvent::Far { start, end } => (8, start, end, 0.0),
+        ChainEvent::Cancel { start } => (9, start, 0.0, 0.0),
     }
 }
 

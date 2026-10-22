@@ -58,6 +58,7 @@ pub(crate) struct Near {
     seen: [f64; KEEP],
     seen_n: usize,
     seen_at: usize,
+    hold: Acc,
 }
 
 impl Near {
@@ -81,6 +82,7 @@ impl Near {
             seen: [0.0; KEEP],
             seen_n: 0,
             seen_at: 0,
+            hold: Acc::default(),
         }
     }
 
@@ -129,6 +131,22 @@ impl Near {
         let r = self.reference();
         events.push(ChainEvent::Level { voice_db: js::to_fixed(acc.db(), 1), noise_db: js::to_fixed(noise_db, 1), ref_db: if r.is_nan() { r } else { js::to_fixed(r, 1) } });
         self.keep(acc);
+    }
+
+    // a held phrase's voiced frames, whatever the stretches
+    pub(crate) fn hold_frame(&mut self, voiced: bool, power: f64) {
+        if voiced {
+            self.hold.add(power);
+        }
+    }
+
+    pub(crate) fn hold_told(&mut self, noise_db: f64, events: &mut Vec<ChainEvent>) {
+        let acc = std::mem::take(&mut self.hold);
+        self.told(acc, noise_db, events);
+    }
+
+    pub(crate) fn hold_reset(&mut self) {
+        self.hold = Acc::default();
     }
 
     fn reset(&mut self) {
