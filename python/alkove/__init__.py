@@ -464,6 +464,11 @@ class Chain:
         """The gain `normalize` applies now, in dB."""
         return self._c.gain_db
 
+    @property
+    def input_gain_db(self) -> float:
+        """The gain a quiet mic gets before Focus, which takes a voice under -45 dBFS for noise: 0 dB at a normal level, up to 24 dB, set on loud moments only."""
+        return self._c.input_gain_db
+
 
 class Live:
     """The chain on a live stream at any rate, as the web SDK runs it in real time: frames in, the processed samples that are ready out, at the same rate."""
@@ -517,6 +522,11 @@ class Live:
     def release(self) -> None:
         """As `Chain.release`."""
         self._l.release()
+
+    @property
+    def input_gain_db(self) -> float:
+        """As `Chain.input_gain_db`."""
+        return self._l.input_gain_db
 
     @property
     def speaking(self) -> bool:

@@ -220,6 +220,11 @@ impl Chain {
     }
 
     #[getter]
+    fn input_gain_db(&self) -> f64 {
+        self.inner.input_gain_db()
+    }
+
+    #[getter]
     fn delay(&self) -> usize {
         self.inner.delay()
     }
@@ -301,6 +306,11 @@ impl Live {
 
     fn release(&mut self) {
         self.inner.chain_mut().release();
+    }
+
+    #[getter]
+    fn input_gain_db(&self) -> f64 {
+        self.inner.chain().input_gain_db()
     }
 
     #[getter]

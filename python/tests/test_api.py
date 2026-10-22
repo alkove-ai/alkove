@@ -140,6 +140,16 @@ def test_a_hold_in_a_silence_has_no_voice_level(models):
     assert len(events) == 1 and events[0]["voiceDb"] is None and events[0]["refDb"] is None
 
 
+def test_a_quiet_mic_gets_an_input_gain_and_a_normal_one_none(models):
+    pcm = mix().astype(np.float32) / 32768
+    pcm = np.concatenate([pcm] * 4)
+    for gain, expect in ((1.0, False), (10 ** (-40 / 20), True)):
+        live = alkove.Live(models, 16000)
+        live.push((pcm * gain).astype(np.float32))
+        assert (live.input_gain_db > 0) == expect
+        assert 0 <= live.input_gain_db <= 24
+
+
 def test_streams_in_threads_give_what_they_give_alone(models):
     pcm = [stream(s, 8) for s in (21, 22, 23, 24)]
     alone = [alkove.process(models, x, focus=True, cue=True).audio for x in pcm]

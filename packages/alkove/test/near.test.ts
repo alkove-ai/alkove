@@ -110,3 +110,16 @@ describe('near on a call', () => {
     expect(rms(shut, copies[2]!)).toBeGreaterThan(-45)
   })
 })
+
+describe('a quiet microphone', () => {
+  it('is brought up before Focus: its phrases come as at a normal level, measured as the mic gave them', () => {
+    const loud = concat(silence(1), speech, speech, speech, speech, silence(1))
+    const quiet = scaled(loud, 10 ** (-36 / 20))
+    const ends = (x: Float32Array) => feed(engine.pipeline({ chain: { levels: true }, output: OUTPUT }), x).events.filter((e) => e.type === 'speechend')
+    const atNormal = ends(loud)
+    const atQuiet = ends(quiet)
+    const last = (e: Event[]) => e.filter((x) => (x.start as number) > 1 + 2 * (speech.length / 16000))
+    expect(last(atQuiet).length).toBe(last(atNormal).length)
+    for (const [q, n] of last(atQuiet).map((e, i) => [e, last(atNormal)[i]!] as const)) expect(Math.abs((q.voiceDb as number) - ((n.voiceDb as number) - 36))).toBeLessThan(1.5)
+  })
+})

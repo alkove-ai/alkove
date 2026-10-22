@@ -4,7 +4,7 @@ use alkove_engine::Model;
 
 use crate::cue::{Cue, SpeechEvent, SpeechParams, SpeechTracker};
 use crate::focus::Focus;
-use crate::level::{coef, Chunker, Delay, Gate, Level};
+use crate::level::{coef, Chunker, Delay, Gate, InputGain, Level};
 use crate::math::{log10, pow};
 use crate::near::Near;
 use crate::{js, Error, CUE, FOCUS, RATE};
@@ -121,6 +121,8 @@ pub struct Chain {
     t: u64,
     near: Option<Near>,
     powers: [f64; CUE.lag_steps + 1],
+    input: InputGain,
+    gained: Vec<f32>,
     listen: Listen,
     before_hold: Listen,
     // Cue's phrase sent out and not ended yet, from its start
@@ -174,6 +176,8 @@ impl Chain {
             t: 0,
             near: (opts.levels || opts.near.is_some()).then(|| Near::new(opts.near, &opts.speech, CUE.chunk as f64 / RATE)),
             powers: [0.0; CUE.lag_steps + 1],
+            input: InputGain::default(),
+            gained: vec![0.0; HOP],
             listen: Listen::Cue,
             before_hold: Listen::Cue,
             said: None,
@@ -206,6 +210,11 @@ impl Chain {
 
     pub fn gain_db(&self) -> f64 {
         self.level.db()
+    }
+
+    // the gain a quiet mic gets before Focus, 0 dB at a normal level
+    pub fn input_gain_db(&self) -> f64 {
+        self.input.db()
     }
 
     // Focus's output of the last hop
@@ -349,9 +358,11 @@ impl Chain {
         self.told(events);
         let from = events.len();
         let at = self.t as f64 / RATE;
-        self.raw.copy_from_slice(hop);
-        self.raw_delay.apply(&mut self.raw);
         self.listen(hop);
+        self.input.hop(hop, self.floor);
+        self.input.apply(hop, &mut self.gained);
+        self.raw.copy_from_slice(&self.gained);
+        self.raw_delay.apply(&mut self.raw);
         if self.asleep && self.woken() {
             self.asleep = false;
             self.quiet = 0;
@@ -365,7 +376,7 @@ impl Chain {
             self.focus_out.fill(0.0);
         } else {
             self.rules(events);
-            self.focus.step(hop, &mut self.focus_out);
+            self.focus.step(&self.gained, &mut self.focus_out);
         }
         events.push(ChainEvent::Focus { t: self.t as f64 });
         let mut at_cue = 0;
@@ -478,7 +489,9 @@ impl Chain {
                 s += x as f64 * x as f64;
             }
             self.powers[k.rem_euclid(ring) as usize] = s / CUE.chunk as f64;
-            let power = self.powers[(k - lag).rem_euclid(ring) as usize];
+            // the level the mic gave, the input gain taken off
+            let g = self.input.gain();
+            let power = self.powers[(k - lag).rem_euclid(ring) as usize] / (g * g);
             let (t, dt) = self.tracker.frame_time(k - lag);
             let noise = 10.0 * log10(self.floor + 1e-12);
             let voiced = p >= self.tracker.params.confidence;

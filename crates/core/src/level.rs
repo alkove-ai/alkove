@@ -161,3 +161,148 @@ impl Chunker {
         None
     }
 }
+
+// a quiet mic brought up before Focus, which takes a voice under -45 dBFS for noise; set on loud hops only, so a silence never raises it, and exactly 1 at a normal level
+const INPUT_TARGET_DB: f64 = -20.0;
+const INPUT_MAX_DB: f64 = 24.0;
+// 10 s of loud hops, the 99th percentile of their level: one syllable at a normal level and there is no gain; 3 s of them before any
+const INPUT_WINDOW: usize = 625;
+const INPUT_MIN: usize = 187;
+const INPUT_LOUD_DB: f64 = 10.0;
+// up 4 dB a second at most, down at once: in doubt, no gain
+const INPUT_RISE_DB: f64 = 4.0;
+const INPUT_TAU: f64 = 0.2;
+
+pub struct InputGain {
+    loud: Vec<f64>,
+    n: usize,
+    at: usize,
+    scratch: Vec<f64>,
+    target: f64,
+    // the target as the gain may follow it: rising at INPUT_RISE_DB, falling at once
+    ramp: f64,
+    g: f64,
+}
+
+impl Default for InputGain {
+    fn default() -> Self {
+        InputGain { loud: vec![0.0; INPUT_WINDOW], n: 0, at: 0, scratch: vec![0.0; INPUT_WINDOW], target: 1.0, ramp: 1.0, g: 1.0 }
+    }
+}
+
+impl InputGain {
+    pub fn gain(&self) -> f64 {
+        self.g
+    }
+
+    pub fn db(&self) -> f64 {
+        20.0 * log10(self.g)
+    }
+
+    // one hop of the mic as it comes, and its noise floor (a power)
+    pub fn hop(&mut self, hop: &[f32], floor: f64) {
+        let mut s = 0.0;
+        for &x in hop {
+            s += x as f64 * x as f64;
+        }
+        let e = s / hop.len() as f64;
+        if e <= 1e-10 || e <= floor * pow(10.0, INPUT_LOUD_DB / 10.0) {
+            return;
+        }
+        self.loud[self.at] = 10.0 * log10(e);
+        self.at = (self.at + 1) % INPUT_WINDOW;
+        self.n = (self.n + 1).min(INPUT_WINDOW);
+        if self.n < INPUT_MIN {
+            return;
+        }
+        let v = &mut self.scratch[..self.n];
+        v.copy_from_slice(&self.loud[..self.n]);
+        let k = (self.n * 99) / 100;
+        let (_, p90, _) = v.select_nth_unstable_by(k, |a, b| a.total_cmp(b));
+        let db = js::max(0.0, js::min(INPUT_MAX_DB, INPUT_TARGET_DB - *p90));
+        self.target = if db == 0.0 { 1.0 } else { pow(10.0, db / 20.0) };
+    }
+
+    pub fn apply(&mut self, hop: &[f32], out: &mut [f32]) {
+        if self.g == 1.0 && self.target == 1.0 {
+            out.copy_from_slice(hop);
+            return;
+        }
+        let rise = pow(10.0, INPUT_RISE_DB * hop.len() as f64 / RATE / 20.0);
+        self.ramp = if self.target > self.ramp { js::min(self.target, self.ramp * rise) } else { self.target };
+        let to = self.ramp;
+        let k = coef(INPUT_TAU);
+        for (o, &x) in out.iter_mut().zip(hop) {
+            self.g += (to - self.g) * k;
+            if (self.g - to).abs() < 1e-9 {
+                self.g = to;
+            }
+            *o = (x as f64 * self.g) as f32;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HOP: usize = 256;
+
+    // a hop of a 200 Hz tone at `db` dBFS (RMS), or silence
+    fn hop(db: Option<f64>, k: usize) -> Vec<f32> {
+        let a = db.map_or(0.0, |d| pow(10.0, d / 20.0) * std::f64::consts::SQRT_2);
+        (0..HOP).map(|i| (a * crate::math::sin(2.0 * std::f64::consts::PI * 200.0 * (k * HOP + i) as f64 / RATE)) as f32).collect()
+    }
+
+    // hops through the gain, the mic's floor fixed at -80 dBFS; the gain in dB after each
+    fn run(g: &mut InputGain, levels: &[Option<f64>]) -> Vec<f64> {
+        let mut out = vec![0.0; HOP];
+        levels
+            .iter()
+            .enumerate()
+            .map(|(k, &db)| {
+                let h = hop(db, k);
+                g.hop(&h, 1e-8);
+                g.apply(&h, &mut out);
+                g.db()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_normal_level_is_left_alone_to_the_bit() {
+        let mut g = InputGain::default();
+        let mut out = vec![0.0; HOP];
+        for k in 0..1000 {
+            let h = hop(Some(-15.0), k);
+            g.hop(&h, 1e-8);
+            g.apply(&h, &mut out);
+            assert_eq!(out, h);
+        }
+        assert_eq!(g.gain(), 1.0);
+    }
+
+    #[test]
+    fn a_quiet_mic_comes_up_after_3_s_of_loud_hops_4_db_a_second_at_most() {
+        let mut g = InputGain::default();
+        let db = run(&mut g, &vec![Some(-60.0); 1500]);
+        assert!(db[INPUT_MIN - 2] == 0.0);
+        let per_hop = INPUT_RISE_DB * HOP as f64 / RATE;
+        for w in db.windows(2) {
+            assert!(w[1] - w[0] <= per_hop + 1e-9);
+        }
+        assert!((db[1499] - INPUT_MAX_DB).abs() < 0.01, "{}", db[1499]);
+    }
+
+    #[test]
+    fn a_silence_does_not_raise_it_and_a_normal_voice_brings_it_down_at_once() {
+        let mut g = InputGain::default();
+        let mut levels = vec![Some(-40.0); 1000];
+        levels.extend(vec![None; 2000]);
+        let db = run(&mut g, &levels);
+        assert!((db[999] - 20.0).abs() < 0.5, "{}", db[999]);
+        assert!(db[1000..].iter().all(|&d| (d - db[999]).abs() < 1e-6));
+        let back = run(&mut g, &[Some(-10.0); 200]);
+        assert!(back[199] < 0.01, "{}", back[199]);
+    }
+}
