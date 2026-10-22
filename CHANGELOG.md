@@ -2,7 +2,9 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## Unreleased
+## 0.3.2 (2026-10-22)
+
+Every package moves to 0.3.2 together; the core is unchanged, the same outputs to the bit as 0.3.1.
 
 - `livekit-plugins-alkove`, as in its pull request to `livekit/agents`. Focus keeps one stream per sample rate: LiveKit sends the pre-connect audio through the same processor as the live track, which reset it in mid-phrase. Focus and the VAD refuse models without theirs when they are built, not on every frame. The VAD's start of speech keeps its whole prefix whatever `start_secs` (from 1 s on, it was cut); a speech longer than `max_buffered_speech` keeps its start and warns once, as Silero does (it kept its end); a frame at another rate is refused with an error, as Silero does; `min_silence_duration` follows `speech.stop_secs`; the audio is no longer copied whole on every frame. `alkove.Timbre` and `alkove.Voiceprint` come with the plugin.
 
