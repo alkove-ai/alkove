@@ -106,3 +106,58 @@ def test_vad_flush_starts_a_fresh_segment(models):
     events = run_vad(plugin.VAD.load(models=models), fs, flush_after=len(fs) // 2)
     stamps = [e.timestamp for e in events if e.type == agents_vad.VADEventType.INFERENCE_DONE]
     assert any(b < a for a, b in zip(stamps, stamps[1:]))
+
+
+def test_focus_keeps_the_live_track_whole_when_pre_connect_audio_comes_at_another_rate(models):
+    live24, pre48 = frames(wav("mix.wav", 24000), 24000), frames(wav("mix.wav", 48000), 48000)
+    alone = plugin.Focus(models=models)
+    want = [alone._process(f).data.tobytes() for f in live24]
+    focus = plugin.Focus(models=models)
+    got = []
+    for a, b in zip(live24, pre48, strict=True):
+        got.append(focus._process(a).data.tobytes())
+        assert focus._process(b).sample_rate == 48000
+    assert got == want
+
+
+def test_focus_wants_focus_and_cue():
+    with pytest.raises(ValueError, match="focus"):
+        plugin.Focus(models=alkove.Models.load(["cue"], dir=MODELS))
+
+
+def test_vad_start_of_speech_keeps_its_prefix_whatever_start_secs(models):
+    pcm = np.concatenate([np.zeros(48000, np.int16), wav("speech.wav", 24000)])
+    vad = plugin.VAD.load(models=models, speech=alkove.SpeechParams(start_secs=1.2))
+    starts = [e for e in run_vad(vad, frames(pcm, 24000)) if e.type == agents_vad.VADEventType.START_OF_SPEECH]
+    assert starts
+    for e in starts:
+        assert abs(e.frames[0].samples_per_channel - round((e.speech_duration + vad.prefix_padding_duration) * 24000)) <= 1
+
+
+def test_vad_long_speech_keeps_its_start_up_to_max_buffered_speech(models, caplog):
+    pcm = np.concatenate([np.zeros(24000, np.int16), wav("speech.wav", 24000), np.zeros(24000, np.int16)])
+    vad = plugin.VAD.load(models=models, max_buffered_speech=1.0)
+    long = [e for e in run_vad(vad, frames(pcm, 24000)) if e.type == agents_vad.VADEventType.END_OF_SPEECH and e.speech_duration > 1.5]
+    assert long
+    for e in long:
+        first = round((e.timestamp - e.silence_duration - e.speech_duration - vad.prefix_padding_duration) * 24000)
+        got = np.frombuffer(e.frames[0].data, dtype=np.int16)
+        assert len(got) == round(1.5 * 24000)
+        assert np.array_equal(got, pcm[first : first + len(got)])
+    assert "max_buffered_speech reached" in caplog.text
+
+
+def test_vad_min_silence_duration_follows_its_speech_params(models):
+    vad = plugin.VAD.load(models=models)
+    assert vad.min_silence_duration == 0.6
+    vad.speech = alkove.SpeechParams(stop_secs=0.3)
+    assert vad.min_silence_duration == 0.3
+
+
+def test_vad_refuses_a_frame_at_another_rate(models, caplog):
+    fs, other = frames(wav("speech.wav", 16000), 16000), frames(wav("speech.wav", 24000)[:12000], 24000)
+    events = run_vad(plugin.VAD.load(models=models), fs[:20] + other + fs[20:])
+    inference = [e for e in events if e.type == agents_vad.VADEventType.INFERENCE_DONE]
+    assert all(e.frames[0].sample_rate == 16000 for e in inference)
+    assert abs(len(inference) * 0.03 - len(wav("speech.wav", 16000)) / 16000) < 0.1
+    assert "another sample rate" in caplog.text
