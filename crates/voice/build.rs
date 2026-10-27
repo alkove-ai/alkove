@@ -32,6 +32,15 @@ fn main() {
     }
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static=needle");
-    println!("cargo:rustc-link-lib=dylib={}", if target.contains("apple") { "c++" } else { "stdc++" });
+    if target.contains("apple") {
+        println!("cargo:rustc-link-lib=dylib=c++");
+    } else {
+        // Cactus builds libneedle for Linux against libc++, which few systems have: linked in, as their own needle binary does
+        let dir = std::fs::read_dir("/usr/lib").into_iter().flatten().flatten().map(|e| e.path().join("lib")).filter(|p| p.join("libc++.a").exists()).max();
+        let dir = dir.expect("alkove-voice: no libc++.a under /usr/lib/llvm-*/lib, install libc++-dev and libc++abi-dev");
+        println!("cargo:rustc-link-search=native={}", dir.display());
+        println!("cargo:rustc-link-lib=static=c++");
+        println!("cargo:rustc-link-lib=static=c++abi");
+    }
     println!("cargo:rerun-if-changed=build.rs");
 }

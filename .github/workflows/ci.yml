@@ -29,7 +29,7 @@ jobs:
       - run: rustup toolchain install 1.88 --profile minimal
       - run: cargo +1.88 check --workspace --exclude alkove-voice --all-targets
 
-  # the Claude Code mod's binary: cpal needs ALSA on Linux
+  # the Claude Code mod's binary: cpal needs ALSA on Linux, Cactus's libneedle libc++
   voice:
     strategy:
       matrix:
@@ -37,10 +37,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libc++-dev libc++abi-dev
         if: runner.os == 'Linux'
       - run: cargo clippy --release -p alkove-voice --all-targets -- -D warnings
       - run: cargo test --release -p alkove-voice
+      # the tests link no Whistle: the binary does
+      - run: cargo build --release -p alkove-voice
 
   wasm:
     runs-on: ubuntu-latest

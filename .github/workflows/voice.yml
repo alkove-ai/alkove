@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libc++-dev libc++abi-dev
         if: runner.os == 'Linux'
       - run: test "voice-v$(cargo pkgid -p alkove-voice | sed 's/.*@//')" = "$GITHUB_REF_NAME"
       - run: cargo test --release -p alkove-voice
