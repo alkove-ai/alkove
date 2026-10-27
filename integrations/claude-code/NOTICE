@@ -1,0 +1,42 @@
+Alkove
+Copyright 2026 Eddy Bordi
+
+This product includes software developed by third parties:
+
+- alkove-focus-1-preview is derived from GTCRN
+  (https://github.com/Xiaobin-Rong/gtcrn), under the MIT License:
+
+  Copyright (c) 2024 Rong Xiaobin
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+- The alkove-voice binary links Cactus's Needle engine (libneedle) and
+  downloads the Whistle speech model (https://huggingface.co/Cactus-Compute/whistle),
+  both under the Apache License 2.0, Copyright Cactus Compute.
+
+- The alkove-voice binary links sherpa-onnx (https://github.com/k2-fsa/sherpa-onnx),
+  under the Apache License 2.0, Copyright Xiaomi Corporation, with ONNX Runtime
+  (https://github.com/microsoft/onnxruntime), under the MIT License,
+  Copyright Microsoft Corporation.
+
+- When answers are read aloud, the alkove-voice binary downloads Supertonic 3
+  (https://huggingface.co/Supertone/supertonic-3), Copyright 2025 Supertone Inc.:
+  its code under the MIT License, its model under the OpenRAIL-M License
+  (https://huggingface.co/Supertone/supertonic-3/blob/main/LICENSE), whose use
+  restrictions apply to what it is made to say.

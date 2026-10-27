@@ -1,0 +1,10 @@
+{
+  "name": "voice-commands",
+  "version": "0.1.0",
+  "description": "Voice commands for Claude Code, on the device: say \"OK Claude\" and a command, or what to type.",
+  "author": { "name": "Eddy Bordi" },
+  "homepage": "https://alkove.ai",
+  "repository": "https://github.com/alkove-ai/alkove",
+  "license": "Apache-2.0",
+  "types": "./types/index.d.ts"
+}
