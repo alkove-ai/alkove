@@ -1,0 +1,14 @@
+{
+  "name": "alkove",
+  "description": "Alkove's on-device voice for Claude Code",
+  "owner": {
+    "name": "Eddy Bordi"
+  },
+  "plugins": [
+    {
+      "name": "voice-commands",
+      "source": "./integrations/claude-code",
+      "description": "Voice commands for Claude Code, on the device: a wake word, voice isolation, speech-to-text and a read-out summary in one binary"
+    }
+  ]
+}

@@ -145,6 +145,8 @@ Weights on [Hugging Face](https://huggingface.co/alkove-ai), downloaded once, ch
 | [`android`](./android) | the Android library and its LiveKit plugin ([maven.alkove.ai](https://maven.alkove.ai)) |
 | [`integrations/livekit`](./integrations/livekit) | Focus and Cue for LiveKit Agents |
 | [`integrations/pipecat`](./integrations/pipecat) | Focus and Cue for Pipecat |
+| [`integrations/claude-code`](./integrations/claude-code) | voice commands for Claude Code: a mod and its binary, released on their own (`voice-v*`) |
+| [`crates/voice`](./crates/voice) | `alkove-voice`, that binary: the microphone, the trigger, the phrase and its transcript, for every session |
 | [`crates/engine`](./crates/engine) | the inference engine and the `.alk` format |
 | [`crates/core`](./crates/core) | the features, written once in Rust for every package |
 | [`bench`](./bench) | every benchmark number, with its datasets and protocol |
