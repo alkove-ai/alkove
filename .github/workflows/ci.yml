@@ -37,7 +37,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libc++-dev libc++abi-dev
+      # Cactus's libneedle wants libc++ 21 (std::__1::__hash_memory), newer than Ubuntu's
+      - run: |
+          sudo apt-get update && sudo apt-get install -y libasound2-dev
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh && sudo bash llvm.sh 21 && sudo apt-get install -y libc++-21-dev libc++abi-21-dev
         if: runner.os == 'Linux'
       - run: cargo clippy --release -p alkove-voice --all-targets -- -D warnings
       - run: cargo test --release -p alkove-voice

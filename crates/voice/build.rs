@@ -37,7 +37,7 @@ fn main() {
     } else {
         // Cactus builds libneedle for Linux against libc++, which few systems have: linked in, as their own needle binary does
         let dir = std::fs::read_dir("/usr/lib").into_iter().flatten().flatten().map(|e| e.path().join("lib")).filter(|p| p.join("libc++.a").exists()).max();
-        let dir = dir.expect("alkove-voice: no libc++.a under /usr/lib/llvm-*/lib, install libc++-dev and libc++abi-dev");
+        let dir = dir.expect("alkove-voice: no libc++.a under /usr/lib/llvm-*/lib, install libc++-21-dev and libc++abi-21-dev from apt.llvm.org");
         println!("cargo:rustc-link-search=native={}", dir.display());
         println!("cargo:rustc-link-lib=static=c++");
         println!("cargo:rustc-link-lib=static=c++abi");
