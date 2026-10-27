@@ -1,5 +1,9 @@
 {
   "version": "0.1.0",
   "url": "https://github.com/alkove-ai/alkove/releases/download/voice-v0.1.0/alkove-voice-{target}",
-  "targets": {}
+  "targets": {
+    "linux-arm64": "c2d3cde37130e6b9fd89b94562c07ad8d654c0f4788f8da82d13804cc5ade254",
+    "linux-x86_64": "620ec92e0528d4015e9607947e402f3c0c9a0c2225cfa4e601b1fa455e9a29ff",
+    "macos-arm64": "2860dd465278d2b308dce6e8247d073ec9f8847f20dba9c648b030cf5597842a"
+  }
 }
