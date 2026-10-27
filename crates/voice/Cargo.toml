@@ -1,0 +1,26 @@
+[package]
+name = "alkove-voice"
+description = "Alkove's voice commands for Claude Code: the microphone, the trigger word, the phrase after it and its transcript, natively"
+# its own version, with the mod's: tagged voice-vX.Y.Z
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "alkove-voice"
+path = "src/main.rs"
+
+[dependencies]
+alkove-core = { path = "../core" }
+alkove-engine = { path = "../engine" }
+cpal = "0.18.2"
+serde_json = "1.0.154"
+sherpa-onnx = "1.13.8"
+sha2 = "0.11.1"
+ureq = "3.5.0"
+
+[build-dependencies]
+sha2 = "0.11.1"
