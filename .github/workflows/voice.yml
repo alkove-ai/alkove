@@ -1,0 +1,64 @@
+name: voice
+
+# a tag voice-vX.Y.Z: the Claude Code mod's binary for each target, on a GitHub release of its own, then its sha256s in integrations/claude-code/binaries.json on main, which the marketplace installs from
+on:
+  push:
+    tags: ['voice-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-latest, target: macos-arm64 }
+          - { os: ubuntu-latest, target: linux-x86_64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        if: runner.os == 'Linux'
+      - run: test "voice-v$(cargo pkgid -p alkove-voice | sed 's/.*@//')" = "$GITHUB_REF_NAME"
+      - run: cargo test --release -p alkove-voice
+      - run: cargo build --release -p alkove-voice && cp target/release/alkove-voice alkove-voice-${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alkove-voice-${{ matrix.target }}
+          path: alkove-voice-${{ matrix.target }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cd dist && sha256sum alkove-voice-* > SHA256SUMS && cat SHA256SUMS
+      # not --latest: the repository's latest release stays the SDK's
+      - run: |
+          v="${GITHUB_REF_NAME#voice-v}"
+          printf 'The Claude Code mod and its binary, %s. Install:\n\n```\n/plugin install voice-commands --marketplace alkove-ai/alkove\n```\n\nSee [integrations/claude-code](https://github.com/alkove-ai/alkove/tree/main/integrations/claude-code).\n' "$v" > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Claude Code mod $v" --notes-file notes.md --latest=false
+      - run: |
+          v="${GITHUB_REF_NAME#voice-v}"
+          f=integrations/claude-code/binaries.json
+          jq --arg v "$v" --arg url "https://github.com/${{ github.repository }}/releases/download/$GITHUB_REF_NAME/alkove-voice-{target}" \
+            '.version = $v | .url = $url | .targets = ($sums | split("\n") | map(select(length > 0) | split("  ") | {key: (.[1] | ltrimstr("alkove-voice-")), value: .[0]}) | from_entries)' \
+            --rawfile sums dist/SHA256SUMS "$f" > "$f.new"
+          jq -e '.targets | length == 3' "$f.new"
+          mv "$f.new" "$f"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(voice): binaries.json for $GITHUB_REF_NAME, its sha256s"
+          git push origin main
