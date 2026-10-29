@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wyoming-alkove"
+dynamic = ["version"]
+description = "Wyoming server for Alkove's Spot: typed wake words for Home Assistant, in 7 languages, with no training"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+authors = [{ name = "Eddy Bordi" }]
+keywords = ["wake-word", "wyoming", "home-assistant", "keyword-spotting", "on-device"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = ["alkove>=0.3.2,<0.4", "wyoming>=1.8,<2", "numpy>=1.21"]
+
+[project.urls]
+Homepage = "https://alkove.ai"
+Repository = "https://github.com/alkove-ai/alkove"
+
+[project.scripts]
+wyoming-alkove = "wyoming_alkove.__main__:run"
+
+[tool.hatch.version]
+path = "wyoming_alkove/__init__.py"
