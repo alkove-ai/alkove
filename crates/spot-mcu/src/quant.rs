@@ -58,10 +58,38 @@ pub fn round_clear(v: f32, tol: f32) -> Option<i32> {
     }
 }
 
+// round_clear() for the hot loops: None past +-300 too (saturated or not, the exact path decides)
+#[inline]
+pub fn round_near(v: f32, tol: f32) -> Option<i32> {
+    if v.is_nan() || v.abs() >= 300.0 {
+        return None;
+    }
+    let r = (v + ROUND) - ROUND;
+    if 0.5 - (v - r).abs() <= tol {
+        None
+    } else {
+        Some(r as i32)
+    }
+}
+
+// requantize() for mult > 0 and shift <= 0, as Spot's: branchless, equal while the sums stay far from i32's ends
+#[inline]
+pub fn requantize_down(acc: i32, mult: i32, right: u32) -> i32 {
+    let p = acc as i64 * mult as i64;
+    let neg = (acc >> 31) as i64;
+    // TFLite's nudge and truncation toward zero, for either sign
+    let hi = (((p ^ neg) - neg + (1 << 30) + neg) >> 31) as i32;
+    let hi = (hi ^ neg as i32) - neg as i32;
+    if right == 0 {
+        return hi;
+    }
+    (hi + (1 << (right - 1)) - (hi < 0) as i32) >> right
+}
+
 // quantize() to the bit, multiplying by 1 / scale: the division only near a tie (|x * inv - x / scale| < 1e-4 below 512)
 #[inline]
 pub fn quantize_fast(x: f32, inv: f32, scale: f32, zero: i32) -> i8 {
-    match round_clear(x * inv, 1e-3) {
+    match round_near(x * inv, 1e-3) {
         Some(r) => sat8(r + zero),
         None => quantize(x, scale, zero),
     }
@@ -199,6 +227,18 @@ mod tests {
         assert_eq!(requantize(6, half, -1), 2);
         assert_eq!(requantize(-6, half, -1), -2);
         assert_eq!(requantize(7, half, 1), 7);
+    }
+
+    #[test]
+    fn requantize_down_is_requantize() {
+        let mut s = 7u64;
+        for _ in 0..2_000_000 {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let acc = ((s >> 20) as i32) >> (s % 9) as i32;
+            let mult = (1 << 30) + ((s >> 7) as i32 & 0x3fff_ffff);
+            let shift = -(((s >> 40) % 16) as i32);
+            assert_eq!(requantize_down(acc, mult, (-shift) as u32), requantize(acc, mult, shift), "{acc} {mult} {shift}");
+        }
     }
 
     #[test]

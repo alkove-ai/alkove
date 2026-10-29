@@ -8,7 +8,7 @@ use alkove_engine::math;
 
 pub use fbank::{Fbank, Features, CHUNK, MELS};
 pub use file::{write_f32, Error, File};
-use quant::{dense, dequantize, quantize, quantize_fast, requantize, round_clear, sat8, Requant};
+use quant::{dense, dequantize, quantize, quantize_fast, requantize, requantize_down, round_clear, round_near, sat8, Requant};
 
 #[derive(Clone, Copy, Default)]
 #[repr(C, align(16))]
@@ -56,9 +56,9 @@ pub mod profile {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Instant;
 
-    pub const NAMES: [&str; 9] = ["fbank", "front", "dw + norm", "up", "gelu", "down", "residual", "vad head", "logits"];
+    pub const NAMES: [&str; 11] = ["fbank", "front", "norm", "up", "gelu", "down", "residual", "vad head", "logits", "quantize h", "dw"];
     // microseconds: the ESP32-S3 has no 64-bit atomics
-    pub static US: [AtomicU32; 9] = [const { AtomicU32::new(0) }; 9];
+    pub static US: [AtomicU32; 11] = [const { AtomicU32::new(0) }; 11];
 
     pub fn lap(i: usize, t: &mut Instant) {
         US[i].fetch_add(t.elapsed().as_micros() as u32, Ordering::Relaxed);
@@ -184,19 +184,23 @@ impl Norm {
         }
     }
 
-    // run() then quantize(), to the bit, without a division unless a value lies near a tie
-    fn quantized(&self, x: &[f32], scale: f32, inv: f32, zero: i32, out: &mut [i8]) {
+    // run() then quantize(), to the bit, without a division unless a value lies near a tie; tol from tolerance()
+    fn quantized(&self, x: &[f32], scale: f32, inv: f32, zero: i32, tol: f32, out: &mut [i8]) {
         let (mean, sd) = self.stats(x);
         let isd = 1.0 / sd;
-        for j in 0..self.gamma.len() {
-            let a = ((x[j] - mean) * isd) * self.gamma[j];
-            let n = a + self.beta[j];
-            let tol = 1e-3 + (a.abs() + n.abs()) * inv * 1e-6;
-            out[j] = match round_clear(n * inv, tol) {
+        for ((((o, &v), g), b), j) in out.iter_mut().zip(x).zip(&self.gamma).zip(&self.beta).zip(0..) {
+            let n = ((v - mean) * isd) * g + b;
+            *o = match round_near(n * inv, tol) {
                 Some(r) => sat8(r + zero),
                 None => quantize(((x[j] - mean) / sd) * self.gamma[j] + self.beta[j], scale, zero),
             };
         }
+    }
+
+    // within |n * inv| < 300: 1 / sd's rounding moves (x - mean) * gamma by ~2e-7 of itself, |(x - mean) * gamma| <= |n| + |beta|
+    fn tolerance(&self, inv: f32) -> f32 {
+        let beta = self.beta.iter().fold(0f32, |m, b| m.max(b.abs()));
+        1e-3 + (600.0 + beta * inv) * 1e-6
     }
 }
 
@@ -208,6 +212,9 @@ struct Block {
     dw_bias: Vec<i32>,
     dw_mult: Vec<i32>,
     dw_shift: Vec<i32>,
+    // -shift when every shift is <= 0 and every multiplier > 0, as in Spot: requantize_down
+    dw_right: Option<Vec<u32>>,
+    norm_tol: f32,
     // input, dw out, norm out, up out, gelu out, down out
     s: [f32; 6],
     inv: [f32; 6],
@@ -265,17 +272,21 @@ impl Spot {
             let z = f.i32(&format!("{p}.zps"), 6)?;
             let dw = f.i8(&format!("{p}.dw.w"), d * k)?;
             let up_bias = f.f32(&format!("{p}.up.bias"), ff)?;
+            let (dw_mult, dw_shift) = (f.i32(&format!("{p}.dw.mult"), d)?, f.i32(&format!("{p}.dw.shift"), d)?);
+            let norm = Norm::read(&f, &format!("{p}.norm"), d)?;
             blocks.push(Block {
                 dil: dils[i] as usize,
                 look: looks[i] != 0,
                 dw: (0..k * d).map(|j| dw[(j % d) * k + j / d] as i32).collect(),
                 dw_bias: f.i32(&format!("{p}.dw.bias"), d)?.iter().enumerate().map(|(c, b)| b - z[0] * (0..k).map(|t| dw[c * k + t] as i32).sum::<i32>()).collect(),
-                dw_mult: f.i32(&format!("{p}.dw.mult"), d)?,
-                dw_shift: f.i32(&format!("{p}.dw.shift"), d)?,
+                dw_right: dw_mult.iter().zip(&dw_shift).all(|(&m, &sh)| m > 0 && sh <= 0).then(|| dw_shift.iter().map(|&sh| (-sh) as u32).collect()),
+                norm_tol: norm.tolerance(1.0 / s[2]),
+                norm,
+                dw_mult,
+                dw_shift,
                 inv: [0, 1, 2, 3, 4, 5].map(|j| 1.0 / s[j]),
                 s: s[..].try_into().unwrap(),
                 z: z[..].try_into().unwrap(),
-                norm: Norm::read(&f, &format!("{p}.norm"), d)?,
                 up: Dense::read(&f, &format!("{p}.up"), d, ff, false)?,
                 up_gelu: UpGelu::new(&up_bias, s[3], z[3], 1.0 / s[4]),
                 up_bias,
@@ -507,6 +518,7 @@ impl<'a> Stream<'a> {
             w.hq.extend_from_slice(&self.cache[i]);
             w.hq.extend(w.h.iter().map(|&v| quantize_fast(v, blk.inv[0], blk.s[0], blk.z[0])));
             self.cache[i].copy_from_slice(&w.hq[b * d..]);
+            lap!(t, 9);
             for o in 0..b {
                 let res = if !blk.look {
                     &w.h[o * d..(o + 1) * d]
@@ -524,11 +536,22 @@ impl<'a> Stream<'a> {
                         *a += *x as i32 * wt;
                     }
                 }
-                for c in 0..d {
-                    let v = sat8(requantize(w.acc[c], blk.dw_mult[c], blk.dw_shift[c]) + blk.z[1]);
-                    w.y[c] = w.x[o * d + c] + dequantize(v, blk.s[1], blk.z[1]);
+                let xo = &w.x[o * d..(o + 1) * d];
+                match &blk.dw_right {
+                    Some(right) => {
+                        for ((((y, &a), &m), &r), &x) in w.y.iter_mut().zip(&w.acc).zip(&blk.dw_mult).zip(right).zip(xo) {
+                            *y = x + dequantize(sat8(requantize_down(a, m, r) + blk.z[1]), blk.s[1], blk.z[1]);
+                        }
+                    }
+                    None => {
+                        for ((((y, &a), &m), &sh), &x) in w.y.iter_mut().zip(&w.acc).zip(&blk.dw_mult).zip(&blk.dw_shift).zip(xo) {
+                            *y = x + dequantize(sat8(requantize(a, m, sh) + blk.z[1]), blk.s[1], blk.z[1]);
+                        }
+                    }
                 }
-                blk.norm.quantized(&w.y, blk.s[2], blk.inv[2], blk.z[2], &mut w.a8[o * d..(o + 1) * d]);
+                lap!(t, 10);
+                blk.norm.quantized(&w.y, blk.s[2], blk.inv[2], blk.z[2], blk.norm_tol, &mut w.a8[o * d..(o + 1) * d]);
+                lap!(t, 2);
             }
             if blk.look {
                 self.last[i].copy_from_slice(&w.h[(b - 1) * d..]);
