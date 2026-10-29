@@ -21,3 +21,6 @@ cc = { version = "1", optional = true }
 
 [dependencies]
 alkove-engine = { path = "../engine" }
+
+[dev-dependencies]
+alkove-core = { path = "../core" }

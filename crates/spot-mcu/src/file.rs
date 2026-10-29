@@ -84,6 +84,11 @@ impl<'a> File<'a> {
         Ok(self.get(name, 2, len)?.bytes.as_chunks::<4>().0.iter().map(|w| i32::from_le_bytes(*w)).collect())
     }
 
+    // an array's raw little-endian bytes, borrowed from the file
+    pub fn raw(&self, name: &str) -> Result<&'a [u8], Error> {
+        Ok(self.entries.iter().find(|e| e.name == name).ok_or_else(|| Error(format!("no {name}")))?.bytes)
+    }
+
     // an f32 array whatever its length, for test vectors
     pub fn floats(&self, name: &str) -> Result<(Vec<usize>, Vec<f32>), Error> {
         let e = self.entries.iter().find(|e| e.name == name).ok_or_else(|| Error(format!("no {name}")))?;
