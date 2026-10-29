@@ -105,6 +105,14 @@ const Q4_SHIFT: i32 = 4;
 
 // 4-bit rows to int8, as spot_mcu_export.py's q4(): w8 = clamp(((code - zero) * m + 8) >> 4, -127, 127); codes low nibble first, a zero and a multiplier per block of 32
 pub fn unpack_q4(codes: &[u8], zero: &[u8], m: &[u8], out: &mut [i8]) {
+    #[cfg(feature = "pie")]
+    if pie::ON.load(core::sync::atomic::Ordering::Relaxed) {
+        return pie::unpack_q4(codes, zero, m, out);
+    }
+    unpack_q4_rust(codes, zero, m, out)
+}
+
+pub fn unpack_q4_rust(codes: &[u8], zero: &[u8], m: &[u8], out: &mut [i8]) {
     let mut lut = [0i8; 16];
     for (((block, o), &z), &m) in codes.as_chunks::<{ Q4_BLOCK / 2 }>().0.iter().zip(out.as_chunks_mut::<Q4_BLOCK>().0).zip(zero).zip(m) {
         let (z, m) = (z as i32, m as i32);
@@ -114,6 +122,27 @@ pub fn unpack_q4(codes: &[u8], zero: &[u8], m: &[u8], out: &mut [i8]) {
         for (pair, &c) in o.as_chunks_mut::<2>().0.iter_mut().zip(block) {
             *pair = [lut[(c & 15) as usize], lut[(c >> 4) as usize]];
         }
+    }
+}
+
+// the 4-bit unpacking in the ESP32-S3's vector instructions (pie/alk_unpack_q4.S): codes and out 16-byte aligned, |code - zero| * m <= 2031
+#[cfg(feature = "pie")]
+pub mod pie {
+    use core::sync::atomic::AtomicBool;
+
+    // through PIE (true) or the Rust loop (false), to check one against the other on the chip
+    pub static ON: AtomicBool = AtomicBool::new(true);
+
+    extern "C" {
+        fn alk_unpack_q4(codes: *const u8, zero: *const u8, m: *const u8, out: *mut i8, blocks: u32);
+    }
+
+    pub fn unpack_q4(codes: &[u8], zero: &[u8], m: &[u8], out: &mut [i8]) {
+        let blocks = zero.len();
+        assert!(codes.len() == blocks * super::Q4_BLOCK / 2 && m.len() == blocks && out.len() == blocks * super::Q4_BLOCK);
+        assert!((codes.as_ptr() as usize).is_multiple_of(16) && (out.as_ptr() as usize).is_multiple_of(16));
+        // Safety: lengths and alignment checked above.
+        unsafe { alk_unpack_q4(codes.as_ptr(), zero.as_ptr(), m.as_ptr(), out.as_mut_ptr(), blocks as u32) }
     }
 }
 

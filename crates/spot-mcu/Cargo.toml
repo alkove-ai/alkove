@@ -11,8 +11,13 @@ publish = false
 [features]
 # dense layers through Espressif's ESP-NN (ESP32-S3), linked by the firmware
 esp-nn = []
+# 4-bit unpacking in the ESP32-S3's vector instructions (pie/alk_unpack_q4.S, built with xtensa-esp32s3-elf-gcc or $ALKOVE_PIE_CC)
+pie = ["dep:cc"]
 # time per part of a step (profile::NS)
 profile = []
+
+[build-dependencies]
+cc = { version = "1", optional = true }
 
 [dependencies]
 alkove-engine = { path = "../engine" }

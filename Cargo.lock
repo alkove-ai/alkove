@@ -53,6 +53,7 @@ name = "alkove-spot-mcu"
 version = "0.1.0"
 dependencies = [
  "alkove-engine",
+ "cc",
 ]
 
 [[package]]
