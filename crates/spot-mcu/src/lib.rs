@@ -80,10 +80,28 @@ macro_rules! start {
     };
 }
 
+// a dense layer's weights: copied, or borrowed from a file that lives for the whole program (a model in flash or rodata)
+enum Weights {
+    Own(Buf),
+    Ref(&'static [i8]),
+}
+
+impl std::ops::Deref for Weights {
+    type Target = [i8];
+    fn deref(&self) -> &[i8] {
+        match self {
+            Weights::Own(b) => b,
+            Weights::Ref(r) => r,
+        }
+    }
+}
+
+type Take<'f> = dyn FnMut(&str, usize) -> Result<Weights, Error> + 'f;
+
 struct Dense {
     k: usize,
     n: usize,
-    w: Buf,
+    w: Weights,
     bias: Vec<i32>,
     mult: Vec<i32>,
     shift: Vec<i32>,
@@ -92,12 +110,12 @@ struct Dense {
 }
 
 impl Dense {
-    fn read(f: &File, p: &str, k: usize, n: usize, bias: bool) -> Result<Dense, Error> {
+    fn read(f: &File, take: &mut Take, p: &str, k: usize, n: usize, bias: bool) -> Result<Dense, Error> {
         let zp = f.i32(&format!("{p}.zp"), 2)?;
         Ok(Dense {
             k,
             n,
-            w: Buf::from(&f.i8(&format!("{p}.w"), k * n)?),
+            w: take(&format!("{p}.w"), k * n)?,
             bias: if bias { f.i32(&format!("{p}.bias"), n)? } else { vec![0; n] },
             mult: f.i32(&format!("{p}.mult"), n)?,
             shift: f.i32(&format!("{p}.shift"), n)?,
@@ -255,8 +273,22 @@ pub struct Spot {
 }
 
 impl Spot {
+    // every array copied
     pub fn load(bytes: &[u8]) -> Result<Spot, Error> {
         let f = File::parse(bytes)?;
+        Spot::read(&f, &mut |name, len| Ok(Weights::Own(Buf::from(&f.i8(name, len)?))))
+    }
+
+    // the dense layers' weights (3.6 of Spot's 4 MB) borrowed where 16-byte aligned, the rest copied: no second copy of a model kept in memory anyway
+    pub fn load_static(bytes: &'static [u8]) -> Result<Spot, Error> {
+        let f = File::parse(bytes)?;
+        Spot::read(&f, &mut |name, len| {
+            let w = f.i8_ref(name, len)?;
+            Ok(if (w.as_ptr() as usize).is_multiple_of(16) { Weights::Ref(w) } else { Weights::Own(Buf::from(w)) })
+        })
+    }
+
+    fn read(f: &File, take: &mut Take) -> Result<Spot, Error> {
         let c = f.i32("config", 8)?;
         let [d, ff, nb, k, stride, vad_block, gru, phones] = [0, 1, 2, 3, 4, 5, 6, 7].map(|i| c[i] as usize);
         let (dils, looks) = (f.i32("dils", nb)?, f.i32("looks", nb)?);
@@ -273,7 +305,7 @@ impl Spot {
             let dw = f.i8(&format!("{p}.dw.w"), d * k)?;
             let up_bias = f.f32(&format!("{p}.up.bias"), ff)?;
             let (dw_mult, dw_shift) = (f.i32(&format!("{p}.dw.mult"), d)?, f.i32(&format!("{p}.dw.shift"), d)?);
-            let norm = Norm::read(&f, &format!("{p}.norm"), d)?;
+            let norm = Norm::read(f, &format!("{p}.norm"), d)?;
             blocks.push(Block {
                 dil: dils[i] as usize,
                 look: looks[i] != 0,
@@ -287,10 +319,10 @@ impl Spot {
                 inv: [0, 1, 2, 3, 4, 5].map(|j| 1.0 / s[j]),
                 s: s[..].try_into().unwrap(),
                 z: z[..].try_into().unwrap(),
-                up: Dense::read(&f, &format!("{p}.up"), d, ff, false)?,
+                up: Dense::read(f, take, &format!("{p}.up"), d, ff, false)?,
                 up_gelu: UpGelu::new(&up_bias, s[3], z[3], 1.0 / s[4]),
                 up_bias,
-                down: Dense::read(&f, &format!("{p}.down"), ff, d, false)?,
+                down: Dense::read(f, take, &format!("{p}.down"), ff, d, false)?,
                 down_bias: f.f32(&format!("{p}.down.bias"), d)?,
                 scale: f.f32(&format!("{p}.scale"), d)?,
             });
@@ -307,18 +339,18 @@ impl Spot {
             s_x: fs[0],
             inv_x: 1.0 / fs[0],
             z_x: fz[0],
-            front: Dense::read(&f, "front", k * MELS, d, true)?,
+            front: Dense::read(f, take, "front", k * MELS, d, true)?,
             front_gelu,
             blocks,
-            out_norm: Norm::read(&f, "out_norm", d)?,
-            out: Linear::read(&f, "out", d, phones)?,
+            out_norm: Norm::read(f, "out_norm", d)?,
+            out: Linear::read(f, "out", d, phones)?,
             vad_block,
-            vad_norm: Norm::read(&f, "vad_head.inp.0", d)?,
-            vad_inp: Linear::read(&f, "vad_head.inp.1", d, gru)?,
+            vad_norm: Norm::read(f, "vad_head.inp.0", d)?,
+            vad_inp: Linear::read(f, "vad_head.inp.1", d, gru)?,
             gru_i: Linear { k: gru, n: gru3, w: f.f32("vad_head.gru.weight_ih_l0", gru * gru3)?, b: f.f32("vad_head.gru.bias_ih_l0", gru3)? },
             gru_h: Linear { k: gru, n: gru3, w: f.f32("vad_head.gru.weight_hh_l0", gru * gru3)?, b: f.f32("vad_head.gru.bias_hh_l0", gru3)? },
-            vad_out: Linear::read(&f, "vad_head.out", gru, 1)?,
-            fbank: Fbank::read(&f)?,
+            vad_out: Linear::read(f, "vad_head.out", gru, 1)?,
+            fbank: Fbank::read(f)?,
             gelu: Gelu::new(),
         })
     }

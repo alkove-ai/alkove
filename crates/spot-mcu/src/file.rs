@@ -69,6 +69,13 @@ impl<'a> File<'a> {
         Ok(self.get(name, 0, len)?.bytes.as_chunks::<4>().0.iter().map(|w| f32::from_le_bytes(*w)).collect())
     }
 
+    // borrowed from the file's bytes
+    pub fn i8_ref(&self, name: &str, len: usize) -> Result<&'a [i8], Error> {
+        let b = self.get(name, 1, len)?.bytes;
+        // Safety: i8 and u8 have the same size and alignment.
+        Ok(unsafe { std::slice::from_raw_parts(b.as_ptr() as *const i8, b.len()) })
+    }
+
     pub fn i8(&self, name: &str, len: usize) -> Result<Vec<i8>, Error> {
         Ok(self.get(name, 1, len)?.bytes.iter().map(|&v| v as i8).collect())
     }
