@@ -95,7 +95,7 @@ jobs:
       - run: cd "$RUNNER_TEMP" && python -m pytest -q -p no:cacheprovider --import-mode=importlib "$GITHUB_WORKSPACE/python/tests"
         shell: bash
 
-  # the LiveKit and Pipecat integrations against the versions they are tested with
+  # the LiveKit, Pipecat and Wyoming integrations against the versions they are tested with
   integrations:
     runs-on: ubuntu-latest
     steps:
@@ -108,9 +108,9 @@ jobs:
           working-directory: python
           args: --profile python --out dist
           manylinux: auto
-      - run: pip install python/dist/*.whl "livekit-agents==1.8.8" "pipecat-ai==1.13.0" pytest
-      - run: pip install --no-deps -e integrations/livekit -e integrations/pipecat
-      - run: python -m pytest -q integrations/livekit/tests integrations/pipecat/tests
+      - run: pip install python/dist/*.whl "livekit-agents==1.8.8" "pipecat-ai==1.13.0" "wyoming[zeroconf]==1.10.2" pytest
+      - run: pip install --no-deps -e integrations/livekit -e integrations/pipecat -e integrations/wyoming
+      - run: python -m pytest -q integrations/livekit/tests integrations/pipecat/tests integrations/wyoming/tests
 
   # the Android library: its binding, its tests on the host JVM (the web's digests once the models can be downloaded), the AARs and the example minified (R8 against the consumer rules)
   android:

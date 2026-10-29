@@ -11,7 +11,7 @@ pip install wyoming-alkove
 wyoming-alkove --uri tcp://0.0.0.0:10400 --word "ok nabu" --word "fr:salut maison" --zeroconf
 ```
 
-The models (Spot 2.8 MB, Lex 1.8 MB) are downloaded once from Hugging Face and checked by their sha256; `--models-dir` reads them from a folder. Then add the Wyoming integration in Home Assistant (found by `--zeroconf`, or by host and port) and pick the word in the satellite's settings.
+The models (Spot 2.8 MB, Lex 1.8 MB) are downloaded once from Hugging Face and checked by their sha256; `--models-dir` reads them from a folder. Then add the Wyoming integration in Home Assistant (found by `--zeroconf`, or by host and port) and pick the word in the satellite's settings, or as the wake word engine of an Assist pipeline. Tried with Home Assistant 2026.10.
 
 - `--word "text"` (repeatable): a word in `--lang` (default `en`); `"fr:text"` for another language. Lex compiles it when the server starts. Its id for Wyoming is the text in lower case with underscores: `ok_nabu`.
 - `--any-word`: a name a client asks for that no `--word` gave is compiled on demand, in `--lang`.
