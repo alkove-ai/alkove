@@ -24,7 +24,8 @@
   <a href="https://alkove.ai/docs/">Docs</a> ·
   <a href="https://alkove.ai/docs/start/android/">Android</a> ·
   <a href="./integrations/livekit">LiveKit Agents</a> ·
-  <a href="./integrations/pipecat">Pipecat</a>
+  <a href="./integrations/pipecat">Pipecat</a> ·
+  <a href="./integrations/esphome">Home Assistant</a>
 </p>
 
 <br>
@@ -114,6 +115,28 @@ from pipecat_alkove import AlkoveFilter, AlkoveVADAnalyzer
 
 params = TransportParams(audio_in_enabled=True, audio_in_filter=AlkoveFilter())
 vad = AlkoveVADAnalyzer()
+```
+
+### Home Assistant
+
+Typed wake words on an ESP32-S3, in place of `micro_wake_word` ([the ESPHome component](./integrations/esphome)):
+
+```yaml
+alkove_spot:
+  microphone: my_microphone
+  words:
+    - text: ok Nabu
+      lang: en
+  on_wake_word_detected:
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+```
+
+On a satellite, in place of openWakeWord ([the Wyoming server](./integrations/wyoming)):
+
+```sh
+pip install wyoming-alkove
+wyoming-alkove --uri tcp://0.0.0.0:10400 --word "ok nabu" --word "fr:salut maison" --zeroconf
 ```
 
 Python on its own: `pip install alkove`, see [the Python package](./python).
