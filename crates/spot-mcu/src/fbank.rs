@@ -14,14 +14,17 @@ const BINS: usize = NFFT / 2;
 
 pub struct Fbank {
     window: Vec<f32>,
-    banks: Vec<f32>,
+    // per mel band, its nonzero (bin, weight) in bin order: the dense sum adds exact zeros for the others
+    bands: Vec<Vec<(u16, f32)>>,
     cos: Vec<f32>,
     sin: Vec<f32>,
 }
 
 impl Fbank {
     pub fn read(f: &File) -> Result<Fbank, Error> {
-        Ok(Fbank { window: f.f32("fbank.window", WIN)?, banks: f.f32("fbank.banks", BINS * MELS)?, cos: f.f32("fbank.cos", BINS)?, sin: f.f32("fbank.sin", BINS)? })
+        let banks = f.f32("fbank.banks", BINS * MELS)?;
+        let bands = (0..MELS).map(|m| (0..BINS).filter(|&k| banks[k * MELS + m] != 0.0).map(|k| (k as u16, banks[k * MELS + m])).collect()).collect();
+        Ok(Fbank { window: f.f32("fbank.window", WIN)?, bands, cos: f.f32("fbank.cos", BINS)?, sin: f.f32("fbank.sin", BINS)? })
     }
 
     // in place, radix 2, decimation in time
@@ -70,10 +73,10 @@ impl Fbank {
         for (k, p) in power.iter_mut().enumerate() {
             *p = re[k] * re[k] + im[k] * im[k];
         }
-        out[..MELS].fill(0.0);
-        for (p, row) in power.iter().zip(self.banks.as_chunks::<MELS>().0) {
-            for (o, w) in out.iter_mut().zip(row) {
-                *o += p * w;
+        for (o, band) in out[..MELS].iter_mut().zip(&self.bands) {
+            *o = 0.0;
+            for &(k, w) in band {
+                *o += power[k as usize] * w;
             }
         }
         for o in out[..MELS].iter_mut() {

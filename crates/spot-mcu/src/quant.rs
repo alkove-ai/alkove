@@ -43,6 +43,30 @@ pub fn quantize(x: f32, scale: f32, zero: i32) -> i8 {
     sat8(v as i32 + zero)
 }
 
+// round(v) when no tie lies within `tol` of v, else None: v is an approximate quotient, and the exact one gives this integer too
+#[inline]
+pub fn round_clear(v: f32, tol: f32) -> Option<i32> {
+    if v.is_nan() {
+        return None;
+    }
+    let v = v.clamp(-512.0, 512.0);
+    let r = (v + ROUND) - ROUND;
+    if 0.5 - (v - r).abs() <= tol {
+        None
+    } else {
+        Some(r as i32)
+    }
+}
+
+// quantize() to the bit, multiplying by 1 / scale: the division only near a tie (|x * inv - x / scale| < 1e-4 below 512)
+#[inline]
+pub fn quantize_fast(x: f32, inv: f32, scale: f32, zero: i32) -> i8 {
+    match round_clear(x * inv, 1e-3) {
+        Some(r) => sat8(r + zero),
+        None => quantize(x, scale, zero),
+    }
+}
+
 #[inline]
 pub fn dequantize(q: i8, scale: f32, zero: i32) -> f32 {
     (q as i32 - zero) as f32 * scale

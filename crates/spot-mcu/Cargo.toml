@@ -11,6 +11,8 @@ publish = false
 [features]
 # dense layers through Espressif's ESP-NN (ESP32-S3), linked by the firmware
 esp-nn = []
+# time per part of a step (profile::NS)
+profile = []
 
 [dependencies]
 alkove-engine = { path = "../engine" }

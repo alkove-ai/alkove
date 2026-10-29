@@ -8,12 +8,82 @@ use alkove_engine::math;
 
 pub use fbank::{Fbank, Features, CHUNK, MELS};
 pub use file::{write_f32, Error, File};
-use quant::{dense, dequantize, quantize, requantize, sat8, Requant};
+use quant::{dense, dequantize, quantize, quantize_fast, requantize, round_clear, sat8, Requant};
+
+#[derive(Clone, Copy, Default)]
+#[repr(C, align(16))]
+struct A16([i8; 16]);
+
+// int8 on 16-byte boundaries: ESP-NN's fast paths load 8 and 16 bytes at a time and ignore the low address bits
+#[derive(Default)]
+struct Buf {
+    raw: Vec<A16>,
+    len: usize,
+}
+
+impl Buf {
+    fn from(v: &[i8]) -> Buf {
+        let mut b = Buf::default();
+        b.resize(v.len());
+        b.copy_from_slice(v);
+        b
+    }
+
+    fn resize(&mut self, len: usize) {
+        self.raw.resize(len.div_ceil(16), A16::default());
+        self.len = len;
+    }
+}
+
+impl std::ops::Deref for Buf {
+    type Target = [i8];
+    fn deref(&self) -> &[i8] {
+        // Safety: raw holds at least len bytes of plain i8.
+        unsafe { std::slice::from_raw_parts(self.raw.as_ptr() as *const i8, self.len) }
+    }
+}
+
+impl std::ops::DerefMut for Buf {
+    fn deref_mut(&mut self) -> &mut [i8] {
+        // Safety: as deref, borrowed mutably.
+        unsafe { std::slice::from_raw_parts_mut(self.raw.as_mut_ptr() as *mut i8, self.len) }
+    }
+}
+
+// time spent in each part of a step, to find what to make light on the chip
+#[cfg(feature = "profile")]
+pub mod profile {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Instant;
+
+    pub const NAMES: [&str; 9] = ["fbank", "front", "dw + norm", "up", "gelu", "down", "residual", "vad head", "logits"];
+    // microseconds: the ESP32-S3 has no 64-bit atomics
+    pub static US: [AtomicU32; 9] = [const { AtomicU32::new(0) }; 9];
+
+    pub fn lap(i: usize, t: &mut Instant) {
+        US[i].fetch_add(t.elapsed().as_micros() as u32, Ordering::Relaxed);
+        *t = Instant::now();
+    }
+}
+
+macro_rules! lap {
+    ($t:ident, $i:expr) => {
+        #[cfg(feature = "profile")]
+        profile::lap($i, &mut $t);
+    };
+}
+
+macro_rules! start {
+    ($t:ident) => {
+        #[cfg(feature = "profile")]
+        let mut $t = std::time::Instant::now();
+    };
+}
 
 struct Dense {
     k: usize,
     n: usize,
-    w: Vec<i8>,
+    w: Buf,
     bias: Vec<i32>,
     mult: Vec<i32>,
     shift: Vec<i32>,
@@ -27,7 +97,7 @@ impl Dense {
         Ok(Dense {
             k,
             n,
-            w: f.i8(&format!("{p}.w"), k * n)?,
+            w: Buf::from(&f.i8(&format!("{p}.w"), k * n)?),
             bias: if bias { f.i32(&format!("{p}.bias"), n)? } else { vec![0; n] },
             mult: f.i32(&format!("{p}.mult"), n)?,
             shift: f.i32(&format!("{p}.shift"), n)?,
@@ -36,15 +106,9 @@ impl Dense {
         })
     }
 
-    // rows start every `stride` values of x
-    fn run(&self, x: &[i8], rows: usize, stride: usize, out: &mut [i8]) {
+    fn run(&self, x: &[i8], rows: usize, out: &mut [i8]) {
         let q = Requant { bias: &self.bias, mult: &self.mult, shift: &self.shift, zin: self.zin, zout: self.zout };
-        if stride == self.k {
-            dense(x, rows, self.k, &self.w, self.n, &q, out);
-        } else {
-            let rows_of: Vec<i8> = (0..rows).flat_map(|r| x[r * stride..r * stride + self.k].iter().copied()).collect();
-            dense(&rows_of, rows, self.k, &self.w, self.n, &q, out);
-        }
+        dense(x, rows, self.k, &self.w, self.n, &q, out);
     }
 }
 
@@ -106,13 +170,32 @@ impl Norm {
         Ok(Norm { gamma: f.f32(&format!("{p}.weight"), n)?, beta: f.f32(&format!("{p}.bias"), n)? })
     }
 
-    fn run(&self, x: &[f32], out: &mut [f32]) {
+    fn stats(&self, x: &[f32]) -> (f32, f32) {
         let n = self.gamma.len();
         let mean = lane_sum(x[..n].iter().copied()) / n as f32;
         let var = lane_sum(x[..n].iter().map(|v| (v - mean) * (v - mean))) / n as f32;
-        let sd = (var + 1e-5).sqrt();
-        for j in 0..n {
+        (mean, (var + 1e-5).sqrt())
+    }
+
+    fn run(&self, x: &[f32], out: &mut [f32]) {
+        let (mean, sd) = self.stats(x);
+        for j in 0..self.gamma.len() {
             out[j] = ((x[j] - mean) / sd) * self.gamma[j] + self.beta[j];
+        }
+    }
+
+    // run() then quantize(), to the bit, without a division unless a value lies near a tie
+    fn quantized(&self, x: &[f32], scale: f32, inv: f32, zero: i32, out: &mut [i8]) {
+        let (mean, sd) = self.stats(x);
+        let isd = 1.0 / sd;
+        for j in 0..self.gamma.len() {
+            let a = ((x[j] - mean) * isd) * self.gamma[j];
+            let n = a + self.beta[j];
+            let tol = 1e-3 + (a.abs() + n.abs()) * inv * 1e-6;
+            out[j] = match round_clear(n * inv, tol) {
+                Some(r) => sat8(r + zero),
+                None => quantize(((x[j] - mean) / sd) * self.gamma[j] + self.beta[j], scale, zero),
+            };
         }
     }
 }
@@ -120,12 +203,14 @@ impl Norm {
 struct Block {
     dil: usize,
     look: bool,
-    dw: Vec<i8>,
+    // [tap][channel]; the input zero point folded into the bias: (x - z) . w = x . w - z * sum(w)
+    dw: Vec<i32>,
     dw_bias: Vec<i32>,
     dw_mult: Vec<i32>,
     dw_shift: Vec<i32>,
     // input, dw out, norm out, up out, gelu out, down out
     s: [f32; 6],
+    inv: [f32; 6],
     z: [i32; 6],
     norm: Norm,
     up: Dense,
@@ -144,6 +229,7 @@ pub struct Spot {
     mean: Vec<f32>,
     std: Vec<f32>,
     s_x: f32,
+    inv_x: f32,
     z_x: i32,
     front: Dense,
     front_gelu: [f32; 256],
@@ -157,6 +243,7 @@ pub struct Spot {
     gru_h: Linear,
     vad_out: Linear,
     fbank: Fbank,
+    gelu: Gelu,
 }
 
 impl Spot {
@@ -175,13 +262,15 @@ impl Spot {
             let p = format!("blocks.{i}");
             let s = f.f32(&format!("{p}.scales"), 6)?;
             let z = f.i32(&format!("{p}.zps"), 6)?;
+            let dw = f.i8(&format!("{p}.dw.w"), d * k)?;
             blocks.push(Block {
                 dil: dils[i] as usize,
                 look: looks[i] != 0,
-                dw: f.i8(&format!("{p}.dw.w"), d * k)?,
-                dw_bias: f.i32(&format!("{p}.dw.bias"), d)?,
+                dw: (0..k * d).map(|j| dw[(j % d) * k + j / d] as i32).collect(),
+                dw_bias: f.i32(&format!("{p}.dw.bias"), d)?.iter().enumerate().map(|(c, b)| b - z[0] * (0..k).map(|t| dw[c * k + t] as i32).sum::<i32>()).collect(),
                 dw_mult: f.i32(&format!("{p}.dw.mult"), d)?,
                 dw_shift: f.i32(&format!("{p}.dw.shift"), d)?,
+                inv: [0, 1, 2, 3, 4, 5].map(|j| 1.0 / s[j]),
                 s: s.try_into().unwrap(),
                 z: z.try_into().unwrap(),
                 norm: Norm::read(&f, &format!("{p}.norm"), d)?,
@@ -202,6 +291,7 @@ impl Spot {
             mean: f.f32("mean", MELS)?,
             std: f.f32("std", MELS)?,
             s_x: fs[0],
+            inv_x: 1.0 / fs[0],
             z_x: fz[0],
             front: Dense::read(&f, "front", k * MELS, d, true)?,
             front_gelu,
@@ -215,6 +305,7 @@ impl Spot {
             gru_h: Linear { k: gru, n: gru3, w: f.f32("vad_head.gru.weight_hh_l0", gru * gru3)?, b: f.f32("vad_head.gru.bias_hh_l0", gru3)? },
             vad_out: Linear::read(&f, "vad_head.out", gru, 1)?,
             fbank: Fbank::read(&f)?,
+            gelu: Gelu::new(),
         })
     }
 
@@ -232,6 +323,59 @@ impl Spot {
     }
 }
 
+// gelu() then quantize(), to the bit: linear interpolation in a table of math::gelu, the exact path only near a tie
+const GELU_SPAN: f32 = 6.0;
+const GELU_STEP: f32 = 128.0;
+
+struct Gelu {
+    table: Vec<f32>,
+}
+
+impl Gelu {
+    fn new() -> Gelu {
+        let n = (2.0 * GELU_SPAN * GELU_STEP) as usize + 2;
+        Gelu { table: (0..n).map(|i| math::gelu(i as f32 / GELU_STEP - GELU_SPAN)).collect() }
+    }
+
+    #[inline]
+    fn quantized(&self, t: f32, scale: f32, inv: f32, zero: i32) -> i8 {
+        // past +-5.55, erf is exactly +-1 and gelu exactly t or -0
+        let g = if t >= GELU_SPAN {
+            t
+        } else if t <= -GELU_SPAN || t.is_nan() {
+            return quantize(math::gelu(t), scale, zero);
+        } else {
+            let p = (t + GELU_SPAN) * GELU_STEP;
+            let i = p as usize;
+            let f = p - i as f32;
+            self.table[i] + (self.table[i + 1] - self.table[i]) * f
+        };
+        // interpolation within 0.1 / 128^2 of gelu (|gelu''| < 0.8), plus a few ulps of the table
+        match round_clear(g * inv, 1e-3 + 2e-5 * inv) {
+            Some(r) => sat8(r + zero),
+            None => quantize(math::gelu(t), scale, zero),
+        }
+    }
+}
+
+// a step's buffers, kept from one step to the next: sized for the most output frames per step seen
+#[derive(Default)]
+struct Work {
+    raw: Vec<f32>,
+    xq: Vec<i8>,
+    rows: Buf,
+    q: Buf,
+    a8: Buf,
+    u: Buf,
+    hq: Vec<i8>,
+    acc: Vec<i32>,
+    h: Vec<f32>,
+    x: Vec<f32>,
+    y: Vec<f32>,
+    n: Vec<f32>,
+    v: Vec<f32>,
+}
+
 pub struct Stream<'a> {
     spot: &'a Spot,
     feats: Vec<i8>,
@@ -239,7 +383,7 @@ pub struct Stream<'a> {
     last: Vec<Vec<f32>>,
     gru: Vec<f32>,
     audio: Features,
-    raw: Vec<f32>,
+    w: Work,
 }
 
 impl<'a> Stream<'a> {
@@ -253,93 +397,115 @@ impl<'a> Stream<'a> {
             last: spot.blocks.iter().map(|_| vec![0.0; d]).collect(),
             gru: vec![0.0; spot.gru_i.k],
             audio: Features::default(),
-            raw: Vec::new(),
+            w: Work::default(),
         }
     }
 
     // 16 kHz audio in [-1, 1], a multiple of 480 samples: one output frame per 480
     pub fn push(&mut self, audio: &[f32], logp: &mut [f32], vad: &mut [f32]) {
-        let mut raw = std::mem::take(&mut self.raw);
+        start!(t);
+        let mut raw = std::mem::take(&mut self.w.raw);
         raw.resize(audio.len() / CHUNK * self.spot.stride * MELS, 0.0);
         self.audio.push(&self.spot.fbank, audio, &mut raw);
+        lap!(t, 0);
         self.step(&raw, logp, vad);
-        self.raw = raw;
+        self.w.raw = raw;
     }
 
     // raw fbank, `stride` frames of 80 per output frame -> log-probabilities of the phonemes and probability of speech per output frame
     pub fn step(&mut self, feats: &[f32], logp: &mut [f32], vad: &mut [f32]) {
+        start!(t);
         let s = self.spot;
         let (d, ff, k) = (s.d, s.ff, s.k);
         let frames = feats.len() / MELS;
         assert!(frames.is_multiple_of(s.stride));
         let b = frames / s.stride;
+        let mut w = std::mem::take(&mut self.w);
 
         let hist = (k - s.stride) * MELS;
-        let mut xq = Vec::with_capacity(hist + frames * MELS);
-        xq.extend_from_slice(&self.feats);
+        w.xq.clear();
+        w.xq.extend_from_slice(&self.feats);
         for f in feats.as_chunks::<MELS>().0 {
-            xq.extend(f.iter().zip(&s.mean).zip(&s.std).map(|((v, m), sd)| quantize((v - m) / sd, s.s_x, s.z_x)));
+            w.xq.extend(f.iter().zip(&s.mean).zip(&s.std).map(|((v, m), sd)| quantize_fast((v - m) / sd, s.inv_x, s.s_x, s.z_x)));
         }
-        self.feats.copy_from_slice(&xq[xq.len() - hist..]);
-        let mut q = vec![0i8; b * ff.max(d)];
-        s.front.run(&xq, b, s.stride * MELS, &mut q);
-        let mut h: Vec<f32> = q[..b * d].iter().map(|&v| s.front_gelu[(v as i32 + 128) as usize]).collect();
+        self.feats.copy_from_slice(&w.xq[w.xq.len() - hist..]);
+        let kf = k * MELS;
+        w.rows.resize(b * kf);
+        for r in 0..b {
+            w.rows[r * kf..(r + 1) * kf].copy_from_slice(&w.xq[r * s.stride * MELS..r * s.stride * MELS + kf]);
+        }
+        w.q.resize(b * ff.max(d));
+        s.front.run(&w.rows, b, &mut w.q);
+        w.h.clear();
+        w.h.extend(w.q[..b * d].iter().map(|&v| s.front_gelu[(v as i32 + 128) as usize]));
+        lap!(t, 1);
 
-        let (mut x, mut y, mut a8, mut u) = (vec![0f32; b * d], vec![0f32; d], vec![0i8; b * d], vec![0i8; b * ff]);
+        w.x.resize(b * d, 0.0);
+        w.y.resize(d, 0.0);
+        w.a8.resize(b * d);
+        w.u.resize(b * ff);
         for (i, blk) in s.blocks.iter().enumerate() {
-            let pad = (k - 1) * blk.dil;
-            let mut hq = Vec::with_capacity((pad + b) * d);
-            hq.extend_from_slice(&self.cache[i]);
-            hq.extend(h.iter().map(|&v| quantize(v, blk.s[0], blk.z[0])));
-            self.cache[i].copy_from_slice(&hq[b * d..]);
+            w.hq.clear();
+            w.hq.extend_from_slice(&self.cache[i]);
+            w.hq.extend(w.h.iter().map(|&v| quantize_fast(v, blk.inv[0], blk.s[0], blk.z[0])));
+            self.cache[i].copy_from_slice(&w.hq[b * d..]);
             for o in 0..b {
                 let res = if !blk.look {
-                    &h[o * d..(o + 1) * d]
+                    &w.h[o * d..(o + 1) * d]
                 } else if o == 0 {
                     &self.last[i][..]
                 } else {
-                    &h[(o - 1) * d..o * d]
+                    &w.h[(o - 1) * d..o * d]
                 };
-                x[o * d..(o + 1) * d].copy_from_slice(res);
-                for c in 0..d {
-                    let mut acc = blk.dw_bias[c];
-                    for t in 0..k {
-                        acc += (hq[(o + t * blk.dil) * d + c] as i32 - blk.z[0]) * blk.dw[c * k + t] as i32;
+                w.x[o * d..(o + 1) * d].copy_from_slice(res);
+                w.acc.clear();
+                w.acc.extend_from_slice(&blk.dw_bias);
+                for t in 0..k {
+                    let row = &w.hq[(o + t * blk.dil) * d..(o + t * blk.dil + 1) * d];
+                    for ((a, x), wt) in w.acc.iter_mut().zip(row).zip(&blk.dw[t * d..(t + 1) * d]) {
+                        *a += *x as i32 * wt;
                     }
-                    let v = sat8(requantize(acc, blk.dw_mult[c], blk.dw_shift[c]) + blk.z[1]);
-                    y[c] = x[o * d + c] + dequantize(v, blk.s[1], blk.z[1]);
                 }
-                let mut n = vec![0f32; d];
-                blk.norm.run(&y, &mut n);
                 for c in 0..d {
-                    a8[o * d + c] = quantize(n[c], blk.s[2], blk.z[2]);
+                    let v = sat8(requantize(w.acc[c], blk.dw_mult[c], blk.dw_shift[c]) + blk.z[1]);
+                    w.y[c] = w.x[o * d + c] + dequantize(v, blk.s[1], blk.z[1]);
                 }
+                blk.norm.quantized(&w.y, blk.s[2], blk.inv[2], blk.z[2], &mut w.a8[o * d..(o + 1) * d]);
             }
             if blk.look {
-                self.last[i].copy_from_slice(&h[(b - 1) * d..]);
+                self.last[i].copy_from_slice(&w.h[(b - 1) * d..]);
             }
-            blk.up.run(&a8, b, d, &mut u);
-            for (j, v) in u.iter_mut().enumerate() {
-                let t = blk.up_bias[j % ff] + dequantize(*v, blk.s[3], blk.z[3]);
-                *v = quantize(math::gelu(t), blk.s[4], blk.z[4]);
+            lap!(t, 2);
+            blk.up.run(&w.a8, b, &mut w.u);
+            lap!(t, 3);
+            for row in w.u.chunks_exact_mut(ff) {
+                for (v, bias) in row.iter_mut().zip(&blk.up_bias) {
+                    *v = s.gelu.quantized(bias + dequantize(*v, blk.s[3], blk.z[3]), blk.s[4], blk.inv[4], blk.z[4]);
+                }
             }
-            blk.down.run(&u, b, ff, &mut q);
-            for j in 0..b * d {
-                let c = j % d;
-                h[j] = x[j] + blk.scale[c] * (blk.down_bias[c] + dequantize(q[j], blk.s[5], blk.z[5]));
+            lap!(t, 4);
+            blk.down.run(&w.u, b, &mut w.q);
+            lap!(t, 5);
+            for o in 0..b {
+                for c in 0..d {
+                    let j = o * d + c;
+                    w.h[j] = w.x[j] + blk.scale[c] * (blk.down_bias[c] + dequantize(w.q[j], blk.s[5], blk.z[5]));
+                }
             }
+            lap!(t, 6);
             if i == s.vad_block {
                 for (o, p) in vad.iter_mut().take(b).enumerate() {
-                    *p = self.vad(&h[o * d..(o + 1) * d]);
+                    *p = self.vad(&w.h[o * d..(o + 1) * d], &mut w.n, &mut w.v);
                 }
+                lap!(t, 7);
             }
         }
 
-        let mut n = vec![0f32; d];
+        w.n.resize(d, 0.0);
         for o in 0..b {
-            s.out_norm.run(&h[o * d..(o + 1) * d], &mut n);
+            s.out_norm.run(&w.h[o * d..(o + 1) * d], &mut w.n);
             let l = &mut logp[o * s.phones..(o + 1) * s.phones];
-            s.out.run(&n, l);
+            s.out.run(&w.n, l);
             let mx = l.iter().fold(f32::NEG_INFINITY, |m, &v| if v > m { v } else { m });
             let sum = lane_sum(l.iter().map(|v| math::exp(v - mx)));
             let ls = math::ln(sum);
@@ -347,21 +513,24 @@ impl<'a> Stream<'a> {
                 *v = (*v - mx) - ls;
             }
         }
+        self.w = w;
+        lap!(t, 8);
     }
 
-    fn vad(&mut self, h: &[f32]) -> f32 {
+    fn vad(&mut self, h: &[f32], n: &mut Vec<f32>, v: &mut Vec<f32>) -> f32 {
         let s = self.spot;
         let g = self.gru.len();
-        let mut n = vec![0f32; s.d];
-        s.vad_norm.run(h, &mut n);
-        let mut x = vec![0f32; g];
-        s.vad_inp.run(&n, &mut x);
-        for v in x.iter_mut() {
-            *v = math::gelu(*v);
+        n.resize(s.d, 0.0);
+        v.resize(7 * g, 0.0);
+        s.vad_norm.run(h, n);
+        let (x, rest) = v.split_at_mut(g);
+        let (gi, gh) = rest.split_at_mut(3 * g);
+        s.vad_inp.run(n, x);
+        for e in x.iter_mut() {
+            *e = math::gelu(*e);
         }
-        let (mut gi, mut gh) = (vec![0f32; 3 * g], vec![0f32; 3 * g]);
-        s.gru_i.run(&x, &mut gi);
-        s.gru_h.run(&self.gru, &mut gh);
+        s.gru_i.run(x, gi);
+        s.gru_h.run(&self.gru, gh);
         for j in 0..g {
             let r = math::sigmoid(gi[j] + gh[j]);
             let z = math::sigmoid(gi[g + j] + gh[g + j]);
