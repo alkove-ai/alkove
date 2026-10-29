@@ -14,7 +14,7 @@ struct Dense {
     k: usize,
     n: usize,
     w: Vec<i8>,
-    bias: Option<Vec<i32>>,
+    bias: Vec<i32>,
     mult: Vec<i32>,
     shift: Vec<i32>,
     zin: i32,
@@ -28,7 +28,7 @@ impl Dense {
             k,
             n,
             w: f.i8(&format!("{p}.w"), k * n)?,
-            bias: if bias { Some(f.i32(&format!("{p}.bias"), n)?) } else { None },
+            bias: if bias { f.i32(&format!("{p}.bias"), n)? } else { vec![0; n] },
             mult: f.i32(&format!("{p}.mult"), n)?,
             shift: f.i32(&format!("{p}.shift"), n)?,
             zin: zp[0],
@@ -38,13 +38,12 @@ impl Dense {
 
     // rows start every `stride` values of x
     fn run(&self, x: &[i8], rows: usize, stride: usize, out: &mut [i8]) {
-        let q = Requant { bias: self.bias.as_deref(), mult: &self.mult, shift: &self.shift, zin: self.zin, zout: self.zout };
+        let q = Requant { bias: &self.bias, mult: &self.mult, shift: &self.shift, zin: self.zin, zout: self.zout };
         if stride == self.k {
             dense(x, rows, self.k, &self.w, self.n, &q, out);
         } else {
-            for r in 0..rows {
-                dense(&x[r * stride..r * stride + self.k], 1, self.k, &self.w, self.n, &q, &mut out[r * self.n..(r + 1) * self.n]);
-            }
+            let rows_of: Vec<i8> = (0..rows).flat_map(|r| x[r * stride..r * stride + self.k].iter().copied()).collect();
+            dense(&rows_of, rows, self.k, &self.w, self.n, &q, out);
         }
     }
 }

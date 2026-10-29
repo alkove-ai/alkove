@@ -49,7 +49,7 @@ pub fn dequantize(q: i8, scale: f32, zero: i32) -> f32 {
 }
 
 pub struct Requant<'a> {
-    pub bias: Option<&'a [i32]>,
+    pub bias: &'a [i32],
     pub mult: &'a [i32],
     pub shift: &'a [i32],
     pub zin: i32,
@@ -58,6 +58,10 @@ pub struct Requant<'a> {
 
 // rows of k int8 times w [n][k], as ESP-NN's 1 x 1 convolution: (x - zin) . w + bias, requantized per output, plus zout
 pub fn dense(x: &[i8], rows: usize, k: usize, w: &[i8], n: usize, q: &Requant, out: &mut [i8]) {
+    #[cfg(feature = "esp-nn")]
+    if esp_nn::ON.load(core::sync::atomic::Ordering::Relaxed) {
+        return esp_nn::conv1x1(x, rows, k, w, n, q, out);
+    }
     for r in 0..rows {
         let xr = &x[r * k..(r + 1) * k];
         for (c, wc) in w.chunks_exact(k).take(n).enumerate() {
@@ -65,9 +69,95 @@ pub fn dense(x: &[i8], rows: usize, k: usize, w: &[i8], n: usize, q: &Requant, o
             for (a, b) in xr.iter().zip(wc) {
                 acc += (*a as i32 - q.zin) * *b as i32;
             }
-            acc += q.bias.map_or(0, |b| b[c]);
+            acc += q.bias[c];
             out[r * n + c] = sat8(requantize(acc, q.mult[c], q.shift[c]) + q.zout);
         }
+    }
+}
+
+#[cfg(feature = "esp-nn")]
+pub mod esp_nn {
+    use super::Requant;
+    use core::sync::atomic::AtomicBool;
+
+    // dense layers through ESP-NN (true) or the Rust loops (false), to check one against the other on the chip
+    pub static ON: AtomicBool = AtomicBool::new(true);
+
+    #[repr(C)]
+    struct Dims {
+        width: i32,
+        height: i32,
+        channels: i32,
+        extra: i32,
+    }
+    #[repr(C)]
+    struct D2 {
+        width: i32,
+        height: i32,
+    }
+    #[repr(C)]
+    struct Params {
+        in_offset: i32,
+        out_offset: i32,
+        stride: D2,
+        padding: D2,
+        dilation: D2,
+        min: i32,
+        max: i32,
+    }
+    #[repr(C)]
+    struct Quant {
+        shift: *const i32,
+        mult: *const i32,
+    }
+
+    extern "C" {
+        fn esp_nn_conv_s8_esp32s3(
+            input_dims: *const Dims,
+            input: *const i8,
+            filter_dims: *const Dims,
+            filter: *const i8,
+            bias: *const i32,
+            output_dims: *const Dims,
+            out: *mut i8,
+            params: *const Params,
+            quant: *const Quant,
+        );
+        fn esp_nn_get_conv_scratch_size_esp32s3(input_dims: *const Dims, filter_dims: *const Dims, output_dims: *const Dims, params: *const Params) -> i32;
+        fn esp_nn_set_conv_scratch_buf_esp32s3(buf: *const core::ffi::c_void);
+    }
+
+    fn shapes(rows: usize, k: usize, n: usize, zin: i32, zout: i32) -> (Dims, Dims, Dims, Params) {
+        let d = |w: usize, c: usize, e: usize| Dims { width: w as i32, height: 1, channels: c as i32, extra: e as i32 };
+        let one = || D2 { width: 1, height: 1 };
+        (d(rows, k, 1), d(1, k, n), d(rows, n, 1), Params { in_offset: -zin, out_offset: zout, stride: one(), padding: D2 { width: 0, height: 0 }, dilation: one(), min: -128, max: 127 })
+    }
+
+    // scratch bytes for every (k, n) of Spot at up to `rows` rows; the caller allocates them in internal RAM and calls set_scratch
+    pub fn scratch_size(rows: usize, layers: &[(usize, usize)]) -> usize {
+        layers
+            .iter()
+            .map(|&(k, n)| {
+                let (i, f, o, p) = shapes(rows, k, n, 0, 0);
+                // Safety: the dims outlive the call.
+                unsafe { esp_nn_get_conv_scratch_size_esp32s3(&i, &f, &o, &p) }.max(0) as usize
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// # Safety
+    /// `buf` holds scratch_size() bytes and lives as long as dense layers run.
+    pub unsafe fn set_scratch(buf: *mut u8) {
+        esp_nn_set_conv_scratch_buf_esp32s3(buf as *const _)
+    }
+
+    pub fn conv1x1(x: &[i8], rows: usize, k: usize, w: &[i8], n: usize, q: &Requant, out: &mut [i8]) {
+        assert!(x.len() >= rows * k && w.len() >= n * k && out.len() >= rows * n && q.bias.len() >= n);
+        let (i, f, o, p) = shapes(rows, k, n, q.zin, q.zout);
+        let qd = Quant { shift: q.shift.as_ptr(), mult: q.mult.as_ptr() };
+        // Safety: buffers checked against the dims above; ESP-NN only reads shift and mult.
+        unsafe { esp_nn_conv_s8_esp32s3(&i, x.as_ptr(), &f, w.as_ptr(), q.bias.as_ptr(), &o, out.as_mut_ptr(), &p, &qd) }
     }
 }
 
