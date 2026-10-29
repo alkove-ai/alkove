@@ -2,7 +2,6 @@
 
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional
 
 import alkove
 
@@ -22,11 +21,11 @@ def name_of(text: str) -> str:
 class Words:
     """Compiles words once and keeps them by name; with `lang`, a name no one configured is compiled on demand ("hey_casper" -> "hey casper")."""
 
-    def __init__(self, models: alkove.Models, lang: Optional[str] = None, thresholds: Optional[dict] = None):
+    def __init__(self, models: alkove.Models, lang: str | None = None, thresholds: dict | None = None):
         self.lex = alkove.Lex(models)
         self.lang = lang
         self.thresholds = thresholds or {}
-        self.by_name: Dict[str, Spoken] = {}
+        self.by_name: dict[str, Spoken] = {}
 
     def add(self, text: str, lang: str) -> Spoken:
         w = self.lex.compile(text, lang).to_json()
@@ -35,7 +34,7 @@ class Words:
         self.by_name[s.name] = s
         return s
 
-    def get(self, name: str) -> Optional[Spoken]:
+    def get(self, name: str) -> Spoken | None:
         s = self.by_name.get(name_of(name))
         if s is None and self.lang is not None:
             try:

@@ -2,7 +2,6 @@
 
 import logging
 import time
-from typing import List, Optional
 
 import alkove
 import numpy as np
@@ -26,8 +25,8 @@ class SpotHandler(AsyncEventHandler):
         self.words = words
         self.context = context
         self.converter = AudioChunkConverter(rate=16000, width=2, channels=1)
-        self.chosen: List[Spoken] = list(words.by_name.values())[:1]
-        self.listener: Optional[alkove.Listener] = None
+        self.chosen: list[Spoken] = list(words.by_name.values())[:1]
+        self.listener: alkove.Listener | None = None
         self.detected = False
         self.client = str(time.monotonic_ns())
 
@@ -53,16 +52,12 @@ class SpotHandler(AsyncEventHandler):
                     self.detected = True
                     await self.write_event(Detection(name=spoken.name, timestamp=int(wake["end"] * 1000)).event())
                     _LOGGER.debug("%s: %s at %.2f s, score %.3f (%s)", self.client, spoken.name, wake["end"], wake["score"], wake["context"])
-        elif AudioStop.is_type(event.type):
-            if not self.detected:
-                await self.write_event(NotDetected().event())
+        elif AudioStop.is_type(event.type) and not self.detected:
+            await self.write_event(NotDetected().event())
         return True
 
     def info(self) -> Info:
-        models = [
-            WakeModel(name=s.name, description=s.text, phrase=s.text, attribution=ALKOVE, installed=True, languages=[s.lang], version=alkove.__version__)
-            for s in self.words.by_name.values()
-        ]
+        models = [WakeModel(name=s.name, description=s.text, phrase=s.text, attribution=ALKOVE, installed=True, languages=[s.lang], version=alkove.__version__) for s in self.words.by_name.values()]
         return Info(
             wake=[
                 WakeProgram(
