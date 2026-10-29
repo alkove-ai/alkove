@@ -84,3 +84,27 @@ impl<'a> File<'a> {
         Ok((e.dims.clone(), self.f32(name, n)?))
     }
 }
+
+// f32 arrays to an ALKM v1 file, as spot_mcu_export.py writes them
+pub fn write_f32(arrays: &[(String, Vec<usize>, &[f32])]) -> Vec<u8> {
+    let (mut head, mut data) = (Vec::new(), Vec::new());
+    for (name, dims, v) in arrays {
+        data.resize(data.len().next_multiple_of(16), 0);
+        head.extend((name.len() as u32).to_le_bytes());
+        head.extend(name.as_bytes());
+        head.resize(head.len().next_multiple_of(4), 0);
+        for w in [0, dims.len()].into_iter().chain(dims.iter().copied()).chain([data.len()]) {
+            head.extend((w as u32).to_le_bytes());
+        }
+        data.extend(v.iter().flat_map(|x| x.to_le_bytes()));
+    }
+    let top = (16 + head.len()).next_multiple_of(16);
+    let mut out = b"ALKM".to_vec();
+    for w in [1, arrays.len(), top] {
+        out.extend((w as u32).to_le_bytes());
+    }
+    out.extend(head);
+    out.resize(top, 0);
+    out.extend(data);
+    out
+}

@@ -7,7 +7,7 @@ pub mod quant;
 use alkove_engine::math;
 
 pub use fbank::{Fbank, Features, CHUNK, MELS};
-pub use file::{Error, File};
+pub use file::{write_f32, Error, File};
 use quant::{dense, dequantize, quantize, requantize, sat8, Requant};
 
 struct Dense {
