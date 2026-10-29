@@ -1,0 +1,45 @@
+# a bare ESP32-S3 (N16R8) set like the Voice PE (caches, code and rodata in PSRAM), listening for "ok Claude" with a self-test at boot
+esphome:
+  name: alkove-spot-test
+
+esp32:
+  board: esp32-s3-devkitc-1
+  cpu_frequency: 240MHz
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [alkove_spot]
+
+alkove_spot:
+  model: spot-q4.mcu
+  library: libalkove_spot_esp.a
+  test_audio: okclaude.wav
+  words:
+    - name: ok Claude
+      thresholds: { anywhere: -1.22, pause: -1.99 }
+      phonemes:
+        - { ids: [8, 17, 35, 5, 16, 35, 47, 11, 34], p: 0.4821109 }
+        - { ids: [8, 17, 35, 1, 35, 47, 11, 34], p: 0.3141262 }
+  on_wake_word_detected:
+    - logger.log:
+        format: "ESPHome trigger: %s"
+        args: ["wake_word.c_str()"]

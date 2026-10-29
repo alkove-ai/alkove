@@ -568,6 +568,10 @@ impl<'a> Stream<'a> {
         }
     }
 
+    pub fn spot(&self) -> &'a Spot {
+        self.spot
+    }
+
     // 16 kHz audio in [-1, 1], a multiple of 480 samples: one output frame per 480
     pub fn push(&mut self, audio: &[f32], logp: &mut [f32], vad: &mut [f32]) {
         start!(t);

@@ -1,0 +1,20 @@
+[package]
+name = "alkove-spot-esp"
+description = "Spot and its wake word search as a C library for ESP-IDF: what the ESPHome component links"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+# the ESP32-S3: dense layers through ESP-NN, 4-bit unpacking in PIE
+chip = ["alkove-spot-mcu/esp-nn", "alkove-spot-mcu/pie"]
+
+[dependencies]
+alkove-core = { path = "../../../crates/core" }
+alkove-spot-mcu = { path = "../../../crates/spot-mcu" }

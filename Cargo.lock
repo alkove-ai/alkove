@@ -49,6 +49,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "alkove-spot-esp"
+version = "0.1.0"
+dependencies = [
+ "alkove-core",
+ "alkove-spot-mcu",
+]
+
+[[package]]
 name = "alkove-spot-mcu"
 version = "0.1.0"
 dependencies = [
