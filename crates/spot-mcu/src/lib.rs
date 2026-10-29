@@ -215,6 +215,7 @@ struct Block {
     norm: Norm,
     up: Dense,
     up_bias: Vec<f32>,
+    up_gelu: Option<UpGelu>,
     down: Dense,
     down_bias: Vec<f32>,
     scale: Vec<f32>,
@@ -263,6 +264,7 @@ impl Spot {
             let s = f.f32(&format!("{p}.scales"), 6)?;
             let z = f.i32(&format!("{p}.zps"), 6)?;
             let dw = f.i8(&format!("{p}.dw.w"), d * k)?;
+            let up_bias = f.f32(&format!("{p}.up.bias"), ff)?;
             blocks.push(Block {
                 dil: dils[i] as usize,
                 look: looks[i] != 0,
@@ -271,11 +273,12 @@ impl Spot {
                 dw_mult: f.i32(&format!("{p}.dw.mult"), d)?,
                 dw_shift: f.i32(&format!("{p}.dw.shift"), d)?,
                 inv: [0, 1, 2, 3, 4, 5].map(|j| 1.0 / s[j]),
-                s: s.try_into().unwrap(),
-                z: z.try_into().unwrap(),
+                s: s[..].try_into().unwrap(),
+                z: z[..].try_into().unwrap(),
                 norm: Norm::read(&f, &format!("{p}.norm"), d)?,
                 up: Dense::read(&f, &format!("{p}.up"), d, ff, false)?,
-                up_bias: f.f32(&format!("{p}.up.bias"), ff)?,
+                up_gelu: UpGelu::new(&up_bias, s[3], z[3], 1.0 / s[4]),
+                up_bias,
                 down: Dense::read(&f, &format!("{p}.down"), ff, d, false)?,
                 down_bias: f.f32(&format!("{p}.down.bias"), d)?,
                 scale: f.f32(&format!("{p}.scale"), d)?,
@@ -329,12 +332,16 @@ const GELU_STEP: f32 = 128.0;
 
 struct Gelu {
     table: Vec<f32>,
+    // the same table in Q20
+    fixed: Vec<i32>,
 }
 
 impl Gelu {
     fn new() -> Gelu {
         let n = (2.0 * GELU_SPAN * GELU_STEP) as usize + 2;
-        Gelu { table: (0..n).map(|i| math::gelu(i as f32 / GELU_STEP - GELU_SPAN)).collect() }
+        let table: Vec<f32> = (0..n).map(|i| math::gelu(i as f32 / GELU_STEP - GELU_SPAN)).collect();
+        let fixed = table.iter().map(|&g| (g as f64 * Q20).round() as i32).collect();
+        Gelu { table, fixed }
     }
 
     #[inline]
@@ -355,6 +362,57 @@ impl Gelu {
             Some(r) => sat8(r + zero),
             None => quantize(math::gelu(t), scale, zero),
         }
+    }
+}
+
+const Q20: f64 = (1u32 << 20) as f64;
+const Q24: f64 = (1u32 << 24) as f64;
+
+// the up layer's int8 output to GELU's int8, in 32-bit integers: the table position in Q16 is a per-channel offset plus a per-input step; the float path out of the table or near a tie
+struct UpGelu {
+    p0: Vec<i32>,
+    pd: Vec<i32>,
+    ig: i32,
+    tol: u32,
+    end: u32,
+}
+
+impl UpGelu {
+    fn new(bias: &[f32], s: f32, z: i32, inv: f32) -> Option<UpGelu> {
+        let pos = |t: f64| (t * GELU_STEP as f64 * 65536.0).round() as i64;
+        let p0: Vec<i64> = bias.iter().map(|&b| pos(b as f64 + GELU_SPAN as f64)).collect();
+        let pd: Vec<i64> = (-128..128).map(|q| pos(s as f64 * (q - z) as f64)).collect();
+        let ig = (inv as f64 * Q24).round() as i64;
+        let most = p0.iter().map(|v| v.abs()).max()? + pd.iter().map(|v| v.abs()).max()?;
+        // past these, the sums or the product leave 32 bits: the float path does every value
+        if most >= 1 << 30 || ig >= 1 << 31 {
+            return None;
+        }
+        Some(UpGelu {
+            p0: p0.iter().map(|&v| v as i32).collect(),
+            pd: pd.iter().map(|&v| v as i32).collect(),
+            ig: ig as i32,
+            // the float path's margin, plus t's own rounding (~1e-6) and the fixed-point steps, all well inside it
+            tol: ((1e-3 + 2e-5 * inv as f64) * 65536.0) as u32 + 2,
+            end: (2.0 * GELU_SPAN * GELU_STEP) as u32 * 65536,
+        })
+    }
+
+    #[inline]
+    fn get(&self, g: &Gelu, q: i8, c: usize, zero: i32) -> Option<i8> {
+        let p = self.p0[c].wrapping_add(self.pd[(q as i32 + 128) as usize]);
+        if p as u32 >= self.end {
+            return None;
+        }
+        let i = (p >> 16) as usize;
+        let f = p & 0xffff;
+        // Safety: p < end, so i + 1 is at most the table's last index.
+        let (a, b) = unsafe { (*g.fixed.get_unchecked(i), *g.fixed.get_unchecked(i + 1)) };
+        let v = (((a + (((b - a) * f) >> 16)) as i64 * self.ig as i64) >> 28) as i32;
+        if ((v & 0xffff) - 32768).unsigned_abs() <= self.tol {
+            return None;
+        }
+        Some(sat8(((v + 32768) >> 16) + zero))
     }
 }
 
@@ -479,8 +537,12 @@ impl<'a> Stream<'a> {
             blk.up.run(&w.a8, b, &mut w.u);
             lap!(t, 3);
             for row in w.u.chunks_exact_mut(ff) {
-                for (v, bias) in row.iter_mut().zip(&blk.up_bias) {
-                    *v = s.gelu.quantized(bias + dequantize(*v, blk.s[3], blk.z[3]), blk.s[4], blk.inv[4], blk.z[4]);
+                for (c, (v, bias)) in row.iter_mut().zip(&blk.up_bias).enumerate() {
+                    *v = blk
+                        .up_gelu
+                        .as_ref()
+                        .and_then(|ug| ug.get(&s.gelu, *v, c, blk.z[4]))
+                        .unwrap_or_else(|| s.gelu.quantized(bias + dequantize(*v, blk.s[3], blk.z[3]), blk.s[4], blk.inv[4], blk.z[4]));
                 }
             }
             lap!(t, 4);
