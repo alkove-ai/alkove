@@ -11,4 +11,6 @@ Build the library (espup's toolchain):
 RUSTFLAGS="--cfg espidf_time64" cargo +esp build --release -p alkove-spot-esp --features chip --target xtensa-esp32s3-espidf -Zbuild-std=std,panic_abort --lib
 ```
 
-Then `esphome compile example.yaml` with `model`, `library` and `test_audio` pointing at the files. Words come compiled (Lex's phoneme ids and thresholds), as `example.yaml` shows.
+Then `esphome compile example.yaml` with `model`, `library` and `test_audio` pointing at the files.
+
+A word is its text and language (`text: ok Claude`, `lang: en`): Lex compiles it where ESPHome runs, which needs the `alkove` Python package there (`pip install alkove`, or `uvx --with alkove esphome compile …`). Thresholds may be set by hand (`thresholds: {anywhere, pause}`), else they are Spot's defaults for the language. A word can also be given compiled: `name`, `phonemes` (Lex's phoneme ids, `p`, `french`) and `thresholds`.
