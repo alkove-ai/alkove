@@ -7,7 +7,7 @@ Maintained by Alkove.
 ## Needs
 
 - An ESP32-S3 with 8 MB of octal PSRAM, on ESP-IDF.
-- The `alkove` Python package where ESPHome runs, to compile the words: `pip install alkove`, or `uvx --with alkove esphome run …`.
+- To compile the words, the `alkove-esphome` Python package where ESPHome runs: `pip install alkove-esphome`, or `uvx --with alkove-esphome esphome run …`. Where it cannot be installed (ESPHome's Home Assistant add-on), `uvx alkove-esphome "ok Nabu" --lang en` on any computer prints the word compiled, to paste under `words:`.
 
 Measured on a bare ESP32-S3-N16R8 set like the Home Assistant Voice PE (its caches, code and fixed data in PSRAM), ESPHome 2026.10: the model loads in 76 ms, takes 0.48 MB of PSRAM besides its file and 50 KB of internal RAM, and runs at 0.81× real time on one core. Not yet tried on a Voice PE itself, where PSRAM is tight next to its firmware: tell me if you do.
 
@@ -40,7 +40,7 @@ alkove_spot:
 
 The library and the model are downloaded once from the `esphome-v0.1.0` release and checked by their sha256.
 
-- `words`: a text and its language (or a list of them), compiled by Lex when ESPHome builds. `thresholds: {pause, anywhere}` sets a word's own, else they are Spot's defaults for its language. A word can also be given compiled: `name`, `phonemes` (Lex's phoneme ids, `p`, `french`) and `thresholds`.
+- `words`: a text and its language (or a list of them), compiled by Lex when ESPHome builds. `thresholds: {pause, anywhere}` sets a word's own, else they are Spot's defaults for its language. A word can also be given compiled, as `alkove-esphome` prints it: `name`, `phonemes` (Lex's phoneme ids, `p`, `french`) and `thresholds`.
 - `context`: `pause` (default, the word said after a pause: far fewer false alarms), `anywhere` or `both`.
 - `log_scores: true` logs each second's best score above -3, to set a word's thresholds on the device.
 - `alkove_spot.start`, `alkove_spot.stop` and the condition `alkove_spot.is_running`, as `micro_wake_word`'s.
@@ -49,4 +49,4 @@ The library and the model are downloaded once from the `esphome-v0.1.0` release 
 
 ## Build
 
-`lib/` is the Rust library (`alkove-spot-esp`) behind a C ABI (`include/alk_spot.h`); `components/alkove_spot/` links it with `espressif/esp-nn` and embeds the model. `./dist.sh path/to/spot-q4.mcu` (espup's toolchain) builds the bundle into `dist/alkove-spot-esp-<version>/` and writes its manifest to `components/alkove_spot/bundle.json`; `bundle: dist/alkove-spot-esp-<version>` takes a local one instead of the release, and `model:` and `library:` set the files one by one.
+`alkove_esphome/` is the `alkove-esphome` package, which the component imports to compile the words. `lib/` is the Rust library (`alkove-spot-esp`) behind a C ABI (`include/alk_spot.h`); `components/alkove_spot/` links it with `espressif/esp-nn` and embeds the model. `./dist.sh path/to/spot-q4.mcu` (espup's toolchain) builds the bundle into `dist/alkove-spot-esp-<version>/` and writes its manifest to `components/alkove_spot/bundle.json`; `bundle: dist/alkove-spot-esp-<version>` takes a local one instead of the release, and `model:` and `library:` set the files one by one.

@@ -55,59 +55,49 @@ VARIANT_SCHEMA = cv.Schema(
     }
 )
 
-_lex = None
-
 
 def _compile(word):
-    """A word given as text: compiled by the SDK's Lex on the machine that builds the firmware (pip install alkove), its variants' phoneme ids taken from Lex."""
-    global _lex
+    """A word given as text: compiled by alkove-esphome on the machine that builds the firmware (pip install alkove-esphome)."""
     try:
         import alkove
+        from alkove_esphome import compile_word
     except ImportError as e:
-        raise cv.Invalid("A word given as text needs the alkove Python package where ESPHome runs: pip install alkove") from e
-    if _lex is None:
-        _lex = alkove.Lex(alkove.Models.load(["lex"]))
-    text, langs = word[CONF_TEXT], word[CONF_LANG]
+        raise cv.Invalid("A word given as text needs the alkove-esphome Python package where ESPHome runs (pip install alkove-esphome); else paste the word compiled by: uvx alkove-esphome \"your word\" --lang en") from e
+    text = word[CONF_TEXT]
     try:
-        compiled = _lex.compile(text, langs).to_json()
+        compiled = compile_word(text, word[CONF_LANG], word.get(CONF_NAME))
     except alkove.AlkoveError as e:
         raise cv.Invalid(f'"{text}": {e}') from e
-    phonemes = []
-    for v in compiled["phonemes"]:
-        ids = next((c["ids"] for c in _lex._l.phonemize([text], v["lang"])[0] if c["ipa"] == v["ipa"]), None)
-        if ids is None:
-            raise cv.Invalid(f'"{text}": no phoneme ids for /{v["ipa"]}/')
-        phonemes.append({CONF_IDS: [int(i) for i in ids], CONF_P: v["p"], CONF_FRENCH: v["lang"] == "fr"})
-    t = compiled["thresholds"]
-    return {
-        CONF_NAME: word.get(CONF_NAME, text),
-        CONF_PHONEMES: phonemes,
-        CONF_THRESHOLDS: {CONF_ANYWHERE: word.get(CONF_THRESHOLDS, {}).get(CONF_ANYWHERE, t["anywhere"]), CONF_PAUSE: word.get(CONF_THRESHOLDS, {}).get(CONF_PAUSE, t["pause"])},
-    }
+    t = {**compiled[CONF_THRESHOLDS], **word.get(CONF_THRESHOLDS, {})}
+    return {CONF_NAME: compiled[CONF_NAME], CONF_PHONEMES: compiled[CONF_PHONEMES], CONF_THRESHOLDS: {CONF_ANYWHERE: t[CONF_ANYWHERE], CONF_PAUSE: t[CONF_PAUSE]}}
 
 
 THRESHOLDS_SCHEMA = cv.Schema({cv.Optional(CONF_ANYWHERE): cv.float_range(-2.9, -0.6), cv.Optional(CONF_PAUSE): cv.float_range(-2.9, -0.6)})
 
-WORD_SCHEMA = cv.Any(
-    cv.All(
-        cv.Schema(
-            {
-                cv.Required(CONF_TEXT): cv.string_strict,
-                cv.Required(CONF_LANG): cv.All(cv.ensure_list(cv.one_of(*LANGS, lower=True)), cv.Length(min=1)),
-                cv.Optional(CONF_NAME): cv.string_strict,
-                cv.Optional(CONF_THRESHOLDS): THRESHOLDS_SCHEMA,
-            }
-        ),
-        _compile,
-    ),
+TEXT_WORD_SCHEMA = cv.All(
     cv.Schema(
         {
-            cv.Required(CONF_NAME): cv.string_strict,
-            cv.Required(CONF_PHONEMES): cv.All(cv.ensure_list(VARIANT_SCHEMA), cv.Length(min=1)),
-            cv.Required(CONF_THRESHOLDS): cv.Schema({cv.Required(CONF_ANYWHERE): cv.float_, cv.Required(CONF_PAUSE): cv.float_}),
+            cv.Required(CONF_TEXT): cv.string_strict,
+            cv.Required(CONF_LANG): cv.All(cv.ensure_list(cv.one_of(*LANGS, lower=True)), cv.Length(min=1)),
+            cv.Optional(CONF_NAME): cv.string_strict,
+            cv.Optional(CONF_THRESHOLDS): THRESHOLDS_SCHEMA,
         }
     ),
+    _compile,
 )
+
+COMPILED_WORD_SCHEMA = cv.Schema(
+    {
+        cv.Required(CONF_NAME): cv.string_strict,
+        cv.Required(CONF_PHONEMES): cv.All(cv.ensure_list(VARIANT_SCHEMA), cv.Length(min=1)),
+        cv.Required(CONF_THRESHOLDS): cv.Schema({cv.Required(CONF_ANYWHERE): cv.float_, cv.Required(CONF_PAUSE): cv.float_}),
+    }
+)
+
+
+def WORD_SCHEMA(value):
+    return TEXT_WORD_SCHEMA(value) if isinstance(value, dict) and CONF_TEXT in value else COMPILED_WORD_SCHEMA(value)
+
 
 CONFIG_SCHEMA = cv.All(
     cv.Schema(

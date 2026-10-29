@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alkove-esphome"
+dynamic = ["version"]
+description = "Typed wake words for Alkove's ESPHome component: compiles a word for alkove_spot, where ESPHome runs or as YAML to paste"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+authors = [{ name = "Eddy Bordi" }]
+keywords = ["wake-word", "esphome", "home-assistant", "keyword-spotting", "esp32"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = ["alkove>=0.3.2,<0.4"]
+
+[project.urls]
+Homepage = "https://alkove.ai"
+Repository = "https://github.com/alkove-ai/alkove"
+
+[project.scripts]
+alkove-esphome = "alkove_esphome.__main__:run"
+
+[tool.hatch.version]
+path = "alkove_esphome/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["alkove_esphome", "tests", "README.md", "LICENSE", "NOTICE"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["alkove_esphome"]
