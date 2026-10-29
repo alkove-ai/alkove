@@ -1,5 +1,6 @@
 //! Alkove's core: from the engine's outputs to features, written once for every platform and the same to the bit on each.
 
+mod band;
 mod chain;
 mod cue;
 mod focus;

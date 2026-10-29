@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use alkove_engine::{Model, Session};
 
+use crate::band::Band;
 use crate::level::Chunker;
 use crate::{js, stream_io, Error, CUE, RATE};
 
@@ -10,6 +11,7 @@ pub struct Cue {
     net: Session,
     chunker: Chunker,
     steps: usize,
+    band: Band,
 }
 
 impl Cue {
@@ -18,12 +20,14 @@ impl Cue {
     pub fn new(model: &Arc<Model>) -> Result<Cue, Error> {
         let net = Session::new(model.clone())?;
         stream_io(&net, "audio", CUE.chunk, "speech", 1)?;
-        Ok(Cue { net, chunker: Chunker::new(CUE.chunk), steps: 0 })
+        Ok(Cue { net, chunker: Chunker::new(CUE.chunk), steps: 0, band: Band::new() })
     }
 
     // None for the first `lag_steps` steps
     pub fn step(&mut self, chunk: &[f32]) -> Option<f32> {
-        self.net.input_mut("audio").expect("checked").copy_from_slice(chunk);
+        let input = self.net.input_mut("audio").expect("checked");
+        input.copy_from_slice(chunk);
+        self.band.apply(input);
         self.net.run();
         let s = self.steps;
         self.steps += 1;
@@ -46,6 +50,7 @@ impl Cue {
         self.net.clear_state();
         self.chunker.reset();
         self.steps = 0;
+        self.band.reset();
     }
 }
 
