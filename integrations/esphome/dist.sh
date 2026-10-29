@@ -1,6 +1,6 @@
 #!/bin/sh
 # the bundle the component takes (bundle:): the library for the ESP32-S3, the model, manifest.json with their sha256
-# ./dist.sh path/to/spot-q4.mcu   -> dist/alkove-spot-esp-<version>/
+# ./dist.sh path/to/spot-q4.mcu   -> dist/alkove-spot-esp-<version>/, its manifest as components/alkove_spot/bundle.json (what the component downloads from the esphome-v<version> release)
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 model=${1:?the model: a spot_mcu_export.py file (spot-q4.mcu)}
@@ -22,4 +22,5 @@ cat > "$out/manifest.json" <<JSON
   "model": { "file": "spot-q4.mcu", "sha256": "$(sha "$out/spot-q4.mcu")" }
 }
 JSON
+cp "$out/manifest.json" "$here/components/alkove_spot/bundle.json"
 ls -la "$out"

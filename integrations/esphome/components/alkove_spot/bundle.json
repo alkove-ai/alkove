@@ -1,0 +1,5 @@
+{
+  "version": "0.1.0",
+  "library": { "file": "libalkove_spot_esp.a", "sha256": "02ad0de8f3c4891acf82e3f1b971489dbbdce10f5308d4e1adda4b3ccd532c21", "target": "xtensa-esp32s3-espidf", "esp_nn": "1.4.1" },
+  "model": { "file": "spot-q4.mcu", "sha256": "6f7f52a2337fdae34304e3110c734bb55cc94c77c4a616bbd89574737ac9687e" }
+}

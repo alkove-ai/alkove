@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import wave
 
-from esphome import automation
+from esphome import automation, external_files
 import esphome.codegen as cg
 from esphome.components import esp32, microphone
 import esphome.config_validation as cv
@@ -35,6 +35,8 @@ CONF_LOG_SCORES = "log_scores"
 CONF_ON_WAKE_WORD_DETECTED = "on_wake_word_detected"
 CONF_TEXT = "text"
 CONF_LANG = "lang"
+DOMAIN = "alkove_spot"
+RELEASES = "https://github.com/alkove-ai/alkove/releases/download/esphome-v{version}/"
 LANGS = ("fr", "en", "es", "it", "pt", "ca", "ro")
 
 alkove_spot_ns = cg.esphome_ns.namespace("alkove_spot")
@@ -131,23 +133,33 @@ CONFIG_SCHEMA = cv.All(
 )
 
 
+def _sha256(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
 def _from_bundle(config):
-    """model and library from a bundle (dist.sh: manifest.json and its files, checked by sha256), unless given one by one."""
+    """model and library from a local bundle (dist.sh), else from the release bundle.json names, both checked by sha256, unless given one by one."""
+    if CONF_MODEL in config and CONF_LIBRARY in config:
+        return config
     if CONF_BUNDLE in config:
         root = Path(config[CONF_BUNDLE])
         try:
             manifest = json.loads((root / "manifest.json").read_text())
         except (OSError, ValueError) as e:
             raise cv.Invalid(f"{root}: no readable manifest.json") from e
-        for key, conf in (("library", CONF_LIBRARY), ("model", CONF_MODEL)):
-            entry = manifest[key]
-            path = root / entry["file"]
-            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]:
-                raise cv.Invalid(f"{path}: missing, or not the file manifest.json names (sha256)")
-            config.setdefault(conf, str(path))
-    for conf in (CONF_MODEL, CONF_LIBRARY):
-        if conf not in config:
-            raise cv.Invalid(f"Give {CONF_BUNDLE}, or {CONF_MODEL} and {CONF_LIBRARY}")
+    else:
+        manifest = json.loads((Path(__file__).parent / "bundle.json").read_text())
+        url = RELEASES.format(version=manifest["version"])
+        root = external_files.compute_local_file_path(DOMAIN, url)
+        stale = [manifest[k]["file"] for k in ("library", "model") if _sha256(root / manifest[k]["file"]) != manifest[k]["sha256"]]
+        for name in stale:
+            (root / name).unlink(missing_ok=True)
+            external_files.download_content(url + name, root / name, allow_stale=False, return_content=False)
+    for key, conf in (("library", CONF_LIBRARY), ("model", CONF_MODEL)):
+        path = root / manifest[key]["file"]
+        if _sha256(path) != manifest[key]["sha256"]:
+            raise cv.Invalid(f"{path}: missing, or not the file the manifest names (sha256)")
+        config.setdefault(conf, str(path))
     return config
 
 

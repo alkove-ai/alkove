@@ -30,8 +30,7 @@ external_components:
     components: [alkove_spot]
 
 alkove_spot:
-  # ./dist.sh path/to/spot-q4.mcu
-  bundle: dist/alkove-spot-esp-0.1.0
+  # the library and the model come from the esphome-v<version> release; a local build instead: bundle: dist/alkove-spot-esp-0.1.0 (./dist.sh)
   test_audio: okclaude.wav
   # compiled by Lex where ESPHome runs (pip install alkove); or give a word's phoneme ids and thresholds directly
   words:
