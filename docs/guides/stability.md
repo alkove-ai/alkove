@@ -26,7 +26,9 @@ Versions follow semver, with its rule for `0.x`:
 
 `npm install alkove` saves a `^0.3.2` range, which takes patches and stops before the next minor: a breaking version never arrives on its own. Each version is in the [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md), with what to change in your code and which models moved.
 
-The npm package, the Python package and its LiveKit and Pipecat plugins, and the Android library share the minor version: `alkove` 0.3 on the web, in Python and on Android runs the same core and the same models, and reads the same voiceprints and words. Their patches are numbered on their own.
+The npm package, the Python package and the Android library share the minor version: `alkove` 0.3 on the web, in Python and on Android runs the same core and the same models, and reads the same voiceprints and words. Their patches are numbered on their own.
+
+The integrations have versions of their own: the LiveKit and Pipecat plugins, the Wyoming server (`wyoming-alkove`) and the ESPHome component (`alkove-esphome`). Each says the range of `alkove` it runs on, such as `alkove>=0.3.2,<0.4`: a new `alkove` does not move them, and a fix to one of them moves nothing else.
 
 Some things move in any version, patches included. Write your code so they do not break it:
 
