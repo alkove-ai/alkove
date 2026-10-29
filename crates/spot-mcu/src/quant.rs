@@ -100,6 +100,23 @@ pub fn dequantize(q: i8, scale: f32, zero: i32) -> f32 {
     (q as i32 - zero) as f32 * scale
 }
 
+pub const Q4_BLOCK: usize = 32;
+const Q4_SHIFT: i32 = 4;
+
+// 4-bit rows to int8, as spot_mcu_export.py's q4(): w8 = clamp(((code - zero) * m + 8) >> 4, -127, 127); codes low nibble first, a zero and a multiplier per block of 32
+pub fn unpack_q4(codes: &[u8], zero: &[u8], m: &[u8], out: &mut [i8]) {
+    let mut lut = [0i8; 16];
+    for (((block, o), &z), &m) in codes.as_chunks::<{ Q4_BLOCK / 2 }>().0.iter().zip(out.as_chunks_mut::<Q4_BLOCK>().0).zip(zero).zip(m) {
+        let (z, m) = (z as i32, m as i32);
+        for (c, l) in lut.iter_mut().enumerate() {
+            *l = (((c as i32 - z) * m + (1 << (Q4_SHIFT - 1))) >> Q4_SHIFT).clamp(-127, 127) as i8;
+        }
+        for (pair, &c) in o.as_chunks_mut::<2>().0.iter_mut().zip(block) {
+            *pair = [lut[(c & 15) as usize], lut[(c >> 4) as usize]];
+        }
+    }
+}
+
 pub struct Requant<'a> {
     pub bias: &'a [i32],
     pub mult: &'a [i32],

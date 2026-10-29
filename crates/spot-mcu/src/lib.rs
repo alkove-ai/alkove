@@ -8,7 +8,7 @@ use alkove_engine::math;
 
 pub use fbank::{Fbank, Features, CHUNK, MELS};
 pub use file::{write_f32, Error, File};
-use quant::{dense, dequantize, quantize, quantize_fast, requantize, requantize_down, round_clear, round_near, sat8, Requant};
+use quant::{dense, dequantize, quantize, quantize_fast, requantize, requantize_down, round_clear, round_near, sat8, unpack_q4, Requant, Q4_BLOCK};
 
 #[derive(Clone, Copy, Default)]
 #[repr(C, align(16))]
@@ -56,9 +56,9 @@ pub mod profile {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Instant;
 
-    pub const NAMES: [&str; 11] = ["fbank", "front", "norm", "up", "gelu", "down", "residual", "vad head", "logits", "quantize h", "dw"];
+    pub const NAMES: [&str; 14] = ["fbank", "front", "norm", "up", "gelu", "down", "residual", "vad head", "logits", "quantize h", "dw", "  q4 unpack", "  q4 dense", "  q4 scatter"];
     // microseconds: the ESP32-S3 has no 64-bit atomics
-    pub static US: [AtomicU32; 11] = [const { AtomicU32::new(0) }; 11];
+    pub static US: [AtomicU32; 14] = [const { AtomicU32::new(0) }; 14];
 
     pub fn lap(i: usize, t: &mut Instant) {
         US[i].fetch_add(t.elapsed().as_micros() as u32, Ordering::Relaxed);
@@ -80,23 +80,37 @@ macro_rules! start {
     };
 }
 
-// a dense layer's weights: copied, or borrowed from a file that lives for the whole program (a model in flash or rodata)
-enum Weights {
+// an array of the file: copied, or borrowed from a file that lives for the whole program (a model in flash or rodata)
+enum Bytes {
     Own(Buf),
     Ref(&'static [i8]),
 }
 
-impl std::ops::Deref for Weights {
+impl std::ops::Deref for Bytes {
     type Target = [i8];
     fn deref(&self) -> &[i8] {
         match self {
-            Weights::Own(b) => b,
-            Weights::Ref(r) => r,
+            Bytes::Own(b) => b,
+            Bytes::Ref(r) => r,
         }
     }
 }
 
-type Take<'f> = dyn FnMut(&str, usize) -> Result<Weights, Error> + 'f;
+fn u8s(b: &[i8]) -> &[u8] {
+    // Safety: i8 and u8 have the same size and alignment.
+    unsafe { std::slice::from_raw_parts(b.as_ptr() as *const u8, b.len()) }
+}
+
+type Take<'f> = dyn FnMut(&str, usize) -> Result<Bytes, Error> + 'f;
+
+// int8, or 4-bit unpacked to int8 a panel of rows at a time, just before ESP-NN reads them
+enum Weights {
+    Int8(Bytes),
+    Q4 { codes: Bytes, zero: Bytes, m: Bytes },
+}
+
+// rows of int8 weights unpacked at once: within ESP-NN's L1 panel budget
+const PANEL: usize = 24 * 1024;
 
 struct Dense {
     k: usize,
@@ -115,7 +129,12 @@ impl Dense {
         Ok(Dense {
             k,
             n,
-            w: take(&format!("{p}.w"), k * n)?,
+            w: if f.has(&format!("{p}.q4")) {
+                let nb = n * k / Q4_BLOCK;
+                Weights::Q4 { codes: take(&format!("{p}.q4"), n * k / 2)?, zero: take(&format!("{p}.q4z"), nb)?, m: take(&format!("{p}.q4m"), nb)? }
+            } else {
+                Weights::Int8(take(&format!("{p}.w"), k * n)?)
+            },
             bias: if bias { f.i32(&format!("{p}.bias"), n)? } else { vec![0; n] },
             mult: f.i32(&format!("{p}.mult"), n)?,
             shift: f.i32(&format!("{p}.shift"), n)?,
@@ -124,9 +143,41 @@ impl Dense {
         })
     }
 
-    fn run(&self, x: &[i8], rows: usize, out: &mut [i8]) {
-        let q = Requant { bias: &self.bias, mult: &self.mult, shift: &self.shift, zin: self.zin, zout: self.zout };
-        dense(x, rows, self.k, &self.w, self.n, &q, out);
+    fn panel_rows(&self) -> usize {
+        (PANEL / self.k / 8 * 8).min(self.n)
+    }
+
+    // (k, n) of every call to dense()
+    fn shapes(&self) -> Vec<(usize, usize)> {
+        match self.w {
+            Weights::Int8(_) => vec![(self.k, self.n)],
+            Weights::Q4 { .. } => vec![(self.k, self.panel_rows()), (self.k, self.n % self.panel_rows())],
+        }
+    }
+
+    fn run(&self, x: &[i8], rows: usize, out: &mut [i8], panel: &mut Buf, pout: &mut Buf) {
+        let q = |a: usize, e: usize| Requant { bias: &self.bias[a..e], mult: &self.mult[a..e], shift: &self.shift[a..e], zin: self.zin, zout: self.zout };
+        match &self.w {
+            Weights::Int8(w) => dense(x, rows, self.k, w, self.n, &q(0, self.n), out),
+            Weights::Q4 { codes, zero, m } => {
+                let (k, n, rp) = (self.k, self.n, self.panel_rows());
+                let nb = k / Q4_BLOCK;
+                panel.resize(rp * k);
+                pout.resize(rows * rp);
+                start!(t);
+                for r0 in (0..n).step_by(rp) {
+                    let rr = rp.min(n - r0);
+                    unpack_q4(&u8s(codes)[r0 * k / 2..(r0 + rr) * k / 2], &u8s(zero)[r0 * nb..(r0 + rr) * nb], &u8s(m)[r0 * nb..(r0 + rr) * nb], &mut panel[..rr * k]);
+                    lap!(t, 11);
+                    dense(x, rows, k, &panel[..rr * k], rr, &q(r0, r0 + rr), &mut pout[..rows * rr]);
+                    lap!(t, 12);
+                    for f in 0..rows {
+                        out[f * n + r0..f * n + r0 + rr].copy_from_slice(&pout[f * rr..(f + 1) * rr]);
+                    }
+                    lap!(t, 13);
+                }
+            }
+        }
     }
 }
 
@@ -276,7 +327,7 @@ impl Spot {
     // every array copied
     pub fn load(bytes: &[u8]) -> Result<Spot, Error> {
         let f = File::parse(bytes)?;
-        Spot::read(&f, &mut |name, len| Ok(Weights::Own(Buf::from(&f.i8(name, len)?))))
+        Spot::read(&f, &mut |name, len| Ok(Bytes::Own(Buf::from(&f.i8(name, len)?))))
     }
 
     // the dense layers' weights (3.6 of Spot's 4 MB) borrowed where 16-byte aligned, the rest copied: no second copy of a model kept in memory anyway
@@ -284,7 +335,7 @@ impl Spot {
         let f = File::parse(bytes)?;
         Spot::read(&f, &mut |name, len| {
             let w = f.i8_ref(name, len)?;
-            Ok(if (w.as_ptr() as usize).is_multiple_of(16) { Weights::Ref(w) } else { Weights::Own(Buf::from(w)) })
+            Ok(if (w.as_ptr() as usize).is_multiple_of(16) { Bytes::Ref(w) } else { Bytes::Own(Buf::from(w)) })
         })
     }
 
@@ -366,6 +417,19 @@ impl Spot {
 
     pub fn fbank(&self) -> &Fbank {
         &self.fbank
+    }
+
+    // (k, n) of every dense() call, for ESP-NN's scratch
+    pub fn dense_shapes(&self) -> Vec<(usize, usize)> {
+        let mut v = self.front.shapes();
+        for b in &self.blocks {
+            v.extend(b.up.shapes());
+            v.extend(b.down.shapes());
+        }
+        v.retain(|s| s.1 > 0);
+        v.sort();
+        v.dedup();
+        v
     }
 }
 
@@ -468,6 +532,8 @@ struct Work {
     q: Buf,
     a8: Buf,
     u: Buf,
+    panel: Buf,
+    pout: Buf,
     hq: Vec<i8>,
     acc: Vec<i32>,
     h: Vec<f32>,
@@ -536,7 +602,7 @@ impl<'a> Stream<'a> {
             w.rows[r * kf..(r + 1) * kf].copy_from_slice(&w.xq[r * s.stride * MELS..r * s.stride * MELS + kf]);
         }
         w.q.resize(b * ff.max(d));
-        s.front.run(&w.rows, b, &mut w.q);
+        s.front.run(&w.rows, b, &mut w.q, &mut w.panel, &mut w.pout);
         w.h.clear();
         w.h.extend(w.q[..b * d].iter().map(|&v| s.front_gelu[(v as i32 + 128) as usize]));
         lap!(t, 1);
@@ -589,7 +655,7 @@ impl<'a> Stream<'a> {
                 self.last[i].copy_from_slice(&w.h[(b - 1) * d..]);
             }
             lap!(t, 2);
-            blk.up.run(&w.a8, b, &mut w.u);
+            blk.up.run(&w.a8, b, &mut w.u, &mut w.panel, &mut w.pout);
             lap!(t, 3);
             for row in w.u.chunks_exact_mut(ff) {
                 for (c, (v, bias)) in row.iter_mut().zip(&blk.up_bias).enumerate() {
@@ -601,7 +667,7 @@ impl<'a> Stream<'a> {
                 }
             }
             lap!(t, 4);
-            blk.down.run(&w.u, b, &mut w.q);
+            blk.down.run(&w.u, b, &mut w.q, &mut w.panel, &mut w.pout);
             lap!(t, 5);
             for o in 0..b {
                 for c in 0..d {
