@@ -31,6 +31,7 @@ CONF_CONTEXT = "context"
 CONF_STEPS_PER_CALL = "steps_per_call"
 CONF_TASK_CORE = "task_core"
 CONF_TEST_AUDIO = "test_audio"
+CONF_LOG_SCORES = "log_scores"
 CONF_ON_WAKE_WORD_DETECTED = "on_wake_word_detected"
 CONF_TEXT = "text"
 CONF_LANG = "lang"
@@ -120,6 +121,8 @@ CONFIG_SCHEMA = cv.All(
             # ESPHome's loop runs on core 1
             cv.Optional(CONF_TASK_CORE, default=0): cv.int_range(0, 1),
             cv.Optional(CONF_TEST_AUDIO): cv.file_,
+            # each second's best score above -3, to set the thresholds on this device
+            cv.Optional(CONF_LOG_SCORES, default=False): cv.boolean,
             cv.Optional(CONF_ON_WAKE_WORD_DETECTED): automation.validate_automation(single=True),
         }
     ).extend(cv.COMPONENT_SCHEMA),
@@ -193,6 +196,7 @@ async def to_code(config):
     cg.add(var.set_steps_per_call(config[CONF_STEPS_PER_CALL]))
     cg.add(var.set_task_core(config[CONF_TASK_CORE]))
     cg.add(var.set_self_test(CONF_TEST_AUDIO in config))
+    cg.add(var.set_log_scores(config[CONF_LOG_SCORES]))
 
     if on_wake := config.get(CONF_ON_WAKE_WORD_DETECTED):
         await automation.build_automation(var.get_wake_word_detected_trigger(), [(cg.std_string, "wake_word")], on_wake)

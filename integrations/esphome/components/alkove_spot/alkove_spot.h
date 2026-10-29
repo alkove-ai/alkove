@@ -37,6 +37,7 @@ class AlkoveSpot : public Component {
   void set_steps_per_call(uint32_t steps) { this->steps_ = steps; }
   void set_task_core(int core) { this->core_ = core; }
   void set_self_test(bool on) { this->self_test_ = on; }
+  void set_log_scores(bool on) { this->log_scores_ = on; }
 #ifdef USE_ALKOVE_SPOT_MICROPHONE
   void set_microphone_source(microphone::MicrophoneSource *source) { this->microphone_source_ = source; }
 #endif
@@ -68,6 +69,8 @@ class AlkoveSpot : public Component {
   uint32_t steps_{8};
   int core_{0};
   bool self_test_{false};
+  bool log_scores_{false};
+  uint32_t heard_samples_{0};
   bool running_{false};
   volatile bool loaded_{false};
   volatile bool failed_{false};

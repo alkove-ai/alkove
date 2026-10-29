@@ -34,6 +34,9 @@ void alk_spot_set_context(alk_spot *s, int context);
 // 16 kHz mono; returns the wakes written to out (at most cap)
 size_t alk_spot_push(alk_spot *s, const int16_t *pcm, size_t n, alk_wake *out, size_t cap);
 
+// the best score any word reached since the last call (very low when none was searched)
+float alk_spot_take_best(alk_spot *s);
+
 void alk_spot_reset(alk_spot *s);
 
 #ifdef __cplusplus

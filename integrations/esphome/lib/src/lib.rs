@@ -67,6 +67,8 @@ pub struct AlkSpot {
     step: usize,
     logp: Vec<f32>,
     vad: Vec<f32>,
+    // the best score any word reached since alk_spot_take_best, to set thresholds
+    best: f32,
 }
 
 #[no_mangle]
@@ -110,6 +112,7 @@ pub unsafe extern "C" fn alk_spot_new(model: *const u8, len: usize, steps_per_ca
         step: 0,
         logp: vec![0.0; per * spot.phones()],
         vad: vec![0.0; per],
+        best: f32::NEG_INFINITY,
     }))
 }
 
@@ -183,9 +186,19 @@ pub unsafe extern "C" fn alk_spot_push(s: *mut AlkSpot, pcm: *const i16, n: usiz
                     found += 1;
                 }
             });
+            for (_, sc) in s.spotter.scores() {
+                s.best = s.best.max(sc as f32);
+            }
         }
     }
     found
+}
+
+/// # Safety
+/// `s` from alk_spot_new.
+#[no_mangle]
+pub unsafe extern "C" fn alk_spot_take_best(s: *mut AlkSpot) -> f32 {
+    std::mem::replace(&mut (*s).best, f32::NEG_INFINITY)
 }
 
 /// # Safety

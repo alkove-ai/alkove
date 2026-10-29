@@ -95,6 +95,15 @@ void AlkoveSpot::push_(const int16_t *pcm, size_t n) {
   size_t found = alk_spot_push(this->spot_, pcm, n, out, 4);
   for (size_t i = 0; i < found; i++)
     xQueueSend(this->wakes_, &out[i], 0);
+  if (this->log_scores_) {
+    uint32_t before = this->heard_samples_ / 16000;
+    this->heard_samples_ += n;
+    if (this->heard_samples_ / 16000 != before) {
+      float best = alk_spot_take_best(this->spot_);
+      if (best > -3.0f)
+        ESP_LOGI(TAG, "Best score %.2f in second %u", best, (unsigned) before);
+    }
+  }
 }
 
 void AlkoveSpot::run_self_test_() {
