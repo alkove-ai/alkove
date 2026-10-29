@@ -18,17 +18,15 @@ pub struct Fbank {
     bands: Vec<Vec<(u16, f32)>>,
     cos: Vec<f32>,
     sin: Vec<f32>,
+    // the bit-reversal swaps (i < j)
+    swaps: Vec<(u16, u16)>,
 }
 
 impl Fbank {
     pub fn read(f: &File) -> Result<Fbank, Error> {
         let banks = f.f32("fbank.banks", BINS * MELS)?;
         let bands = (0..MELS).map(|m| (0..BINS).filter(|&k| banks[k * MELS + m] != 0.0).map(|k| (k as u16, banks[k * MELS + m])).collect()).collect();
-        Ok(Fbank { window: f.f32("fbank.window", WIN)?, bands, cos: f.f32("fbank.cos", BINS)?, sin: f.f32("fbank.sin", BINS)? })
-    }
-
-    // in place, radix 2, decimation in time
-    fn fft(&self, re: &mut [f32; NFFT], im: &mut [f32; NFFT]) {
+        let mut swaps = Vec::new();
         let mut j = 0;
         for i in 1..NFFT {
             let mut bit = NFFT >> 1;
@@ -38,23 +36,38 @@ impl Fbank {
             }
             j |= bit;
             if i < j {
-                re.swap(i, j);
-                im.swap(i, j);
+                swaps.push((i as u16, j as u16));
             }
+        }
+        Ok(Fbank { window: f.f32("fbank.window", WIN)?, bands, cos: f.f32("fbank.cos", BINS)?, sin: f.f32("fbank.sin", BINS)?, swaps })
+    }
+
+    // in place, radix 2, decimation in time; butterflies of a stage are independent, so k outside start changes no bit
+    fn fft(&self, re: &mut [f32; NFFT], im: &mut [f32; NFFT]) {
+        for &(i, j) in &self.swaps {
+            re.swap(i as usize, j as usize);
+            im.swap(i as usize, j as usize);
         }
         let mut len = 2;
         while len <= NFFT {
-            let step = NFFT / len;
-            for start in (0..NFFT).step_by(len) {
-                for k in 0..len / 2 {
-                    let (c, s) = (self.cos[k * step], self.sin[k * step]);
-                    let (a, b) = (start + k, start + k + len / 2);
-                    let tr = re[b] * c + im[b] * s;
-                    let ti = im[b] * c - re[b] * s;
-                    re[b] = re[a] - tr;
-                    im[b] = im[a] - ti;
-                    re[a] += tr;
-                    im[a] += ti;
+            let (half, step) = (len / 2, NFFT / len);
+            for k in 0..half {
+                let (c, s) = (self.cos[k * step], self.sin[k * step]);
+                let mut a = k;
+                while a < NFFT {
+                    let b = a + half;
+                    // Safety: a < b < NFFT, as a runs over k + multiples of len and k < half.
+                    unsafe {
+                        let (rb, ib) = (*re.get_unchecked(b), *im.get_unchecked(b));
+                        let (ra, ia) = (*re.get_unchecked(a), *im.get_unchecked(a));
+                        let tr = rb * c + ib * s;
+                        let ti = ib * c - rb * s;
+                        *re.get_unchecked_mut(b) = ra - tr;
+                        *im.get_unchecked_mut(b) = ia - ti;
+                        *re.get_unchecked_mut(a) = ra + tr;
+                        *im.get_unchecked_mut(a) = ia + ti;
+                    }
+                    a += len;
                 }
             }
             len <<= 1;
