@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use alkove_engine::Model;
 
+use crate::band::Band;
 use crate::cue::{Cue, SpeechEvent, SpeechParams, SpeechTracker};
 use crate::focus::Focus;
 use crate::level::{coef, Chunker, Delay, Gate, InputGain, Level};
@@ -123,6 +124,7 @@ pub struct Chain {
     powers: [f64; CUE.lag_steps + 1],
     input: InputGain,
     gained: Vec<f32>,
+    band: Band,
     listen: Listen,
     before_hold: Listen,
     // Cue's phrase sent out and not ended yet, from its start
@@ -178,6 +180,7 @@ impl Chain {
             powers: [0.0; CUE.lag_steps + 1],
             input: InputGain::default(),
             gained: vec![0.0; HOP],
+            band: Band::new(),
             listen: Listen::Cue,
             before_hold: Listen::Cue,
             said: None,
@@ -363,6 +366,7 @@ impl Chain {
         self.input.apply(hop, &mut self.gained);
         self.raw.copy_from_slice(&self.gained);
         self.raw_delay.apply(&mut self.raw);
+        self.band.apply(&mut self.gained);
         if self.asleep && self.woken() {
             self.asleep = false;
             self.quiet = 0;
