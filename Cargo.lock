@@ -49,6 +49,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "alkove-spot-mcu"
+version = "0.1.0"
+dependencies = [
+ "alkove-engine",
+]
+
+[[package]]
 name = "alkove-voice"
 version = "0.1.0"
 dependencies = [

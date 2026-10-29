@@ -1,0 +1,12 @@
+[package]
+name = "alkove-spot-mcu"
+description = "Spot in int8 for microcontrollers (ESP32-S3): integer layers as ESP-NN computes them, the rest in float"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+alkove-engine = { path = "../engine" }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/engine", "crates/core", "crates/wasm", "crates/voice", "python", "android/jni"]
+members = ["crates/engine", "crates/core", "crates/wasm", "crates/voice", "crates/spot-mcu", "python", "android/jni"]
 # the Python extension builds with maturin, against a Python; the Android library with cargo-ndk; the voice binary needs a microphone stack and Cactus's libneedle
 default-members = ["crates/engine", "crates/core", "crates/wasm"]
 resolver = "2"
