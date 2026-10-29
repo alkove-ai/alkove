@@ -20,37 +20,11 @@ static const char *const TAG = "alkove_spot";
 // samples handed to Spot at a time: one 30 ms step is 480
 static const size_t BLOCK = 512;
 static const size_t RING_BYTES = 16 * 1024;
+// ~8 KB measured at most (uxTaskGetStackHighWaterMark), loading included
+static const uint32_t STACK = 16 * 1024;
 
 void AlkoveSpot::setup() {
-  void *scratch = heap_caps_aligned_alloc(16, alk_spot_scratch_size() + 16, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (scratch == nullptr) {
-    ESP_LOGE(TAG, "No internal RAM for ESP-NN's scratch");
-    this->mark_failed();
-    return;
-  }
-  alk_spot_set_scratch(scratch);
-
-  size_t internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL), psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-  int64_t t = esp_timer_get_time();
-  this->spot_ = alk_spot_new(alkove_spot_model, alkove_spot_model_end - alkove_spot_model, this->steps_);
-  if (this->spot_ == nullptr) {
-    ESP_LOGE(TAG, "The model does not load");
-    this->mark_failed();
-    return;
-  }
-  ESP_LOGI(TAG, "Spot loaded in %d ms: %u B of PSRAM, %u B of internal RAM", (int) ((esp_timer_get_time() - t) / 1000),
-           (unsigned) (psram - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-           (unsigned) (internal - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
-
-  for (auto &v : this->variants_) {
-    if (std::find(this->words_.begin(), this->words_.end(), v.word) == this->words_.end())
-      this->words_.push_back(v.word);
-    alk_spot_add_variant(this->spot_, v.word.c_str(), v.ids.data(), v.ids.size(), v.p, v.french, v.anywhere, v.pause);
-  }
-  alk_spot_set_context(this->spot_, this->context_);
-
   this->wakes_ = xQueueCreate(4, sizeof(alk_wake));
-
 #ifdef USE_ALKOVE_SPOT_MICROPHONE
   this->ring_buffer_ = ring_buffer::RingBuffer::create(RING_BYTES);
   if (this->ring_buffer_ == nullptr) {
@@ -64,9 +38,39 @@ void AlkoveSpot::setup() {
       rb->write_without_replacement(data.data(), data.size(), 0, false);
   });
 #endif
-
-  xTaskCreatePinnedToCore(AlkoveSpot::task_, "alkove_spot", 24 * 1024, this, 3, &this->task_handle_, this->core_);
+  // the model loads in the task: on ESPHome's loop task stack, loading it overflowed (a crash in the next log line)
+  if (xTaskCreatePinnedToCore(AlkoveSpot::task_, "alkove_spot", STACK, this, 3, &this->task_handle_, this->core_) != pdPASS) {
+    ESP_LOGE(TAG, "No memory for the task");
+    this->mark_failed();
+    return;
+  }
   this->start();
+}
+
+bool AlkoveSpot::load_() {
+  void *scratch = heap_caps_aligned_alloc(16, alk_spot_scratch_size() + 16, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (scratch == nullptr) {
+    ESP_LOGE(TAG, "No internal RAM for ESP-NN's scratch");
+    return false;
+  }
+  alk_spot_set_scratch(scratch);
+  size_t internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL), psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  int64_t t = esp_timer_get_time();
+  this->spot_ = alk_spot_new(alkove_spot_model, alkove_spot_model_end - alkove_spot_model, this->steps_);
+  if (this->spot_ == nullptr) {
+    ESP_LOGE(TAG, "The model does not load");
+    return false;
+  }
+  for (auto &v : this->variants_) {
+    if (std::find(this->words_.begin(), this->words_.end(), v.word) == this->words_.end())
+      this->words_.push_back(v.word);
+    alk_spot_add_variant(this->spot_, v.word.c_str(), v.ids.data(), v.ids.size(), v.p, v.french, v.anywhere, v.pause);
+  }
+  alk_spot_set_context(this->spot_, this->context_);
+  ESP_LOGI(TAG, "Spot loaded in %d ms: %u B of PSRAM, %u B of internal RAM", (int) ((esp_timer_get_time() - t) / 1000),
+           (unsigned) (psram - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+           (unsigned) (internal - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+  return true;
 }
 
 void AlkoveSpot::start() {
@@ -76,6 +80,7 @@ void AlkoveSpot::start() {
 #endif
   this->running_ = true;
 }
+
 
 void AlkoveSpot::stop() {
 #ifdef USE_ALKOVE_SPOT_MICROPHONE
@@ -112,13 +117,19 @@ void AlkoveSpot::run_self_test_() {
 
 void AlkoveSpot::task_(void *arg) {
   auto *self = static_cast<AlkoveSpot *>(arg);
+  if (!self->load_()) {
+    self->failed_ = true;
+    vTaskDelete(nullptr);
+  }
+  self->loaded_ = true;
   if (self->self_test_)
     self->run_self_test_();
+  ESP_LOGI(TAG, "Task stack: %u of %u B never used", (unsigned) uxTaskGetStackHighWaterMark(nullptr), (unsigned) STACK);
 #ifdef USE_ALKOVE_SPOT_MICROPHONE
   int16_t block[BLOCK];
   for (;;) {
     size_t got = self->ring_buffer_->read(block, sizeof(block), pdMS_TO_TICKS(100));
-    if (got >= 2 && self->running_)
+    if (got >= 2 && self->running_ && self->loaded_)
       self->push_(block, got / 2);
   }
 #else
@@ -128,6 +139,10 @@ void AlkoveSpot::task_(void *arg) {
 }
 
 void AlkoveSpot::loop() {
+  if (this->failed_ && !this->is_failed()) {
+    this->mark_failed();
+    return;
+  }
   alk_wake w;
   while (this->wakes_ != nullptr && xQueueReceive(this->wakes_, &w, 0) == pdTRUE) {
     const std::string &word = w.word < this->words_.size() ? this->words_[w.word] : this->words_[0];

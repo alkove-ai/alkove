@@ -58,6 +58,7 @@ class AlkoveSpot : public Component {
   };
 
   static void task_(void *arg);
+  bool load_();
   void run_self_test_();
   void push_(const int16_t *pcm, size_t n);
 
@@ -68,6 +69,8 @@ class AlkoveSpot : public Component {
   int core_{0};
   bool self_test_{false};
   bool running_{false};
+  volatile bool loaded_{false};
+  volatile bool failed_{false};
 
   alk_spot *spot_{nullptr};
   QueueHandle_t wakes_{nullptr};

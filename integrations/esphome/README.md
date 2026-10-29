@@ -5,12 +5,8 @@ Typed wake words on the ESP32-S3, in place of `micro_wake_word`: Spot in 4 bits 
 - `lib/`: the Rust library (`alkove-spot-esp`) behind a C ABI, `include/alk_spot.h`.
 - `components/alkove_spot/`: the ESPHome component; it links the library and `espressif/esp-nn`, and embeds the model.
 
-Build the library (espup's toolchain):
+Build the bundle (espup's toolchain): `./dist.sh path/to/spot-q4.mcu` puts the library, the model and `manifest.json` (their sha256) in `dist/alkove-spot-esp-<version>/`. The component takes it as `bundle:` and checks the files; `model:` and `library:` override them one by one.
 
-```sh
-RUSTFLAGS="--cfg espidf_time64" cargo +esp build --release -p alkove-spot-esp --features chip --target xtensa-esp32s3-espidf -Zbuild-std=std,panic_abort --lib
-```
-
-Then `esphome compile example.yaml` with `model`, `library` and `test_audio` pointing at the files.
+Then `esphome compile example.yaml` (`test_audio` pointing at a 16 kHz mono WAV, or removed).
 
 A word is its text and language (`text: ok Claude`, `lang: en`): Lex compiles it where ESPHome runs, which needs the `alkove` Python package there (`pip install alkove`, or `uvx --with alkove esphome compile …`). Thresholds may be set by hand (`thresholds: {anywhere, pause}`), else they are Spot's defaults for the language. A word can also be given compiled: `name`, `phonemes` (Lex's phoneme ids, `p`, `french`) and `thresholds`.

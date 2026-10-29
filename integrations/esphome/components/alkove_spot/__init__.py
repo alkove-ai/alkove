@@ -1,4 +1,6 @@
 """Alkove Spot: typed wake words for ESPHome, in place of micro_wake_word (alkove/integrations/esphome)."""
+import hashlib
+import json
 from pathlib import Path
 import shutil
 import wave
@@ -14,6 +16,7 @@ CODEOWNERS = ["@edbrdi"]
 DEPENDENCIES = ["esp32", "psram"]
 AUTO_LOAD = ["ring_buffer"]
 
+CONF_BUNDLE = "bundle"
 CONF_LIBRARY = "library"
 CONF_WORDS = "words"
 CONF_NAME = "name"
@@ -108,8 +111,9 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(AlkoveSpot),
             cv.Optional(CONF_MICROPHONE): microphone.microphone_source_schema(min_bits_per_sample=16, max_bits_per_sample=16, min_channels=1, max_channels=1),
-            cv.Required(CONF_MODEL): cv.file_,
-            cv.Required(CONF_LIBRARY): cv.file_,
+            cv.Optional(CONF_BUNDLE): cv.directory,
+            cv.Optional(CONF_MODEL): cv.file_,
+            cv.Optional(CONF_LIBRARY): cv.file_,
             cv.Required(CONF_WORDS): cv.All(cv.ensure_list(WORD_SCHEMA), cv.Length(min=1)),
             cv.Optional(CONF_CONTEXT, default="pause"): cv.one_of(*CONTEXTS, lower=True),
             cv.Optional(CONF_STEPS_PER_CALL, default=8): cv.int_range(1, 8),
@@ -120,7 +124,28 @@ CONFIG_SCHEMA = cv.All(
         }
     ).extend(cv.COMPONENT_SCHEMA),
     cv.only_on_esp32,
+    lambda c: _from_bundle(c),
 )
+
+
+def _from_bundle(config):
+    """model and library from a bundle (dist.sh: manifest.json and its files, checked by sha256), unless given one by one."""
+    if CONF_BUNDLE in config:
+        root = Path(config[CONF_BUNDLE])
+        try:
+            manifest = json.loads((root / "manifest.json").read_text())
+        except (OSError, ValueError) as e:
+            raise cv.Invalid(f"{root}: no readable manifest.json") from e
+        for key, conf in (("library", CONF_LIBRARY), ("model", CONF_MODEL)):
+            entry = manifest[key]
+            path = root / entry["file"]
+            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]:
+                raise cv.Invalid(f"{path}: missing, or not the file manifest.json names (sha256)")
+            config.setdefault(conf, str(path))
+    for conf in (CONF_MODEL, CONF_LIBRARY):
+        if conf not in config:
+            raise cv.Invalid(f"Give {CONF_BUNDLE}, or {CONF_MODEL} and {CONF_LIBRARY}")
+    return config
 
 
 def FINAL_VALIDATE_SCHEMA(config):
