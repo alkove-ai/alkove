@@ -155,3 +155,23 @@ jobs:
           name: integration
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # the GitHub release of an integration's tag, once on PyPI, never Latest
+  github:
+    needs: [integration, livekit, pipecat, wyoming]
+    if: always() && contains(fromJSON('["livekit", "pipecat", "wyoming"]'), needs.integration.outputs.name) && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NAME: ${{ needs.integration.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          v=${GITHUB_REF_NAME##*-v}
+          case $NAME in livekit) title="LiveKit plugin" ;; pipecat) title="Pipecat plugin" ;; wyoming) title="Wyoming server" ;; esac
+          read -r pkg range < <(python3 -c "import tomllib; p = tomllib.load(open('integrations/$NAME/pyproject.toml', 'rb'))['project']; print(p['name'], next(d for d in p['dependencies'] if d.startswith('alkove')))")
+          printf '[`%s`](https://pypi.org/project/%s/%s/) %s on PyPI, on `%s`.\n\nSee [integrations/%s](https://github.com/%s/tree/%s/integrations/%s).\n' \
+            "$pkg" "$pkg" "$v" "$v" "$range" "$NAME" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$NAME" > notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$title $v" --notes-file notes.md --latest=false
