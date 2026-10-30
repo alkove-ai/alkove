@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "alkove-android"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "alkove-core",
  "alkove-engine",
@@ -30,18 +30,18 @@ dependencies = [
 
 [[package]]
 name = "alkove-core"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "alkove-engine",
 ]
 
 [[package]]
 name = "alkove-engine"
-version = "0.3.2"
+version = "0.3.3"
 
 [[package]]
 name = "alkove-python"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "alkove-core",
  "alkove-engine",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "alkove-wasm"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "alkove-core",
  "alkove-engine",

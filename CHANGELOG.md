@@ -2,9 +2,12 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## Unreleased
+## 0.3.3 (2026-10-30)
+
+Wideband sound gives the same outputs to the bit as 0.3.2; only a stream empty above 4 kHz changes.
 
 - Phone audio (#1): a stream with nothing above 4 kHz, as a phone line at 8 kHz leaves it, gets a faint noise up there, -45 dBFS, before Focus and before Cue. The two models never heard such an empty band and lost the voice. The stream itself tells: the power from 4.6 kHz up, averaged in dB over a second of sound, under -78 dB of the total (phone lines -87 at most, wideband sound -71 at least). Wideband sound is the same to the bit: the digests do not move. On 384 phrases through G.711, G.726, G.723.1 and Opus at 8 kHz, with another voice in the gaps, the chain missed 328 to 365 of them in 0.3.2 and misses 0 to 2 now, `near` included, as Pipecat's filter then VAD; iLBC 383 to 8.
+- `livekit-plugins-alkove` 1.0.0 and `pipecat-alkove` 1.0.0, on `alkove>=0.3.3,<0.4`.
 
 ## 0.3.2 (2026-10-22)
 

@@ -21,7 +21,7 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("ai.alkove:alkove:0.3.2")
+    implementation("ai.alkove:alkove:0.3.3")
 }
 ```
 
@@ -110,7 +110,7 @@ val part = p.push(frame)                      // FloatArray or ShortArray, any l
 ## In a LiveKit room
 
 ```kotlin
-implementation("ai.alkove:alkove-livekit:0.3.2")   // from maven.alkove.ai, as above
+implementation("ai.alkove:alkove-livekit:0.3.3")   // from maven.alkove.ai, as above
 ```
 
 ```kotlin
