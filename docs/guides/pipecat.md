@@ -9,7 +9,7 @@ sidebar:
 Focus keeps one voice: the closest one, or the voice of a print. It is made for a caller on a phone, a headset or a laptop, not for a microphone in the middle of a room.
 :::
 
-`pipecat-alkove` puts Alkove in a [Pipecat](https://github.com/pipecat-ai/pipecat) bot: `AlkoveFilter` keeps the user's voice (Focus), `AlkoveVADAnalyzer` finds where they speak (Cue). Both run on the bot's CPU, with no server and no key.
+`pipecat-alkove` puts Alkove in a [Pipecat](https://github.com/pipecat-ai/pipecat) bot: `AlkoveFilter` keeps the user's voice (Focus), `AlkoveVADAnalyzer` finds where they speak (Cue). Both run on the bot's CPU, with no server and no key. Pipecat's docs list it as a community integration: [audio filter](https://docs.pipecat.ai/api-reference/server/services/audio-filters/alkove) and [VAD](https://docs.pipecat.ai/api-reference/server/services/vad/alkove-vad).
 
 ## Install
 
