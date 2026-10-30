@@ -224,7 +224,7 @@ class VADStream(agents.vad.VADStream):
                 self._event_ch.send_nowait(
                     agents.vad.VADEvent(
                         type=agents.vad.VADEventType.INFERENCE_DONE,
-                        samples_index=(k + 1) * 480,
+                        samples_index=at(now),
                         timestamp=now,
                         speech_duration=speech_pub,
                         silence_duration=silence_pub,
@@ -255,7 +255,7 @@ class VADStream(agents.vad.VADStream):
                     self._event_ch.send_nowait(
                         agents.vad.VADEvent(
                             type=agents.vad.VADEventType.START_OF_SPEECH,
-                            samples_index=(k + 1) * 480,
+                            samples_index=at(now),
                             timestamp=now,
                             speech_duration=speech_pub,
                             silence_duration=0.0,
@@ -270,7 +270,7 @@ class VADStream(agents.vad.VADStream):
                     self._event_ch.send_nowait(
                         agents.vad.VADEvent(
                             type=agents.vad.VADEventType.END_OF_SPEECH,
-                            samples_index=(k + 1) * 480,
+                            samples_index=at(now),
                             timestamp=now,
                             speech_duration=e["end"] - e["start"],
                             silence_duration=silence_pub,
