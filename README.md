@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/alkove"><img alt="npm" src="https://img.shields.io/npm/v/alkove?color=e0702c&label=npm&cacheSeconds=3600"></a>
   <a href="https://pypi.org/project/alkove/"><img alt="PyPI" src="https://img.shields.io/pypi/v/alkove?color=e0702c&label=pypi&cacheSeconds=3600"></a>
-  <a href="https://alkove.ai/docs/start/android/"><img alt="Android" src="https://img.shields.io/badge/android-v0.3.3-e0702c"></a>
+  <a href="https://alkove.ai/docs/start/android/"><img alt="Android" src="https://img.shields.io/badge/android-v0.4.0-e0702c"></a>
   <a href="./LICENSE"><img alt="Apache-2.0, code and weights" src="https://img.shields.io/badge/code%20%2B%20weights-Apache--2.0-13254a"></a>
   <a href="https://huggingface.co/alkove-ai"><img alt="Models on Hugging Face" src="https://img.shields.io/badge/models-Hugging%20Face-13254a"></a>
 </p>
@@ -74,7 +74,7 @@ Voice agents, files, Node and the primitives: [the `alkove` package](./packages/
 
 ```kotlin
 // settings.gradle.kts: repositories { maven("https://maven.alkove.ai") }
-implementation("ai.alkove:alkove:0.3.3")
+implementation("ai.alkove:alkove:0.4.0")
 ```
 
 ```kotlin
@@ -146,7 +146,7 @@ Python on its own: `pip install alkove`, see [the Python package](./python).
 | Model | What it does | Size |
 |---|---|---|
 | [Focus](https://alkove.ai/docs/models/focus/) | Keeps the closest voice, or one person's voice from their print, and removes noise, music and other voices | 1.1 MB |
-| [Cue](https://alkove.ai/docs/models/cue/) | Tells when someone speaks, every 30 ms | 1.1 MB |
+| [Cue](https://alkove.ai/docs/models/cue/) | Tells when someone speaks, every 30 ms, and when their turn ends | 1.2 MB |
 | [Spot](https://alkove.ai/docs/models/spot/) | Hears any word you type, in 7 languages, with no training | 2.8 MB |
 | [Lex](https://alkove.ai/docs/models/lex/) | Turns a written word into its likely pronunciations | 1.8 MB |
 | [Timbre](https://alkove.ai/docs/models/timbre/) | Makes voiceprints and compares them | 0.74 MB |

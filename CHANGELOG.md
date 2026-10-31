@@ -2,11 +2,26 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
+## 0.4.0 (2026-10-31)
+
+Every package moves to 0.4 (npm, Python, Android), with `livekit-plugins-alkove` and `pipecat-alkove` 1.1.0 and `wyoming-alkove` 0.2.0 on `alkove>=0.4.0,<0.5`. Cue gets an end of turn head: `speech` is the same to the bit, and every digest of a call, of the primitives and of the files too. Nothing to change in your code; an agent input now also gives turns and interruptions.
+
+- `turn` and `turnend` on the agent input (web, Android) and on `Chain` and `Live` in Python: Cue's end of turn head, read every 0.1 s of each pause, gives the probability that the user has finished and that they stopped on a hesitation. `turnend` comes once per turn, at the first read over `threshold` (0.6) once the pause reaches `minPause` (0.3 s), or at `maxPause` (1.5 s). The head starts over at each turn's end.
+- `interruptstart`, `interrupt`, `interruptcancel` on the agent input with `farEnd`: speech that starts while the agent talks; `interrupt` once its speech spans `minDuration` (0.7 s, short gaps included), `interruptcancel` if it stops before. A backchannel gives no `turnend`; an answer begun as the agent stops is a turn.
+- Python: `Chain` and `Live` take `turn` and `interrupt` (off unless asked), and `far_end_active()`.
+- The Cue file gains the outputs `turn` and `hesitation` and 133 KB; its state grows from 5,848 to 5,976 floats.
+- `pipecat-alkove`: `AlkoveTurnAnalyzer`, the end of turn in place of Smart Turn, and `turn.interruption_strategy()`, a start strategy that lets a "mm" through while the bot speaks.
+- `livekit-plugins-alkove`: `alkove.TurnDetector`, a streaming turn detector; interruptions stay LiveKit's, its VAD mode with `min_duration=0.7` being the same rule.
+- Python: `alkove.Turns`, Cue alone on the raw microphone with the same events, for a microphone across the room.
+- `wyoming-alkove`: `--stt-uri`, Alkove's end of turn in front of a Wyoming speech-to-text for Home Assistant's Assist; it tells Home Assistant it finds the end of speech itself.
+- The model card of alkove-cue-1-preview gives the end of turn on LiveKit's eot-bench, against Smart Turn v3.2 and LiveKit's detectors, and Cue's speed with the head: 1.9 ms per second of audio on a Galaxy Z Fold8 (1.7 before), 3.0 on an Apple M1 Max (2.6).
+- The 0.3.3 entry's phone figures are measured again: the background noise of their scenes was read at the wrong rate. The fix holds; the figures above are the new ones (published: 328 to 365, 0 to 2, iLBC 383 to 8).
+
 ## 0.3.3 (2026-10-30)
 
 Wideband sound gives the same outputs to the bit as 0.3.2; only a stream empty above 4 kHz changes.
 
-- Phone audio (#1): a stream with nothing above 4 kHz, as a phone line at 8 kHz leaves it, gets a faint noise up there, -45 dBFS, before Focus and before Cue. The two models never heard such an empty band and lost the voice. The stream itself tells: the power from 4.6 kHz up, averaged in dB over a second of sound, under -78 dB of the total (phone lines -87 at most, wideband sound -71 at least). Wideband sound is the same to the bit: the digests do not move. On 384 phrases through G.711, G.726, G.723.1 and Opus at 8 kHz, with another voice in the gaps, the chain missed 328 to 365 of them in 0.3.2 and misses 0 to 2 now, `near` included, as Pipecat's filter then VAD; iLBC 383 to 8.
+- Phone audio (#1): a stream with nothing above 4 kHz, as a phone line at 8 kHz leaves it, gets a faint noise up there, -45 dBFS, before Focus and before Cue. The two models never heard such an empty band and lost the voice. The stream itself tells: the power from 4.6 kHz up, averaged in dB over a second of sound, under -78 dB of the total (phone lines -87 at most, wideband sound -71 at least). Wideband sound is the same to the bit: the digests do not move. On 384 phrases through G.711, G.726, G.723.1 and Opus at 8 kHz, with another voice in the gaps, the chain missed 339 to 367 of them in 0.3.2 and misses 0 to 1 now, `near` included, as Pipecat's filter then VAD; iLBC 384 to 11 (14 with `near` or Pipecat's filter).
 - `livekit-plugins-alkove` 1.0.0 and `pipecat-alkove` 1.0.0, on `alkove>=0.3.3,<0.4`.
 
 ## 0.3.2 (2026-10-22)

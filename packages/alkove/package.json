@@ -1,6 +1,6 @@
 {
   "name": "alkove",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "On-device voice input for the web: keep the user's voice, detect speech and wake words. No server, no key.",
   "keywords": [
     "voice",

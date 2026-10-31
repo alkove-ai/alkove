@@ -24,7 +24,7 @@ Versions follow semver, with its rule for `0.x`:
 | Patch (`0.2.0` → `0.2.1`) | Fixes, and additions that do not break code written for the previous version. The same models. |
 | Minor (`0.2` → `0.3`) | Breaking changes: to the API, the models, the defaults. |
 
-`npm install alkove` saves a `^0.3.3` range, which takes patches and stops before the next minor: a breaking version never arrives on its own. Each version is in the [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md), with what to change in your code and which models moved.
+`npm install alkove` saves a `^0.4.0` range, which takes patches and stops before the next minor: a breaking version never arrives on its own. Each version is in the [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md), with what to change in your code and which models moved.
 
 The npm package, the Python package and the Android library share the minor version: `alkove` 0.3 on the web, in Python and on Android runs the same core and the same models, and reads the same voiceprints and words. Their patches are numbered on their own.
 
