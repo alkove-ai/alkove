@@ -37,6 +37,35 @@ input.on('speechend', ({ start, end }) => ui.listening(false))
 
 Times are in seconds from the start of the input. Tune how fast speech opens and closes with `speech` (`startSecs`, `stopSecs`, `confidence`, `exitConfidence`); see [`SpeechParams`](/docs/reference/interfaces/speechparams/).
 
+## When the user is done: `turnend`
+
+```ts
+input.on('turnend', ({ end, probability }) => agent.reply()) // once per turn
+input.on('turn', ({ pause, probability, hesitation }) => ui.thinking(hesitation > 0.5)) // every 0.1 s of a pause
+```
+
+Cue has a second head that hears the end of a turn in the voice: a finished sentence, or one left hanging. It reads each pause every 0.1 s. `probability` is how likely the user has finished; `hesitation`, how likely they stopped on a hesitation, an "um" or a drawn-out vowel. `turnend` comes once per turn, at the first read over `threshold` once the pause has lasted `minPause`, or at `maxPause` whatever the head says. `start` is when the turn began, `end` when the user stopped, `at` when the decision came.
+
+| `turn` option | Default | |
+|---|---|---|
+| `threshold` | 0.6 | lower answers sooner and cuts the user off more often |
+| `minPause` | 0.3 s | no turn ends on a shorter pause |
+| `maxPause` | 1.5 s | the turn ends after this much silence anyway |
+
+`turn: false` turns them off. The head listens to the sound, not to the words: it does not know that "my number is" asks for more.
+
+## When the user cuts in: `interrupt`
+
+With `farEnd`, speech that starts while your agent talks comes in three steps:
+
+```ts
+input.on('interruptstart', () => (player.volume = 0.3)) // the user talks over the agent: lower it
+input.on('interrupt', () => player.stop()) // speech spanning 0.7 s: a real interruption
+input.on('interruptcancel', () => (player.volume = 1)) // it stopped before: "mm", "yeah", the agent goes on
+```
+
+`interrupt: { minDuration: 0.7 }` sets how long the speech must span to stop the agent, its short gaps included (two "mm" half a second apart count as one): most "mm" and "yeah" are shorter. A backchannel is not a turn of its own: it gives no `turnend`. `interrupt: false` turns them off. Without `farEnd`, the SDK cannot know the agent talks, and none of them come.
+
 ## Voices far from the microphone: `near`
 
 ```ts

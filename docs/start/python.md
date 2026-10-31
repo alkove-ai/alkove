@@ -51,6 +51,18 @@ audio, events = live.push(frame)
 # {'type': 'diag', 'code': 'speech.far', 'level': 'info', 'data': {'start': …, 'end': …, 'voiceDb': -40.2, …}}
 ```
 
+They also take its [end of turn](/docs/start/agent/#when-the-user-is-done-turnend) and its [interruptions](/docs/start/agent/#when-the-user-cuts-in-interrupt), off unless asked:
+
+```python
+live = alkove.Live(models, 16000, turn=True, interrupt=True)   # or alkove.TurnParams(threshold=0.7), alkove.InterruptParams(min_duration=0.5)
+live.far_end_active(True)   # your agent starts talking; False when it stops
+audio, events = live.push(frame)
+# {'type': 'turnend', 'start': …, 'end': …, 'probability': 0.83, 'hesitation': 0.02, 'at': …}
+# {'type': 'interruptstart', 'start': …}, then {'type': 'interrupt', 'start': …, 'at': …} or {'type': 'interruptcancel', 'start': …, 'end': …}
+```
+
+For a microphone across the room, where Focus does not belong, `alkove.Turns(models, rate)` runs Cue alone on the raw audio and gives the same events, from `push(frame)`: `turn=True` by default, `interrupt` and `far_end_active()` as above.
+
 ## A file
 
 ```python

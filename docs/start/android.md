@@ -21,7 +21,7 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("ai.alkove:alkove:0.3.3")
+    implementation("ai.alkove:alkove:0.4.0")
 }
 ```
 
@@ -51,7 +51,7 @@ val input = AgentInput.start(context, AgentOptions(output = Output(Format.S16, r
 scope.launch {
     input.events.collect { e ->
         when (e) {
-            is Event.SpeechStart -> interruptTheAgent()
+            is Event.Interrupt -> interruptTheAgent()   // speech over the agent long enough (farEnd)
             is Event.Utterance -> transcribe(e.pcm)         // from speech start to speech end, with its pre-roll
             is Event.ModeChange -> showMode(e.mode)          // RAW while the models load, then FOCUS
             else -> {}
@@ -73,6 +73,19 @@ val input = AgentInput.start(context, AgentOptions(near = Alkove.NEAR_GAP_DB))  
 input.listen(false)   // mute: the phrase under way comes as Event.SpeechCancel; kept before the models run
 input.hold()          // hold to talk: a phrase until release(), whatever Cue hears
 input.release()
+```
+
+The [end of turn](/docs/start/agent/#when-the-user-is-done-turnend) and the [interruptions](/docs/start/agent/#when-the-user-cuts-in-interrupt) come as on the web, on by default (`turn = null` or `interrupt = null` to turn them off); the interruptions need `farEnd = true` and `input.farEndActive()` around your agent's playback:
+
+```kotlin
+val input = AgentInput.start(context, AgentOptions(farEnd = true, turn = TurnParams(threshold = 0.7)))
+when (e) {
+    is Event.TurnEnd -> answer()                 // e.start, e.end, e.probability, e.hesitation, e.at
+    is Event.InterruptStart -> player.duck()
+    is Event.Interrupt -> player.stop()
+    is Event.InterruptCancel -> player.unduck()  // a backchannel: the agent goes on
+    else -> {}
+}
 ```
 
 With `levels` or `near`, `Event.SpeechEnd` and `Event.Utterance` carry a `PhraseLevel` (`voiceDb`, `noiseDb`, `refDb`), and a far voice comes as the diag `speech.far`. `Chain` and `Live` take `levels` and `near` too, with `setListen`, `hold`, `release` and `inputGainDb`, the gain a quiet microphone gets before Focus.
@@ -110,7 +123,7 @@ val part = p.push(frame)                      // FloatArray or ShortArray, any l
 ## In a LiveKit room
 
 ```kotlin
-implementation("ai.alkove:alkove-livekit:0.3.3")   // from maven.alkove.ai, as above
+implementation("ai.alkove:alkove-livekit:0.4.0")   // from maven.alkove.ai, as above
 ```
 
 ```kotlin

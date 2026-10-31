@@ -99,17 +99,27 @@ Played through speakers, the agent's voice comes back into the microphone. The S
 
 ## Barge-in
 
-Alkove does not stop your text-to-speech. `speechstart` keeps firing while the agent talks, so it is your signal:
+Alkove does not stop your text-to-speech: it tells you when to. With `farEnd`, speech over the agent comes in three steps, so a "mm" does not cut it:
 
 ```ts
-input.on('speechstart', () => {
-  if (speaking) stopPlayback()
-})
+input.on('interruptstart', () => player.duck()) // the user starts talking over the agent
+input.on('interrupt', () => player.stop()) // the speech spans `interrupt.minDuration`, 0.7 s by default
+input.on('interruptcancel', () => player.unduck()) // it stopped before: a backchannel
 ```
+
+Lowering the agent's volume at once costs little if it was a "mm", and the user hears that the agent listens. See [When the user cuts in](/docs/start/agent/#when-the-user-cuts-in-interrupt).
 
 With a print (`voiceprint`, or `learn` once ready), Focus keeps only the user's voice, so another person near the phone does not interrupt the agent.
 
 Without a print, `near: true` keeps a voice far under the user's from interrupting: it never fires `speechstart`. It goes by loudness, so it keeps out a colleague across the room or a video on another device, not someone beside the user. See [Voices far from the microphone](/docs/start/agent/#voices-far-from-the-microphone-near).
+
+## Turn taking
+
+`turnend` says when to answer: Cue's end of turn head, read every 0.1 s of each pause, over `turn.threshold` once the pause reaches `turn.minPause`, or at `turn.maxPause` anyway. Send what the user said to your LLM then, not on `speechend`, which only says that speech stopped. See [When the user is done](/docs/start/agent/#when-the-user-is-done-turnend).
+
+```ts
+input.on('turnend', () => llm.respond(transcript.take()))
+```
 
 ## A wake word, then the sentence
 

@@ -13,7 +13,7 @@ Alkove is five small models, each doing a single job, and one engine that runs t
 | Model | Job | Size | Languages |
 |---|---|---|---|
 | [alkove-focus-1-preview](/docs/models/focus/) | Voice isolation: keeps the closest voice, or the voice of a print, and removes noise, music and other voices | 1.1 MB | any (speech) |
-| [alkove-cue-1-preview](/docs/models/cue/) | Voice activity: the probability that someone is speaking, every 30 ms | 1.1 MB | any (speech) |
+| [alkove-cue-1-preview](/docs/models/cue/) | Voice activity: the probability that someone is speaking, every 30 ms, and that their turn ends | 1.2 MB | any (speech) |
 | [alkove-spot-1-preview](/docs/models/spot/) | Keyword spotting: any typed word, no training | 2.8 MB | fr, en, es, it, pt, ca, ro |
 | [alkove-lex-1-preview](/docs/models/lex/) | Pronunciation: a written word to its likely phonemes, with probabilities | 1.8 MB | fr, en, es, it, pt, ca, ro |
 | [alkove-timbre-1-preview](/docs/models/timbre/) | Voiceprints: who is speaking, and the print Focus follows | 0.74 MB | any (speech) |
@@ -55,7 +55,7 @@ Measured natively on a Galaxy Z Fold8, one thread:
 | Model | Cost |
 |---|---|
 | Focus | about 39 ms per second of audio |
-| Cue | 1.7 ms per second of audio |
+| Cue | 1.9 ms per second of audio |
 | Spot | about 7.5 ms per second of audio |
 | Timbre | 2.0 ms per 1.5 s window |
 | Lex | about 2.9 ms per word |
