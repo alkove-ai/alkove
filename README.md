@@ -43,7 +43,7 @@
 - **Any word is a wake word.** Type it in one of 7 languages: no training, no recording session. 80 % recall at one false alarm per hour.
 - **Fewer false barge-ins.** Behind Focus, Cue starts on music 4× less often than Silero VAD.
 - **Small enough for a phone.** Five models under 8 MB together, Focus at 1.1 MB, an engine of 141 KB (brotli).
-- **Open.** Code and weights under Apache-2.0, the engine is our own, in Rust. Every number above comes with its datasets and protocol in [`bench/`](./bench).
+- **Open.** Code and weights under Apache-2.0, the engine is Alkove's own, in Rust. Every number above comes with its datasets and protocol in [`bench/`](./bench).
 
 ## Quick start
 
