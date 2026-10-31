@@ -113,6 +113,11 @@ class AlkoveUserTurnStartStrategy(BaseUserTurnStartStrategy):
         await super().handle_user_turn_started()
         self._waiting = False
 
+    async def _start(self) -> None:
+        # report_user_turn_started from pipecat-ai 1.15, trigger_user_turn_started (removed in 2.0) before
+        start = getattr(self, "report_user_turn_started", None) or self.trigger_user_turn_started
+        await start()
+
     async def process_frame(self, frame: Frame) -> ProcessFrameResult:
         if isinstance(frame, BotStartedSpeakingFrame):
             self._bot = True
@@ -122,17 +127,17 @@ class AlkoveUserTurnStartStrategy(BaseUserTurnStartStrategy):
             self._analyzer.far_end_active(False)
             if self._waiting:
                 # the user kept talking past the bot's end: their turn
-                await self.trigger_user_turn_started()
+                await self._start()
                 return ProcessFrameResult.STOP
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             if not self._bot:
-                await self.trigger_user_turn_started()
+                await self._start()
                 return ProcessFrameResult.STOP
             self._waiting = True
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             self._waiting = False
         elif isinstance(frame, InputAudioRawFrame) and self._bot and self._analyzer.interrupted():
-            await self.trigger_user_turn_started()
+            await self._start()
             return ProcessFrameResult.STOP
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)) and self._bot:
             return ProcessFrameResult.STOP

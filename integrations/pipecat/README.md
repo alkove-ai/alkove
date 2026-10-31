@@ -63,7 +63,7 @@ params = LLMUserAggregatorParams(user_turn_strategies=strategies)
 
 `example.py` runs both on your microphone and prints when you speak. On macOS, `pyaudio` needs `brew install portaudio` first.
 
-Tested with pipecat-ai 1.14.0.
+Tested with pipecat-ai 1.15.0.
 
 ## License
 

@@ -79,4 +79,4 @@ params = LLMUserAggregatorParams(user_turn_strategies=strategies)
 
 [`example.py`](https://github.com/alkove-ai/alkove/blob/main/integrations/pipecat/example.py) runs both on your microphone and prints when you speak. On macOS, `pyaudio` needs `brew install portaudio` first.
 
-Tested with pipecat-ai 1.13.0. The plugin is maintained by Alkove, not by the Pipecat team: [source](https://github.com/alkove-ai/alkove/tree/main/integrations/pipecat).
+Tested with pipecat-ai 1.15.0. The plugin is maintained by Alkove, not by the Pipecat team: [source](https://github.com/alkove-ai/alkove/tree/main/integrations/pipecat).

@@ -108,7 +108,7 @@ jobs:
           working-directory: python
           args: --profile python --out dist
           manylinux: auto
-      - run: pip install python/dist/*.whl "livekit-agents==1.8.8" "pipecat-ai==1.13.0" "wyoming[zeroconf]==1.10.2" pyyaml pytest
+      - run: pip install python/dist/*.whl "livekit-agents==1.8.8" "pipecat-ai==1.15.0" "wyoming[zeroconf]==1.10.2" pyyaml pytest
       - run: pip install --no-deps -e integrations/livekit -e integrations/pipecat -e integrations/wyoming -e integrations/esphome
       - run: python -m pytest -q integrations/livekit/tests integrations/pipecat/tests integrations/wyoming/tests integrations/esphome/tests
 
