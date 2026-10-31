@@ -2,9 +2,11 @@
 
 import logging
 import time
+from typing import Optional
 
 import alkove
 import numpy as np
+from wyoming.asr import Transcribe
 from wyoming.audio import AudioChunk, AudioChunkConverter, AudioStart, AudioStop
 from wyoming.event import Event
 from wyoming.info import Attribution, Describe, Info, WakeModel, WakeProgram
@@ -12,6 +14,7 @@ from wyoming.server import AsyncEventHandler
 from wyoming.wake import Detect, Detection, NotDetected
 
 from . import __version__
+from .turn import TurnProxy, TurnSetup
 from .words import Spoken, Words
 
 _LOGGER = logging.getLogger(__name__)
@@ -19,8 +22,10 @@ ALKOVE = Attribution(name="Alkove", url="https://github.com/alkove-ai/alkove")
 
 
 class SpotHandler(AsyncEventHandler):
-    def __init__(self, models: alkove.Models, words: Words, context: str, *args, **kwargs) -> None:
+    def __init__(self, models: alkove.Models, words: Words, context: str, *args, turn: Optional[TurnSetup] = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.turn = turn
+        self.proxy: Optional[TurnProxy] = None
         self.models = models
         self.words = words
         self.context = context
@@ -32,7 +37,20 @@ class SpotHandler(AsyncEventHandler):
 
     async def handle_event(self, event: Event) -> bool:
         if Describe.is_type(event.type):
-            await self.write_event(self.info().event())
+            info = self.info()
+            if self.turn is not None:
+                info.asr = [await self.turn.program()]
+            await self.write_event(info.event())
+        elif Transcribe.is_type(event.type) and self.turn is not None:
+            self.proxy = TurnProxy(self.turn, self.write_event)
+            await self.proxy.transcribe(Transcribe.from_event(event))
+        elif self.proxy is not None and AudioStart.is_type(event.type):
+            await self.proxy.start(AudioStart.from_event(event))
+        elif self.proxy is not None and AudioChunk.is_type(event.type):
+            await self.proxy.chunk(AudioChunk.from_event(event))
+        elif self.proxy is not None and AudioStop.is_type(event.type):
+            await self.proxy.finish()
+            self.proxy = None
         elif Detect.is_type(event.type):
             names = Detect.from_event(event).names or []
             chosen = [s for s in (self.words.get(n) for n in names) if s is not None]

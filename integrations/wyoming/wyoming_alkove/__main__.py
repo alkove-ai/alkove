@@ -10,6 +10,7 @@ from wyoming.server import AsyncServer, AsyncTcpServer
 
 from . import __version__
 from .handler import SpotHandler
+from .turn import TurnSetup
 from .words import Words
 
 _LOGGER = logging.getLogger()
@@ -30,6 +31,11 @@ async def main() -> None:
     p.add_argument("--threshold-pause", type=float, help="every word's threshold after a pause (Spot's default for the language otherwise)")
     p.add_argument("--threshold-anywhere", type=float, help="every word's threshold anywhere")
     p.add_argument("--models-dir", help="a folder with the .alk files, else they come from Hugging Face once")
+    p.add_argument("--stt-uri", help="a Wyoming speech-to-text (tcp://host:port) to serve with Alkove's end of turn in front of it")
+    p.add_argument("--turn-threshold", type=float, default=0.6, help="the end of turn probability over which a command is over (default: 0.6)")
+    p.add_argument("--min-pause", type=float, default=0.3, help="seconds of pause before a command can be over (default: 0.3)")
+    p.add_argument("--max-pause", type=float, default=1.5, help="seconds of pause after which it is over anyway (default: 1.5)")
+    p.add_argument("--no-speech", type=float, default=5.0, help="seconds without speech after which a command is over (default: 5)")
     p.add_argument("--zeroconf", nargs="?", const="alkove", help="announce the server for Home Assistant's discovery")
     p.add_argument("--debug", action="store_true")
     p.add_argument("--version", action="store_true")
@@ -39,7 +45,10 @@ async def main() -> None:
         print(__version__)
         return
 
-    models = alkove.Models.load(["spot", "lex"], dir=a.models_dir)
+    models = alkove.Models.load(["spot", "lex"] + (["cue"] if a.stt_uri else []), dir=a.models_dir)
+    turn = TurnSetup(models, a.stt_uri, alkove.TurnParams(a.turn_threshold, a.min_pause, a.max_pause), a.no_speech) if a.stt_uri else None
+    if turn is not None:
+        alkove.Turns(models, 16000, turn=turn.params)  # bad settings fail here, not at the first command
     thresholds = {k: v for k, v in (("pause", a.threshold_pause), ("anywhere", a.threshold_anywhere)) if v is not None}
     words = Words(models, lang=a.lang if a.any_word else None, thresholds=thresholds)
     for w in a.word or ["ok nabu"]:
@@ -55,7 +64,7 @@ async def main() -> None:
 
         await HomeAssistantZeroconf(name=a.zeroconf, port=server.port, host=server.host).register_server()
     _LOGGER.info("Ready")
-    await server.run(partial(SpotHandler, models, words, a.context))
+    await server.run(partial(SpotHandler, models, words, a.context, turn=turn))
 
 
 def run() -> None:

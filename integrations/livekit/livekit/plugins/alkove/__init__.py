@@ -16,7 +16,8 @@
 
 Focus keeps the user's voice and removes the other voices and the noise, as the
 `noise_cancellation` of a room's audio input. Cue finds where they speak, as the session's
-VAD. Both run on the agent's CPU, self-hosted, with no API key.
+VAD, and hears when their turn ends, as its turn detector. All run on the agent's CPU,
+self-hosted, with no API key.
 
 See https://alkove.ai for more information.
 """
@@ -27,6 +28,7 @@ from livekit.agents import Plugin
 from ._models import models
 from .focus import Focus
 from .log import logger
+from .turn import TurnDetector, TurnDetectorStream
 from .vad import VAD, VADStream
 from .version import __version__
 
@@ -35,6 +37,8 @@ __all__ = [
     "Models",
     "SpeechParams",
     "Timbre",
+    "TurnDetector",
+    "TurnDetectorStream",
     "VAD",
     "VADStream",
     "Voiceprint",

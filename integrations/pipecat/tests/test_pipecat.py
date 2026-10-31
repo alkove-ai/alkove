@@ -165,3 +165,128 @@ def test_pipeline_gives_alkove_live_and_hears_the_turn(models):
         assert sink.speech == [VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame]
 
     asyncio.run(go())
+
+
+def test_turn_analyzer_completes_the_turn_after_the_speech(models):
+    from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
+
+    from pipecat_alkove import AlkoveTurnAnalyzer
+
+    async def go():
+        turn = AlkoveTurnAnalyzer(models=models)
+        turn.set_sample_rate(16000)
+        pcm = np.concatenate([wav("speech.wav"), np.zeros(3 * 16000, np.int16)])
+        states = [turn.append_audio(c, False) for c in chunks(pcm, 320)]
+        first = states.index(EndOfTurnState.COMPLETE) / 50
+        # Cue hears the sentence end at 3.94 s, the pause at 3.2 s in its middle ends nothing: complete between min_pause and max_pause after the end
+        assert 4.2 < first < 5.5, first
+        state, m = await turn.analyze_end_of_turn()
+        assert state == EndOfTurnState.COMPLETE and 0 <= m.probability <= 1 and 290 <= m.e2e_processing_time_ms <= 1550
+        assert (await turn.analyze_end_of_turn())[0] == EndOfTurnState.INCOMPLETE
+
+    asyncio.run(go())
+
+
+def test_interruption_strategy_lets_a_backchannel_through(models):
+    from pipecat.frames.frames import BotStartedSpeakingFrame
+
+    from pipecat_alkove import AlkoveTurnAnalyzer
+
+    async def run(pcm, bot):
+        turn = AlkoveTurnAnalyzer(models=models)
+        turn.set_sample_rate(16000)
+        start = turn.interruption_strategy()
+        started = []
+
+        async def on_started(*_):
+            started.append(True)
+
+        start.add_event_handler("on_user_turn_started", on_started)
+        if bot:
+            await start.process_frame(BotStartedSpeakingFrame())
+        for c in chunks(pcm, 320):
+            turn.append_audio(c, False)
+            await start.process_frame(InputAudioRawFrame(audio=c, sample_rate=16000, num_channels=1))
+        await start.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+        return len(started)
+
+    async def go():
+        x, gap = wav("speech.wav"), np.zeros(16000, np.int16)
+        # over the bot: a whole sentence cuts it (then the VAD frame adds nothing), 0.4 s of it does not
+        assert await run(np.concatenate([gap, x, gap]), True) == 1
+        assert await run(np.concatenate([gap, x[int(1.2 * 16000) : int(1.6 * 16000)], gap]), True) == 0
+        # with the bot quiet, the VAD's start is the turn's
+        assert await run(np.concatenate([gap, x[int(1.2 * 16000) : int(1.6 * 16000)], gap]), False) == 1
+
+    asyncio.run(go())
+
+
+def test_user_aggregator_ends_the_turn_with_alkove(models):
+    from pipecat.frames.frames import UserStartedSpeakingFrame, UserStoppedSpeakingFrame
+    from pipecat.processors.aggregators.llm_context import LLMContext
+    from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregator, LLMUserAggregatorParams
+    from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
+    from pipecat.turns.user_turn_strategies import UserTurnStrategies
+
+    from pipecat_alkove import AlkoveTurnAnalyzer
+
+    class Turns(FrameProcessor):
+        def __init__(self):
+            super().__init__()
+            self.seen = []
+
+        async def process_frame(self, frame: Frame, direction: FrameDirection):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)) and direction == FrameDirection.DOWNSTREAM:
+                self.seen.append(type(frame))
+            await self.push_frame(frame, direction)
+
+    async def go():
+        m = models
+        pcm = np.concatenate([np.zeros(16000, np.int16), wav("speech.wav"), np.zeros(3 * 16000, np.int16)])
+        source = FileInput(pcm, TransportParams(audio_in_enabled=True, audio_in_sample_rate=16000))
+        turn = AlkoveTurnAnalyzer(models=m)
+        strategies = UserTurnStrategies(start=[turn.interruption_strategy()], stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=turn, wait_for_transcript=False)])
+        user = LLMUserAggregator(LLMContext(), params=LLMUserAggregatorParams(user_turn_strategies=strategies))
+        sink = Turns()
+        worker = PipelineWorker(Pipeline([source, VADProcessor(vad_analyzer=AlkoveVADAnalyzer(models=m)), user, sink]))
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker)
+
+        async def stop():
+            await source.done.wait()
+            await worker.stop_when_done()
+
+        await asyncio.gather(runner.run(), stop())
+        assert sink.seen == [UserStartedSpeakingFrame, UserStoppedSpeakingFrame], sink.seen
+
+    asyncio.run(go())
+
+
+def test_interruption_strategy_holds_transcripts_and_waits_for_the_bot(models):
+    from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, InterimTranscriptionFrame
+    from pipecat.turns.types import ProcessFrameResult
+
+    from pipecat_alkove import AlkoveTurnAnalyzer
+
+    async def go():
+        turn = AlkoveTurnAnalyzer(models=models)
+        turn.set_sample_rate(16000)
+        start = turn.interruption_strategy()
+        started = []
+
+        async def on_started(*_):
+            started.append(True)
+
+        start.add_event_handler("on_user_turn_started", on_started)
+        await start.process_frame(BotStartedSpeakingFrame())
+        # a transcribed "yeah" over the bot: no later strategy sees it
+        assert await start.process_frame(InterimTranscriptionFrame(text="yeah", user_id="", timestamp="")) == ProcessFrameResult.STOP
+        await start.process_frame(VADUserStartedSpeakingFrame(start_secs=0.2))
+        assert not started
+        # the bot stops while the user goes on: their turn
+        assert await start.process_frame(BotStoppedSpeakingFrame()) == ProcessFrameResult.STOP
+        assert started == [True]
+        assert await start.process_frame(InterimTranscriptionFrame(text="so", user_id="", timestamp="")) == ProcessFrameResult.CONTINUE
+
+    asyncio.run(go())

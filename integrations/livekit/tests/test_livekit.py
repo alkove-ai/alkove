@@ -1,6 +1,7 @@
 """The plugin against the LiveKit classes it plugs into, on the SDK's test files."""
 
 import asyncio
+import time
 import wave
 from pathlib import Path
 
@@ -161,3 +162,46 @@ def test_vad_refuses_a_frame_at_another_rate(models, caplog):
     assert all(e.frames[0].sample_rate == 16000 for e in inference)
     assert abs(len(inference) * 0.03 - len(wav("speech.wav", 16000)) / 16000) < 0.1
     assert "another sample rate" in caplog.text
+
+
+def test_turn_detector_is_a_streaming_one_and_answers_at_the_end(models):
+    from livekit.agents.voice.turn import _StreamingTurnDetector, _StreamingTurnDetectorStream
+
+    async def go():
+        det = plugin.TurnDetector(models=models)
+        assert isinstance(det, _StreamingTurnDetector)
+        s = det.stream()
+        assert isinstance(s, _StreamingTurnDetectorStream)
+        assert await s.unlikely_threshold(None) == 0.6 and s.prediction_timeout == 2.0
+        pcm = np.concatenate([wav("speech.wav", 24000), np.zeros(3 * 24000, np.int16)])
+        fs = frames(pcm, 24000, 20)
+        # the session asks once the user has been quiet 0.2 s: Cue hears the sentence end at 3.94 s
+        ask = int(4.15 / 0.02)
+        for f in fs[:ask]:
+            s.push_audio(f)
+        fut = s.predict()
+        assert not fut.done()
+        for f in fs[ask:]:
+            s.push_audio(f)
+        ev = fut.result()
+        # the speech ended 0.3 s before the head decided, the rest of the file pushed since
+        assert ev.end_of_turn_probability >= 0.6 and 0.29 < time.time() - ev.last_speaking_time < 2
+        # the same pause asked again: the answer is already there; once the session cancels (new speech), no more
+        assert s.predict().result() is ev
+        s.cancel_inference()
+        assert not s.predict().done()
+        s.cancel_inference()
+        s.push_audio(fs[0])
+        await s.aclose()
+
+    asyncio.run(go())
+
+
+def test_turn_detector_cancel_gives_zero(models):
+    async def go():
+        s = plugin.TurnDetector(models=models).stream()
+        fut = s.predict()
+        s.cancel_inference()
+        assert fut.result().end_of_turn_probability == 0.0
+
+    asyncio.run(go())
