@@ -11,9 +11,9 @@
     "cue": {
       "name": "alkove-cue-1-preview",
       "file": "alkove-cue-1-preview.alk",
-      "bytes": 1066516,
-      "sha256": "977cd614996498f468536effbc2fb05138331751ca21572cf07b24184b4e7911",
-      "revision": "49e90fcff90dc6e6c47fa6e990e810bd628af4b3"
+      "bytes": 1199892,
+      "sha256": "19e8b6c66ee9ce23bba3b8011f03827c5ba4bb2fe8bec25fe07558a78950190a",
+      "revision": "0e1f30380bdfb3201b5d4fd7d9e4197f71f11a60"
     },
     "spot": {
       "name": "alkove-spot-1-preview",

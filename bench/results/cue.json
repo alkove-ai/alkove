@@ -1,8 +1,8 @@
 {
  "model": "alkove-cue-1-preview",
  "file": "alkove-cue-1-preview.alk",
- "bytes": 1066516,
- "sha256": "977cd614996498f468536effbc2fb05138331751ca21572cf07b24184b4e7911",
+ "bytes": 1199892,
+ "sha256": "19e8b6c66ee9ce23bba3b8011f03827c5ba4bb2fe8bec25fe07558a78950190a",
  "benchmarks": [
   {
    "id": "streams-behind-focus",
@@ -88,19 +88,556 @@
   {
    "id": "speed-native",
    "data": [],
-   "protocol": "crates/engine/examples/bench.rs on the published file, alkove-engine 0.2.0: one thread, 3000 runs of the plan back to back on fixed random inputs, the median of several passes; the outputs' fingerprints are the same on both machines. Measured 2026-10-20. Cue runs once per 480 samples (30 ms).",
+   "protocol": "crates/engine/examples/bench.rs on the published file, alkove-engine 0.4.0: one thread, 3000 runs of the plan back to back on fixed random inputs, the median of 5 passes; the outputs' fingerprints are the same on both machines. Measured 2026-10-31. Cue runs once per 480 samples (30 ms).",
    "metrics": {
     "us_per_run": "µs per run",
     "ms_per_second": "ms per second of audio"
    },
    "results": {
     "Galaxy Z Fold8 (SM-F971B, Snapdragon SM8850), Android 17, native arm64": {
-     "us_per_run": 51,
-     "ms_per_second": 1.7
+     "us_per_run": 58,
+     "ms_per_second": 1.9
     },
     "Apple M1 Max, macOS, native arm64": {
-     "us_per_run": 78,
-     "ms_per_second": 2.6
+     "us_per_run": 90,
+     "ms_per_second": 3.0
+    }
+   }
+  },
+  {
+   "id": "end-of-turn-eot-bench",
+   "data": [
+    {
+     "name": "LiveKit eot-bench, validation (en, fr, es, it, pt, de, nl), revision ca9d98a",
+     "license": "CC-BY-4.0"
+    }
+   ],
+   "protocol": "LiveKit's eot-bench harness (livekit/eot-bench, commit b1cc6ab): real user turns to voice agents, every pause of 0.1 s or more scored every 0.1 s, the first read over the threshold ending it. Cue: the published file through the engine, each turn from its start, read when the stream would give it. Smart Turn v3.2 (BSD-2-Clause) read every 0.1 s on 8 s windows; LiveKit's detectors as the harness runs them; VAD alone: silence only. Mean of the 7 languages, each language under `languages`.",
+   "metrics": {
+    "cut_300ms": "pauses wrongly ended, % (best threshold for 300 ms of latency)",
+    "cut_600ms": "pauses wrongly ended, % (600 ms)",
+    "latency_at_5pct": "latency, ms, at 5 % of pauses wrongly ended",
+    "latency_at_10pct": "latency, ms, at 10 %"
+   },
+   "results": {
+    "Cue": {
+     "cut_300ms": 35.4,
+     "cut_600ms": 12.4,
+     "latency_at_5pct": 891.9,
+     "latency_at_10pct": 660.9,
+     "languages": {
+      "en": {
+       "cut_300ms": 37.9,
+       "cut_600ms": 14.5,
+       "latency_at_5pct": 1038.0,
+       "latency_at_10pct": 726.0
+      },
+      "fr": {
+       "cut_300ms": 32.8,
+       "cut_600ms": 10.8,
+       "latency_at_5pct": 834.0,
+       "latency_at_10pct": 637.0
+      },
+      "es": {
+       "cut_300ms": 34.5,
+       "cut_600ms": 13.8,
+       "latency_at_5pct": 906.0,
+       "latency_at_10pct": 692.0
+      },
+      "it": {
+       "cut_300ms": 33.5,
+       "cut_600ms": 10.9,
+       "latency_at_5pct": 896.0,
+       "latency_at_10pct": 614.0
+      },
+      "pt": {
+       "cut_300ms": 41.3,
+       "cut_600ms": 13.6,
+       "latency_at_5pct": 819.0,
+       "latency_at_10pct": 674.0
+      },
+      "de": {
+       "cut_300ms": 34.8,
+       "cut_600ms": 13.2,
+       "latency_at_5pct": 947.0,
+       "latency_at_10pct": 685.0
+      },
+      "nl": {
+       "cut_300ms": 33.3,
+       "cut_600ms": 9.8,
+       "latency_at_5pct": 803.0,
+       "latency_at_10pct": 598.0
+      }
+     }
+    },
+    "Smart Turn v3.2": {
+     "cut_300ms": 35.3,
+     "cut_600ms": 13.2,
+     "latency_at_5pct": 927.6,
+     "latency_at_10pct": 686.9,
+     "languages": {
+      "en": {
+       "cut_300ms": 32.8,
+       "cut_600ms": 14.2,
+       "latency_at_5pct": 1045.0,
+       "latency_at_10pct": 723.0
+      },
+      "fr": {
+       "cut_300ms": 31.4,
+       "cut_600ms": 8.6,
+       "latency_at_5pct": 832.0,
+       "latency_at_10pct": 533.0
+      },
+      "es": {
+       "cut_300ms": 37.1,
+       "cut_600ms": 16.1,
+       "latency_at_5pct": 974.0,
+       "latency_at_10pct": 752.0
+      },
+      "it": {
+       "cut_300ms": 39.0,
+       "cut_600ms": 13.9,
+       "latency_at_5pct": 964.0,
+       "latency_at_10pct": 733.0
+      },
+      "pt": {
+       "cut_300ms": 37.2,
+       "cut_600ms": 11.0,
+       "latency_at_5pct": 819.0,
+       "latency_at_10pct": 657.0
+      },
+      "de": {
+       "cut_300ms": 31.5,
+       "cut_600ms": 13.9,
+       "latency_at_5pct": 947.0,
+       "latency_at_10pct": 717.0
+      },
+      "nl": {
+       "cut_300ms": 38.3,
+       "cut_600ms": 14.5,
+       "latency_at_5pct": 912.0,
+       "latency_at_10pct": 693.0
+      }
+     }
+    },
+    "LiveKit turn detector v1-mini": {
+     "cut_300ms": 29.2,
+     "cut_600ms": 12.0,
+     "latency_at_5pct": 926.9,
+     "latency_at_10pct": 661.0,
+     "languages": {
+      "en": {
+       "cut_300ms": 27.8,
+       "cut_600ms": 12.1,
+       "latency_at_5pct": 1070.0,
+       "latency_at_10pct": 698.0
+      },
+      "fr": {
+       "cut_300ms": 22.4,
+       "cut_600ms": 8.4,
+       "latency_at_5pct": 798.0,
+       "latency_at_10pct": 541.0
+      },
+      "es": {
+       "cut_300ms": 26.0,
+       "cut_600ms": 12.2,
+       "latency_at_5pct": 926.0,
+       "latency_at_10pct": 667.0
+      },
+      "it": {
+       "cut_300ms": 33.7,
+       "cut_600ms": 14.8,
+       "latency_at_5pct": 966.0,
+       "latency_at_10pct": 744.0
+      },
+      "pt": {
+       "cut_300ms": 36.9,
+       "cut_600ms": 14.4,
+       "latency_at_5pct": 897.0,
+       "latency_at_10pct": 700.0
+      },
+      "de": {
+       "cut_300ms": 24.8,
+       "cut_600ms": 10.7,
+       "latency_at_5pct": 947.0,
+       "latency_at_10pct": 618.0
+      },
+      "nl": {
+       "cut_300ms": 32.9,
+       "cut_600ms": 11.6,
+       "latency_at_5pct": 884.0,
+       "latency_at_10pct": 659.0
+      }
+     }
+    },
+    "LiveKit turn detector v1": {
+     "cut_300ms": 14.2,
+     "cut_600ms": 6.0,
+     "latency_at_5pct": 655.4,
+     "latency_at_10pct": 400.1,
+     "languages": {
+      "en": {
+       "cut_300ms": 9.9,
+       "cut_600ms": 4.5,
+       "latency_at_5pct": 543.0,
+       "latency_at_10pct": 295.0
+      },
+      "fr": {
+       "cut_300ms": 12.7,
+       "cut_600ms": 5.4,
+       "latency_at_5pct": 635.0,
+       "latency_at_10pct": 376.0
+      },
+      "es": {
+       "cut_300ms": 15.5,
+       "cut_600ms": 6.0,
+       "latency_at_5pct": 642.0,
+       "latency_at_10pct": 438.0
+      },
+      "it": {
+       "cut_300ms": 16.9,
+       "cut_600ms": 7.9,
+       "latency_at_5pct": 784.0,
+       "latency_at_10pct": 494.0
+      },
+      "pt": {
+       "cut_300ms": 20.1,
+       "cut_600ms": 7.3,
+       "latency_at_5pct": 702.0,
+       "latency_at_10pct": 482.0
+      },
+      "de": {
+       "cut_300ms": 11.8,
+       "cut_600ms": 5.7,
+       "latency_at_5pct": 672.0,
+       "latency_at_10pct": 350.0
+      },
+      "nl": {
+       "cut_300ms": 12.5,
+       "cut_600ms": 5.1,
+       "latency_at_5pct": 610.0,
+       "latency_at_10pct": 366.0
+      }
+     }
+    },
+    "VAD alone": {
+     "cut_300ms": 55.6,
+     "cut_600ms": 20.2,
+     "latency_at_5pct": 1157.1,
+     "latency_at_10pct": 871.4,
+     "languages": {
+      "en": {
+       "cut_300ms": 55.6,
+       "cut_600ms": 21.7,
+       "latency_at_5pct": 1600.0,
+       "latency_at_10pct": 1000.0
+      },
+      "fr": {
+       "cut_300ms": 56.6,
+       "cut_600ms": 18.5,
+       "latency_at_5pct": 1000.0,
+       "latency_at_10pct": 800.0
+      },
+      "es": {
+       "cut_300ms": 58.9,
+       "cut_600ms": 24.5,
+       "latency_at_5pct": 1200.0,
+       "latency_at_10pct": 1000.0
+      },
+      "it": {
+       "cut_300ms": 55.0,
+       "cut_600ms": 20.6,
+       "latency_at_5pct": 1100.0,
+       "latency_at_10pct": 900.0
+      },
+      "pt": {
+       "cut_300ms": 59.8,
+       "cut_600ms": 17.8,
+       "latency_at_5pct": 1000.0,
+       "latency_at_10pct": 800.0
+      },
+      "de": {
+       "cut_300ms": 53.6,
+       "cut_600ms": 21.5,
+       "latency_at_5pct": 1100.0,
+       "latency_at_10pct": 800.0
+      },
+      "nl": {
+       "cut_300ms": 49.7,
+       "cut_600ms": 17.0,
+       "latency_at_5pct": 1100.0,
+       "latency_at_10pct": 800.0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "end-of-turn-sdk",
+   "data": [
+    {
+     "name": "LiveKit eot-bench, validation (en, fr, es, it, pt, de, nl)",
+     "license": "CC-BY-4.0"
+    }
+   ],
+   "protocol": "The same turns through the SDK's chain (alkove.Chain: Focus then Cue), its own pauses and `turn` reads; a turn is cut off when a word starts after an end, its latency runs from the end of its last word to the first end after it (input clock: Focus adds 16 ms in real time). Smart Turn v3.2 as Pipecat runs it, read once 0.2 s into each of the same pauses, else the end after 3 s of silence. Mean of the 7 languages, each language under `languages`.",
+   "metrics": {
+    "cut_pct": "turns cut off, %",
+    "median_ms": "median latency, ms",
+    "p90_ms": "90th percentile of latency, ms"
+   },
+   "results": {
+    "Cue, defaults (threshold 0.6, minPause 0.3 s, maxPause 1.5 s)": {
+     "cut_pct": 26.1,
+     "median_ms": 587,
+     "p90_ms": 1392,
+     "languages": {
+      "en": {
+       "cut_pct": 23.5,
+       "median_ms": 544,
+       "p90_ms": 1344
+      },
+      "fr": {
+       "cut_pct": 20.5,
+       "median_ms": 819,
+       "p90_ms": 1585
+      },
+      "es": {
+       "cut_pct": 30.0,
+       "median_ms": 494,
+       "p90_ms": 1205
+      },
+      "it": {
+       "cut_pct": 24.8,
+       "median_ms": 574,
+       "p90_ms": 1492
+      },
+      "pt": {
+       "cut_pct": 38.8,
+       "median_ms": 514,
+       "p90_ms": 1215
+      },
+      "de": {
+       "cut_pct": 25.0,
+       "median_ms": 574,
+       "p90_ms": 1536
+      },
+      "nl": {
+       "cut_pct": 20.2,
+       "median_ms": 589,
+       "p90_ms": 1370
+      }
+     }
+    },
+    "Cue, threshold 0.4 (minPause 0, maxPause 1.5 s)": {
+     "cut_pct": 42.6,
+     "median_ms": 305,
+     "p90_ms": 1141,
+     "languages": {
+      "en": {
+       "cut_pct": 39.8,
+       "median_ms": 209,
+       "p90_ms": 1127
+      },
+      "fr": {
+       "cut_pct": 40.2,
+       "median_ms": 424,
+       "p90_ms": 1425
+      },
+      "es": {
+       "cut_pct": 45.8,
+       "median_ms": 274,
+       "p90_ms": 977
+      },
+      "it": {
+       "cut_pct": 42.2,
+       "median_ms": 284,
+       "p90_ms": 1125
+      },
+      "pt": {
+       "cut_pct": 54.2,
+       "median_ms": 294,
+       "p90_ms": 1035
+      },
+      "de": {
+       "cut_pct": 39.8,
+       "median_ms": 314,
+       "p90_ms": 1214
+      },
+      "nl": {
+       "cut_pct": 36.5,
+       "median_ms": 334,
+       "p90_ms": 1085
+      }
+     }
+    },
+    "Smart Turn v3.2 as Pipecat runs it (0.5, else 3 s of silence)": {
+     "cut_pct": 43.0,
+     "median_ms": 341,
+     "p90_ms": 2843,
+     "languages": {
+      "en": {
+       "cut_pct": 34.2,
+       "median_ms": 244,
+       "p90_ms": 3500
+      },
+      "fr": {
+       "cut_pct": 43.0,
+       "median_ms": 354,
+       "p90_ms": 3187
+      },
+      "es": {
+       "cut_pct": 49.5,
+       "median_ms": 334,
+       "p90_ms": 644
+      },
+      "it": {
+       "cut_pct": 40.0,
+       "median_ms": 354,
+       "p90_ms": 3204
+      },
+      "pt": {
+       "cut_pct": 53.5,
+       "median_ms": 354,
+       "p90_ms": 3114
+      },
+      "de": {
+       "cut_pct": 41.0,
+       "median_ms": 384,
+       "p90_ms": 3194
+      },
+      "nl": {
+       "cut_pct": 39.8,
+       "median_ms": 364,
+       "p90_ms": 3056
+      }
+     }
+    },
+    "silence 0.5 s": {
+     "cut_pct": 39.6,
+     "median_ms": 621,
+     "p90_ms": 822,
+     "languages": {
+      "en": {
+       "cut_pct": 40.5,
+       "median_ms": 474,
+       "p90_ms": 664
+      },
+      "fr": {
+       "cut_pct": 48.5,
+       "median_ms": 624,
+       "p90_ms": 855
+      },
+      "es": {
+       "cut_pct": 42.0,
+       "median_ms": 634,
+       "p90_ms": 794
+      },
+      "it": {
+       "cut_pct": 34.0,
+       "median_ms": 654,
+       "p90_ms": 916
+      },
+      "pt": {
+       "cut_pct": 42.2,
+       "median_ms": 644,
+       "p90_ms": 844
+      },
+      "de": {
+       "cut_pct": 36.2,
+       "median_ms": 664,
+       "p90_ms": 844
+      },
+      "nl": {
+       "cut_pct": 33.8,
+       "median_ms": 654,
+       "p90_ms": 834
+      }
+     }
+    },
+    "silence 0.7 s": {
+     "cut_pct": 25.8,
+     "median_ms": 833,
+     "p90_ms": 1047,
+     "languages": {
+      "en": {
+       "cut_pct": 27.0,
+       "median_ms": 684,
+       "p90_ms": 874
+      },
+      "fr": {
+       "cut_pct": 33.5,
+       "median_ms": 834,
+       "p90_ms": 1074
+      },
+      "es": {
+       "cut_pct": 24.0,
+       "median_ms": 844,
+       "p90_ms": 1014
+      },
+      "it": {
+       "cut_pct": 24.0,
+       "median_ms": 864,
+       "p90_ms": 1155
+      },
+      "pt": {
+       "cut_pct": 29.0,
+       "median_ms": 854,
+       "p90_ms": 1084
+      },
+      "de": {
+       "cut_pct": 23.5,
+       "median_ms": 884,
+       "p90_ms": 1075
+      },
+      "nl": {
+       "cut_pct": 19.8,
+       "median_ms": 864,
+       "p90_ms": 1054
+      }
+     }
+    },
+    "silence 0.8 s": {
+     "cut_pct": 21.1,
+     "median_ms": 923,
+     "p90_ms": 1139,
+     "languages": {
+      "en": {
+       "cut_pct": 22.2,
+       "median_ms": 774,
+       "p90_ms": 964
+      },
+      "fr": {
+       "cut_pct": 26.8,
+       "median_ms": 924,
+       "p90_ms": 1165
+      },
+      "es": {
+       "cut_pct": 20.8,
+       "median_ms": 934,
+       "p90_ms": 1104
+      },
+      "it": {
+       "cut_pct": 20.0,
+       "median_ms": 954,
+       "p90_ms": 1234
+      },
+      "pt": {
+       "cut_pct": 23.0,
+       "median_ms": 944,
+       "p90_ms": 1174
+      },
+      "de": {
+       "cut_pct": 18.2,
+       "median_ms": 974,
+       "p90_ms": 1185
+      },
+      "nl": {
+       "cut_pct": 17.0,
+       "median_ms": 954,
+       "p90_ms": 1144
+      }
+     }
     }
    }
   }
