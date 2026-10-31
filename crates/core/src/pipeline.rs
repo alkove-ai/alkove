@@ -8,6 +8,7 @@ use crate::math::log10;
 use crate::resample::Resampler;
 use crate::spot::{Context, EnrollOptions, Enroller, Listener, Spot, Word, ENROLL};
 use crate::timbre::{dot, verify, Level, Timbre, Voiceprint, MIN, WINDOW};
+use crate::turn::{InterruptParams, TurnParams, Turns};
 use crate::value::{obj, Value};
 use crate::{js, Error, FOCUS, RATE};
 
@@ -50,10 +51,12 @@ pub struct PipelineOptions {
     pub words: Vec<Word>,
     pub context: Context,
     pub enroll: Option<(Word, usize)>,
+    pub turn: Option<TurnParams>,
+    pub interrupt: Option<InterruptParams>,
 }
 
 impl PipelineOptions {
-    // { chain: options | null, verify, learn, keepRecent, trace, stats, output: { format, rate, chunkMs, audio, utterance } | null, words, context, enroll: { word, takes } | null }
+    // { chain: options | null, verify, learn, keepRecent, trace, stats, output: { format, rate, chunkMs, audio, utterance } | null, words, context, enroll: { word, takes } | null, turn: true | { threshold, minPause, maxPause }, interrupt: true | { minDuration } (an agent's input; off by default) }
     pub fn from_value(v: &Value) -> Result<PipelineOptions, Error> {
         let flag = |k: &str| v.get(k).and_then(Value::bool).unwrap_or(false);
         let output = match v.get("output") {
@@ -85,6 +88,8 @@ impl PipelineOptions {
             words,
             context: crate::spot::context_of(v.get("context").and_then(Value::str).unwrap_or("anywhere")),
             enroll,
+            turn: TurnParams::from_value(v.get("turn"))?,
+            interrupt: InterruptParams::from_value(v.get("interrupt"))?,
         })
     }
 }
@@ -297,6 +302,9 @@ pub struct Pipeline {
     events: Vec<ChainEvent>,
     outs: Vec<Out>,
     level: Option<Value>,
+    // with a chain: the user's turns and the interruptions of the far end
+    turns: Option<Turns>,
+    turn_events: Vec<Value>,
 }
 
 // a length of audio to keep: Infinity or NaN would size a buffer past memory
@@ -322,6 +330,7 @@ fn energy(x: &[f32]) -> f64 {
 
 impl Pipeline {
     pub fn new(focus: Option<&Arc<Model>>, cue: Option<&Arc<Model>>, spot: Option<&Arc<Model>>, opts: PipelineOptions) -> Result<Pipeline, Error> {
+        let turns = opts.chain.as_ref().filter(|_| opts.turn.is_some() || opts.interrupt.is_some()).map(|c| Turns::new(opts.turn, opts.interrupt, &c.speech));
         let chain = match (opts.chain, focus, cue) {
             (Some(o), Some(f), Some(c)) => Some(Chain::new(f, c, o)?),
             (Some(_), _, _) => return Err(Error::Missing("focus and cue")),
@@ -362,6 +371,8 @@ impl Pipeline {
             events: Vec::with_capacity(16),
             outs: Vec::new(),
             level: None,
+            turns,
+            turn_events: Vec::new(),
         };
         if let Some((w, takes)) = opts.enroll {
             p.start_enroll(Some((w, takes)))?;
@@ -516,13 +527,14 @@ impl Pipeline {
             let mut events = std::mem::take(&mut self.events);
             events.clear();
             let out = self.chain.as_mut().expect("checked").step(hop, &mut events).to_vec();
+            let mut restart = false;
             for e in &events {
                 match *e {
                     ChainEvent::Focus { t } => {
                         let focus = self.chain.as_ref().expect("checked").focus_out().to_vec();
                         self.on_focus(&focus, t);
                     }
-                    ChainEvent::Cue { speech, t } => {
+                    ChainEvent::Cue { speech, t, .. } => {
                         if self.trace {
                             let row = self.cue_rows;
                             self.cue_rows += 1;
@@ -545,6 +557,13 @@ impl Pipeline {
                         }
                     }
                 }
+                if let Some(tu) = &mut self.turns {
+                    restart |= tu.hop(std::slice::from_ref(e), far_quiet_ms, &mut self.turn_events);
+                }
+                self.outs.extend(self.turn_events.drain(..).map(Out::Event));
+            }
+            if restart {
+                self.chain.as_mut().expect("checked").reset_turn();
             }
             self.events = events;
             self.out.copy_from_slice(&out);

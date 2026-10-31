@@ -70,7 +70,7 @@ fn records(events: &[ChainEvent], taps: bool, into: &mut Vec<f64>) {
             ChainEvent::Print { print, after, why } => [3.0, b(print), after, why as u8 as f64],
             ChainEvent::Reset { after, why } => [4.0, after, why as u8 as f64, 0.0],
             ChainEvent::Focus { t } if taps => [5.0, t, 0.0, 0.0],
-            ChainEvent::Cue { speech, t } if taps => [6.0, speech, t, 0.0],
+            ChainEvent::Cue { speech, t, .. } if taps => [6.0, speech, t, 0.0],
             ChainEvent::Level { voice_db, noise_db, ref_db } => [7.0, voice_db, noise_db, ref_db],
             ChainEvent::Far { start, end } => [8.0, start, end, 0.0],
             ChainEvent::Cancel { start } => [9.0, start, 0.0, 0.0],

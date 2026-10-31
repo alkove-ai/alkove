@@ -55,6 +55,8 @@ pub fn run(a: Args) -> Result<(), String> {
         words: vec![word],
         context: Context::Pause,
         enroll: None,
+        turn: None,
+        interrupt: None,
     };
     let mut pipeline = Pipeline::new(Some(&focus), Some(&cue), Some(&spot), opts).map_err(|e| e.to_string())?;
     // a file goes through in blocks of 30 ms, followed by 2 s of silence for its last phrase to end

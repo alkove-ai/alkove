@@ -12,6 +12,8 @@ pub struct Cue {
     chunker: Chunker,
     steps: usize,
     band: Band,
+    // the flat state, to zero the end of turn head's; None for a Cue without the head
+    turn: Option<Vec<f32>>,
 }
 
 impl Cue {
@@ -20,7 +22,9 @@ impl Cue {
     pub fn new(model: &Arc<Model>) -> Result<Cue, Error> {
         let net = Session::new(model.clone())?;
         stream_io(&net, "audio", CUE.chunk, "speech", 1)?;
-        Ok(Cue { net, chunker: Chunker::new(CUE.chunk), steps: 0, band: Band::new() })
+        let n = net.plan().state_len();
+        let turn = (net.output("turn").is_some() && net.output("hesitation").is_some() && n >= CUE.turn_state).then(|| vec![0.0; n]);
+        Ok(Cue { net, chunker: Chunker::new(CUE.chunk), steps: 0, band: Band::new(), turn })
     }
 
     // None for the first `lag_steps` steps
@@ -32,6 +36,21 @@ impl Cue {
         let s = self.steps;
         self.steps += 1;
         (s >= CUE.lag_steps).then(|| self.net.output("speech").expect("checked")[0])
+    }
+
+    // P(end of turn) and P(it ends on a hesitation) of the last step's frame; None without the head
+    pub fn turn(&self) -> Option<(f32, f32)> {
+        self.turn.as_ref()?;
+        Some((self.net.output("turn").expect("checked")[0], self.net.output("hesitation").expect("checked")[0]))
+    }
+
+    // the end of turn head from zero, as at the start of a stream; `speech` untouched
+    pub fn reset_turn(&mut self) {
+        let Some(s) = &mut self.turn else { return };
+        self.net.state(s);
+        let n = s.len();
+        s[n - CUE.turn_state..].fill(0.0);
+        self.net.set_state(s);
     }
 
     // each probability with its frame

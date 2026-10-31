@@ -208,7 +208,7 @@ impl Processor {
                             let row = TraceRow { t: t / RATE - self.shift, value: js::to_fixed(10.0 * log10(s / FOCUS.chunk as f64 + 1e-12), 2) };
                             self.trace().focus.push(row);
                         }
-                        ChainEvent::Cue { speech, t } if self.opts.trace => self.trace().cue.push(TraceRow { t: js::to_fixed(t, 3), value: speech }),
+                        ChainEvent::Cue { speech, t, .. } if self.opts.trace => self.trace().cue.push(TraceRow { t: js::to_fixed(t, 3), value: speech }),
                         e => self.on_event(e),
                     }
                 }

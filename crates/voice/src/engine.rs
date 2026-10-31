@@ -102,6 +102,8 @@ fn pipeline(m: &mut Models, c: &Config) -> Result<(Pipeline, Json), String> {
         words: vec![word],
         context: Context::Pause,
         enroll: None,
+        turn: None,
+        interrupt: None,
     };
     let p = Pipeline::new(Some(&m.focus), Some(&m.cue), Some(&m.spot), opts).map_err(|e| e.to_string())?;
     Ok((p, info))

@@ -18,6 +18,7 @@ mod resample;
 pub mod spot;
 pub mod text;
 pub mod timbre;
+pub mod turn;
 pub mod value;
 
 use std::fmt;
@@ -32,6 +33,7 @@ pub use live::Live;
 pub use near::NEAR_GAP_DB;
 pub use process::{process, FocusOptions, Models, Part, ProcessOptions, Processor, Speech, Trace, TraceRow};
 pub use resample::Resampler;
+pub use turn::{CueTurns, InterruptParams, TurnParams, Turns};
 pub use value::Value;
 
 include!(concat!(env!("OUT_DIR"), "/manifest.rs"));
@@ -50,10 +52,12 @@ pub struct FocusSpec {
 pub struct CueSpec {
     pub chunk: usize,
     pub lag_steps: usize,
+    // the end of turn head's GRU, last in the flat state
+    pub turn_state: usize,
 }
 
 pub const FOCUS: FocusSpec = FocusSpec { chunk: 256, print: 192, lag: 256 };
-pub const CUE: CueSpec = CueSpec { chunk: 480, lag_steps: 1 };
+pub const CUE: CueSpec = CueSpec { chunk: 480, lag_steps: 1, turn_state: 128 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Error {

@@ -52,7 +52,8 @@ pub enum ChainEvent {
     Reset { after: f64, why: Why },
     // Focus's output for the hop is in `Chain::focus_out`; `t` in samples
     Focus { t: f64 },
-    Cue { speech: f64, t: f64 },
+    // `turn` and `hesitation` NaN without the end of turn head or asleep
+    Cue { speech: f64, turn: f64, hesitation: f64, t: f64 },
     // the level of the phrase or the far voice whose event comes next, in dB; `ref_db` NaN before the session knows its voice, `voice_db` for a held phrase without voice
     Level { voice_db: f64, noise_db: f64, ref_db: f64 },
     // a voice far under the session's, kept out of the phrases
@@ -218,6 +219,11 @@ impl Chain {
     // the gain a quiet mic gets before Focus, 0 dB at a normal level
     pub fn input_gain_db(&self) -> f64 {
         self.input.db()
+    }
+
+    // the end of turn head from zero, at a turn's end
+    pub fn reset_turn(&mut self) {
+        self.cue.reset_turn();
     }
 
     // Focus's output of the last hop
@@ -472,17 +478,20 @@ impl Chain {
         let k = self.cue_frames;
         self.cue_frames += 1;
         let lag = CUE.lag_steps as i64;
-        let mut p = 0.0;
+        let (mut p, mut turn, mut hesitation) = (0.0, f64::NAN, f64::NAN);
         if !self.asleep {
             let v = self.cue.step(&self.cue_chunk);
             let s = self.cue_steps;
             self.cue_steps += 1;
             if let (true, Some(v)) = (s >= CUE.lag_steps, v) {
                 p = v as f64;
+                if let Some((a, b)) = self.cue.turn() {
+                    (turn, hesitation) = (a as f64, b as f64);
+                }
             }
         }
         if k >= lag {
-            events.push(ChainEvent::Cue { speech: p, t: ((k - lag) as f64 * CUE.chunk as f64 - FOCUS.lag as f64) / RATE });
+            events.push(ChainEvent::Cue { speech: p, turn, hesitation, t: ((k - lag) as f64 * CUE.chunk as f64 - FOCUS.lag as f64) / RATE });
         }
         let raw = self.tracker.push(p, k - lag);
         let shift = FOCUS.lag as f64 / RATE;
