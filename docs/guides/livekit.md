@@ -89,4 +89,4 @@ session = AgentSession(
 
 The models are loaded once per process and shared by every session. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder.
 
-Tested with livekit-agents 1.8.8. The plugin is maintained by Alkove, not by the LiveKit team: [source](https://github.com/alkove-ai/alkove/tree/main/integrations/livekit).
+Tested with livekit-agents 1.8.10. The plugin is maintained by Alkove, not by the LiveKit team: [source](https://github.com/alkove-ai/alkove/tree/main/integrations/livekit).

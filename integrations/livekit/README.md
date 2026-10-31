@@ -60,7 +60,7 @@ focus = alkove.Focus(models=models, voiceprint=me)
 
 The models are loaded once per process and shared by every session. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder.
 
-Tested with livekit-agents 1.8.8.
+Tested with livekit-agents 1.8.10.
 
 ## License
 
