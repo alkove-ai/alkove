@@ -32,6 +32,9 @@ Cue runs behind Focus in every [call](/docs/start/call/) and [agent](/docs/start
 | `speechend` | Speech has stopped. `start` and `end` in seconds. |
 | `turn` | An agent input, every 0.1 s of a pause: `probability` that the turn ends here, `hesitation` that it ends on a hesitation. |
 | `turnend` | An agent input: the user's turn is over. `start`, `end`, `probability`, `hesitation`, `at`. |
+| `interruptstart` | An agent input with `farEnd`: speech starts while the agent talks. `start`. |
+| `interrupt` | That speech spans `minDuration` (0.7 s, short gaps included): a real interruption, stop the agent. `start`, `at`. |
+| `interruptcancel` | It stopped before: a "mm" or a "yeah", the agent goes on. `start`, `end`. See [When the user cuts in](/docs/start/agent/#when-the-user-cuts-in-interrupt). |
 
 What the recipes do with it:
 
