@@ -1,3 +1,4 @@
+import type { InterruptOptions, TurnOptions } from '../core/cue'
 import type { ChainOptions } from '../core/chain'
 import { WasmEngine } from '../core/engine'
 import type { NativeCoach, NativePipeline } from '../core/native'
@@ -41,6 +42,8 @@ export interface RealtimeOptions {
   trace?: boolean
   stats?: boolean
   output?: OutputOptions & { audio: boolean; utterance: boolean }
+  turn?: boolean | Partial<TurnOptions>
+  interrupt?: boolean | Partial<InterruptOptions>
 }
 
 interface Realtime {
@@ -89,6 +92,8 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
     words: words(opts.words ?? []),
     context: opts.context ?? 'anywhere',
     enroll: enrolling(opts.enroll),
+    turn: opts.turn ?? false,
+    interrupt: opts.interrupt ?? false,
   })
   const r: Realtime = { id, port: null, closed: false, timer: setInterval(() => flush(r), EVENT_MS), opts, p, events: [], shift: 0, timing: { n: 0, sum: 0, max: 0, slow: 0 }, bg, out, recordId: null }
   if (bg && opts.verify)

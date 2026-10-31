@@ -14,7 +14,7 @@ from .errors import AlkoveError
 from .models import MANIFEST, Models, cache_dir, fetch
 
 __version__ = _alkove.VERSION
-__all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "Lex", "Listener", "Live", "MANIFEST", "Models", "NEAR_GAP_DB", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Timbre", "Voiceprint", "VoiceprintLearner", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
+__all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "InterruptParams", "Lex", "Listener", "Live", "MANIFEST", "Models", "NEAR_GAP_DB", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Timbre", "TurnParams", "Turns", "Voiceprint", "VoiceprintLearner", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
 
 RATE = 16000
 """The models' rate, and the rate of every output, in Hz."""
@@ -37,6 +37,32 @@ class SpeechParams:
 
     def _dict(self) -> dict:
         return {"confidence": self.confidence, "exitConfidence": self.exit_confidence, "startSecs": self.start_secs, "stopSecs": self.stop_secs}
+
+
+@dataclass(frozen=True)
+class TurnParams:
+    """The end of the user's turn: Cue's head read every 0.1 s of each pause, `turnend` on the first read over `threshold` past `min_pause` seconds, or at `max_pause`."""
+
+    threshold: float = 0.6
+    min_pause: float = 0.3
+    max_pause: float = 1.5
+
+    def _dict(self) -> dict:
+        return {"threshold": self.threshold, "minPause": self.min_pause, "maxPause": self.max_pause}
+
+
+@dataclass(frozen=True)
+class InterruptParams:
+    """Speech that starts while the far end speaks (`far_end_active`): `interruptstart`, then `interrupt` once it spans `min_duration` seconds, short gaps included, or `interruptcancel` if it stops before."""
+
+    min_duration: float = 0.7
+
+    def _dict(self) -> dict:
+        return {"minDuration": self.min_duration}
+
+
+def _opt(v: Union[bool, TurnParams, InterruptParams, None]) -> Any:
+    return v._dict() if isinstance(v, (TurnParams, InterruptParams)) else bool(v)
 
 
 @dataclass(frozen=True)
@@ -409,16 +435,23 @@ class Chain:
         sleep: bool = True,
         levels: bool = False,
         near: Union[bool, float] = False,
+        turn: Union[bool, TurnParams] = False,
+        interrupt: Union[bool, InterruptParams] = False,
     ):
-        """`levels`: each speechend carries its level (`voiceDb`, Focus's output before the leveling; `noiseDb`, the mic's floor; `refDb`, the session's main voice, None until heard twice). `near`: a voice that far under the session's (True: `NEAR_GAP_DB`, or a gap in dB) is no speech, but a diag `speech.far`."""
+        """`levels`: each speechend carries its level (`voiceDb`, Focus's output before the leveling; `noiseDb`, the mic's floor; `refDb`, the session's main voice, None until heard twice). `near`: a voice that far under the session's (True: `NEAR_GAP_DB`, or a gap in dB) is no speech, but a diag `speech.far`.
+        `turn` (True or `TurnParams`): `turn` every 0.1 s of a pause (`pause`, `probability` of the turn's end, `hesitation`, `at`), then `turnend` (`start`, `end`, `probability`, `hesitation`, `at`). `interrupt` (True or `InterruptParams`): `interruptstart`, `interrupt`, `interruptcancel` for speech that starts while `far_end_active`."""
         _needs(models, "focus", "cue")
         print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
-        self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_, levels, _near(near))
+        self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_, levels, _near(near), _opt(turn), _opt(interrupt))
 
     def step(self, hop: Any) -> Tuple[np.ndarray, List[dict]]:
-        """One hop in, one hop out, and the events it gave (speech, idle, diag)."""
-        out, events, _ = self._c.step(_samples(hop))
-        return _audio(out), _events(events)
+        """One hop in, one hop out, and the events it gave (speech, idle, diag, then turns and interruptions)."""
+        out, events, _, turned = self._c.step(_samples(hop))
+        return _audio(out), _events(events) + turned
+
+    def far_end_active(self, on: bool) -> None:
+        """The far end (the agent's voice) starts or stops: speech that starts while it speaks may interrupt it."""
+        self._c.far_end_active(on)
 
     def set_voiceprint(self, embedding: Any) -> None:
         """Applied at the next silence, from a fresh state; None goes back to the closest voice."""
@@ -470,6 +503,32 @@ class Chain:
         return self._c.input_gain_db
 
 
+class Turns:
+    """Cue alone on the raw microphone, without Focus, for a microphone across the room: its phrases, the user's turns (`turn`, `turnend`) and, with `interrupt`, the far end's interruptions, as `Chain` gives them."""
+
+    def __init__(
+        self,
+        models: Models,
+        rate: int = 16000,
+        *,
+        speech: Optional[SpeechParams] = None,
+        turn: Union[bool, TurnParams] = True,
+        interrupt: Union[bool, InterruptParams] = False,
+    ):
+        _needs(models, "cue")
+        self.rate = rate
+        """The stream's rate, in Hz."""
+        self._t = _alkove.CueTurns(models.get("cue"), float(rate), (speech or SpeechParams())._tuple(), _opt(turn), _opt(interrupt))
+
+    def push(self, pcm: Any) -> List[dict]:
+        """Samples in (float32, or int16), the events they gave (speechstart, speechend, turn, turnend, interruptions), in seconds from the stream's start."""
+        return self._t.push(_samples(pcm))
+
+    def far_end_active(self, on: bool) -> None:
+        """The far end (the agent's voice) starts or stops: speech that starts while it speaks may interrupt it."""
+        self._t.far_end_active(on)
+
+
 class Live:
     """The chain on a live stream at any rate, as the web SDK runs it in real time: frames in, the processed samples that are ready out, at the same rate."""
 
@@ -486,18 +545,24 @@ class Live:
         sleep: bool = True,
         levels: bool = False,
         near: Union[bool, float] = False,
+        turn: Union[bool, TurnParams] = False,
+        interrupt: Union[bool, InterruptParams] = False,
     ):
-        """`levels` and `near` as for `Chain`."""
+        """`levels`, `near`, `turn` and `interrupt` as for `Chain`."""
         _needs(models, "focus", "cue")
         print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
         self.rate = rate
         """The stream's rate, in and out, in Hz."""
-        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_, levels, _near(near))
+        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_, levels, _near(near), _opt(turn), _opt(interrupt))
 
     def push(self, pcm: Any) -> Tuple[np.ndarray, List[dict]]:
-        """Samples in (float32, or int16), the ones ready out, and the events (speech, idle, diag), in seconds from the stream's start."""
-        out, events = self._l.push(_samples(pcm))
-        return _audio(out), _events(events)
+        """Samples in (float32, or int16), the ones ready out, and the events (speech, idle, diag, then turns and interruptions), in seconds from the stream's start."""
+        out, events, turned = self._l.push(_samples(pcm))
+        return _audio(out), _events(events) + turned
+
+    def far_end_active(self, on: bool) -> None:
+        """The far end (the agent's voice) starts or stops: speech that starts while it speaks may interrupt it."""
+        self._l.far_end_active(on)
 
     def set_voiceprint(self, embedding: Any) -> None:
         """Applied at the next silence, from a fresh state; None goes back to the closest voice."""

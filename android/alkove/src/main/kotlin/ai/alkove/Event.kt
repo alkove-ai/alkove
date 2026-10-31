@@ -25,6 +25,21 @@ sealed interface Event {
     /** The phrase sent out from [start] will have no end: listening went off. */
     data class SpeechCancel(val start: Double) : Event
 
+    /** Every 0.1 s of a pause in the user's turn: P(the turn ends here), P(it ends on a hesitation), known at [at]. */
+    data class Turn(val pause: Double, val probability: Double, val hesitation: Double, val at: Double) : Event
+
+    /** The user's turn from [start] ended at [end]: the first read over the threshold past `minPause`, or `maxPause`. */
+    data class TurnEnd(val start: Double, val end: Double, val probability: Double, val hesitation: Double, val at: Double) : Event
+
+    /** Speech started while the far end spoke: lower its volume. */
+    data class InterruptStart(val start: Double) : Event
+
+    /** That speech spans `minDuration`: stop the far end. */
+    data class Interrupt(val start: Double, val at: Double) : Event
+
+    /** That speech stopped before: a backchannel, the far end's volume back. */
+    data class InterruptCancel(val start: Double, val end: Double) : Event
+
     /** `idle`, `focus.print`, `focus.reset`, `timing`, `overload`… with their fields in `data`; see the errors and diagnostics guide. */
     data class Diag(val code: String, val level: String, val data: Map<String, Any?> = emptyMap()) : Event
 

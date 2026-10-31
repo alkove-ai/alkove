@@ -746,6 +746,10 @@ data class AgentOptions @JvmOverloads constructor(
     val levels: Boolean = false,
     /** A voice this many dB under the session's main voice ([Alkove.NEAR_GAP_DB]) opens no phrase, but a diag `speech.far`; null: off. */
     val near: Double? = null,
+    /** [Event.Turn] and [Event.TurnEnd]; null: off. */
+    val turn: TurnParams? = TurnParams(),
+    /** [Event.InterruptStart], [Event.Interrupt], [Event.InterruptCancel] while `farEnd` speaks; null: off. */
+    val interrupt: InterruptParams? = InterruptParams(),
 )
 
 /**
@@ -805,6 +809,8 @@ class AgentInput private constructor(context: Context, private val opts: AgentOp
             "trace" to opts.trace,
             "stats" to opts.stats,
             "output" to outputValue(true),
+            "turn" to (opts.turn?.value() ?: false),
+            "interrupt" to (opts.interrupt?.value() ?: false),
         )
 
     /** Words read in Focus's output, as a wake listener would on the raw microphone; their wakes come on [events]. Close the handle to stop. */

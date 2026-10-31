@@ -130,7 +130,7 @@ def test_chain(models, name, seed, seconds, opts, dense, rate):
             c.set_strength(r() * 1.4 - 0.2)
         elif x < 1:
             c.set_enabled(r() < 0.5)
-        out, events, focus = c.step(floats(pcm[i : i + 256]))
+        out, events, focus, _ = c.step(floats(pcm[i : i + 256]))
         digest.update(bytes(out))
         for e in events:
             digest.update(f64(*e))

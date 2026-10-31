@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use alkove_core::spot::{context_of, EnrollOptions, Enroller as CoreEnroller, Listener as CoreListener, Spot, Word, ENROLL};
+use alkove_core::turn::{FarClock, InterruptParams, TurnParams, Turns};
 use alkove_core::{fp, lex, ChainEvent, ChainOptions, Models, Part, ProcessOptions, SpeechEvent, SpeechParams, Value};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -98,7 +99,7 @@ fn record(e: &ChainEvent) -> (u8, f64, f64, f64) {
         ChainEvent::Print { print, after, why } => (3, b(print), after, why as u8 as f64),
         ChainEvent::Reset { after, why } => (4, after, why as u8 as f64, 0.0),
         ChainEvent::Focus { t } => (5, t, 0.0, 0.0),
-        ChainEvent::Cue { speech, t } => (6, speech, t, 0.0),
+        ChainEvent::Cue { speech, t, .. } => (6, speech, t, 0.0),
         ChainEvent::Level { voice_db, noise_db, ref_db } => (7, voice_db, noise_db, ref_db),
         ChainEvent::Far { start, end } => (8, start, end, 0.0),
         ChainEvent::Cancel { start } => (9, start, 0.0, 0.0),
@@ -132,17 +133,34 @@ fn speech(s: (f64, f64, f64, f64)) -> SpeechParams {
     SpeechParams { confidence: s.0, exit_confidence: s.1, start_secs: s.2, stop_secs: s.3 }
 }
 
+type TurnOptions = (Option<TurnParams>, Option<InterruptParams>);
+
+fn turn_options(turn: Option<&Bound<'_, PyAny>>, interrupt: Option<&Bound<'_, PyAny>>) -> PyResult<TurnOptions> {
+    let turn = TurnParams::from_value(turn.map(from_py).transpose()?.as_ref()).map_err(error)?;
+    let interrupt = InterruptParams::from_value(interrupt.map(from_py).transpose()?.as_ref()).map_err(error)?;
+    Ok((turn, interrupt))
+}
+
+// None unless one of them is on
+fn turns(turn: Option<&Bound<'_, PyAny>>, interrupt: Option<&Bound<'_, PyAny>>, speech: &SpeechParams) -> PyResult<Option<Turns>> {
+    let (turn, interrupt) = turn_options(turn, interrupt)?;
+    Ok((turn.is_some() || interrupt.is_some()).then(|| Turns::new(turn, interrupt, speech)))
+}
+
 /// Focus, Cue, the mix with the raw mic, the level and the gate, one hop of 256 samples at a time.
 #[pyclass(module = "alkove._alkove")]
 struct Chain {
     inner: alkove_core::Chain,
     events: Vec<ChainEvent>,
+    turns: Option<Turns>,
+    turned: Vec<Value>,
+    far: FarClock,
 }
 
 #[pymethods]
 impl Chain {
     #[new]
-    #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None))]
+    #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         focus: &Model,
@@ -155,22 +173,42 @@ impl Chain {
         print: Option<&[u8]>,
         levels: bool,
         near: Option<f64>,
+        turn: Option<&Bound<'_, PyAny>>,
+        interrupt: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels, near };
+        let turns = turns(turn, interrupt, &opts.speech)?;
         let inner = alkove_core::Chain::new(&focus.inner, &cue.inner, opts).map_err(error)?;
-        Ok(Chain { inner, events: Vec::with_capacity(16) })
+        Ok(Chain { inner, events: Vec::with_capacity(16), turns, turned: Vec::new(), far: FarClock::default() })
     }
 
-    // the hop out, the events in order, Focus's output for the hop
-    fn step<'py>(&mut self, py: Python<'py>, hop: &[u8]) -> PyResult<(Bound<'py, PyByteArray>, Records, Bound<'py, PyByteArray>)> {
+    // the hop out, the events in order, Focus's output for the hop, the turns' and interruptions' events
+    #[allow(clippy::type_complexity)]
+    fn step<'py>(&mut self, py: Python<'py>, hop: &[u8]) -> PyResult<(Bound<'py, PyByteArray>, Records, Bound<'py, PyByteArray>, Bound<'py, PyAny>)> {
         let hop = floats(hop)?;
         if hop.len() != 256 {
             return Err(PyValueError::new_err("step() takes hops of 256 samples"));
         }
-        let (inner, events) = (&mut self.inner, &mut self.events);
+        let far_quiet_ms = self.far.tick(16.0);
+        let (inner, events, turns, turned) = (&mut self.inner, &mut self.events, &mut self.turns, &mut self.turned);
         events.clear();
-        let out = py.detach(|| fp::exact(|| inner.step(&hop, events).to_vec()));
-        Ok((bytes(py, &out), self.events.iter().map(record).collect(), bytes(py, self.inner.focus_out())))
+        turned.clear();
+        let out = py.detach(|| {
+            fp::exact(|| {
+                let out = inner.step(&hop, events).to_vec();
+                if turns.as_mut().is_some_and(|t| t.hop(events, far_quiet_ms, turned)) {
+                    inner.reset_turn();
+                }
+                out
+            })
+        });
+        let turned = to_py(py, &Value::Arr(std::mem::take(&mut self.turned)))?;
+        Ok((bytes(py, &out), self.events.iter().map(record).collect(), bytes(py, self.inner.focus_out()), turned))
+    }
+
+    // the far end (the agent's voice) speaks or stops
+    fn far_end_active(&mut self, on: bool) {
+        self.far.set(on);
     }
 
     #[pyo3(signature = (print=None))]
@@ -230,6 +268,40 @@ impl Chain {
     }
 }
 
+#[pyclass(module = "alkove._alkove")]
+struct CueTurns {
+    inner: alkove_core::CueTurns,
+}
+
+#[pymethods]
+impl CueTurns {
+    #[new]
+    #[pyo3(signature = (cue, rate, speech_params, turn=None, interrupt=None))]
+    fn new(cue: &Model, rate: f64, speech_params: (f64, f64, f64, f64), turn: Option<&Bound<'_, PyAny>>, interrupt: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        let (turn, interrupt) = turn_options(turn, interrupt)?;
+        let inner = alkove_core::CueTurns::new(&cue.inner, rate, speech(speech_params), turn, interrupt).map_err(error)?;
+        Ok(CueTurns { inner })
+    }
+
+    // the phrases, turns and interruptions the samples gave
+    fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+        let pcm = floats(pcm)?;
+        let inner = &mut self.inner;
+        let out = py.detach(|| {
+            fp::exact(|| {
+                let mut out = Vec::new();
+                inner.push(&pcm, &mut out);
+                out
+            })
+        });
+        to_py(py, &Value::Arr(out))
+    }
+
+    fn far_end_active(&mut self, on: bool) {
+        self.inner.far_end_active(on);
+    }
+}
+
 fn models(focus: Option<&Model>, cue: Option<&Model>, spot: Option<&Model>) -> Models {
     Models { focus: focus.map(|m| m.inner.clone()), cue: cue.map(|m| m.inner.clone()), spot: spot.map(|m| m.inner.clone()) }
 }
@@ -248,7 +320,7 @@ struct Live {
 #[pymethods]
 impl Live {
     #[new]
-    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None))]
+    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         focus: &Model,
@@ -262,13 +334,18 @@ impl Live {
         print: Option<&[u8]>,
         levels: bool,
         near: Option<f64>,
+        turn: Option<&Bound<'_, PyAny>>,
+        interrupt: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels, near };
-        let inner = alkove_core::Live::new(&focus.inner, &cue.inner, rate, opts).map_err(error)?;
+        let turns = turns(turn, interrupt, &opts.speech)?;
+        let mut inner = alkove_core::Live::new(&focus.inner, &cue.inner, rate, opts).map_err(error)?;
+        inner.set_turns(turns);
         Ok(Live { inner, events: Vec::new() })
     }
 
-    fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<(Bound<'py, PyByteArray>, Records)> {
+    // the samples ready, the events in order, the turns' and interruptions' events
+    fn push<'py>(&mut self, py: Python<'py>, pcm: &[u8]) -> PyResult<(Bound<'py, PyByteArray>, Records, Bound<'py, PyAny>)> {
         let pcm = floats(pcm)?;
         let (inner, events) = (&mut self.inner, &mut self.events);
         events.clear();
@@ -279,7 +356,13 @@ impl Live {
                 out
             })
         });
-        Ok((bytes(py, &out), self.events.iter().map(record).collect()))
+        let turned = to_py(py, &Value::Arr(self.inner.take_turned()))?;
+        Ok((bytes(py, &out), self.events.iter().map(record).collect(), turned))
+    }
+
+    // the far end (the agent's voice) speaks or stops
+    fn far_end_active(&mut self, on: bool) {
+        self.inner.far_end_active(on);
     }
 
     #[pyo3(signature = (print=None))]
@@ -712,6 +795,7 @@ fn _alkove(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Chain>()?;
     m.add_class::<Processor>()?;
     m.add_class::<Live>()?;
+    m.add_class::<CueTurns>()?;
     m.add_class::<SpeechTracker>()?;
     m.add_class::<Lex>()?;
     m.add_class::<Listener>()?;

@@ -10,6 +10,20 @@ data class SpeechParams(
     internal fun value(): Map<String, Any?> = mapOf("confidence" to confidence, "exitConfidence" to exitConfidence, "startSecs" to startSecs, "stopSecs" to stopSecs)
 }
 
+/** The end of the user's turn: Cue's head read every 0.1 s of each pause, a [Event.TurnEnd] on the first read over `threshold` past `minPause` seconds, or at `maxPause`. */
+data class TurnParams(
+    val threshold: Double = 0.6,
+    val minPause: Double = 0.3,
+    val maxPause: Double = 1.5,
+) {
+    internal fun value(): Map<String, Any?> = mapOf("threshold" to threshold, "minPause" to minPause, "maxPause" to maxPause)
+}
+
+/** Speech that starts while the far end speaks ([AlkoveInput.farEndActive]): [Event.InterruptStart], then [Event.Interrupt] once it spans `minDuration` seconds, short gaps included, or [Event.InterruptCancel]. */
+data class InterruptParams(val minDuration: Double = 0.7) {
+    internal fun value(): Map<String, Any?> = mapOf("minDuration" to minDuration)
+}
+
 /** A stretch of speech, in seconds from the stream's start. */
 data class Speech(val start: Double, val end: Double)
 
@@ -40,6 +54,11 @@ internal fun eventOf(v: Map<String, Any?>): Event? =
         "speechstart" -> Event.SpeechStart(v.num("start"))
         "speechend" -> Event.SpeechEnd(v.num("start"), v.num("end"), levelOf(v))
         "speechcancel" -> Event.SpeechCancel(v.num("start"))
+        "turn" -> Event.Turn(v.num("pause"), v.num("probability"), v.num("hesitation"), v.num("at"))
+        "turnend" -> Event.TurnEnd(v.num("start"), v.num("end"), v.num("probability"), v.num("hesitation"), v.num("at"))
+        "interruptstart" -> Event.InterruptStart(v.num("start"))
+        "interrupt" -> Event.Interrupt(v.num("start"), v.num("at"))
+        "interruptcancel" -> Event.InterruptCancel(v.num("start"), v.num("end"))
         "idle" -> Event.Diag("idle", "info", mapOf("asleep" to v["asleep"], "at" to v["at"]))
         "diag" -> Event.Diag(v.str("code"), v["level"] as String? ?: "info", (v["data"] as Map<*, *>?)?.obj() ?: v.filterKeys { it != "type" && it != "code" && it != "level" })
         "wake" -> Wake.of(v)

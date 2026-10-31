@@ -1,4 +1,4 @@
-import type { SpeechParams } from '../core/cue'
+import type { InterruptOptions, SpeechParams, TurnOptions } from '../core/cue'
 import type { Take } from '../core/spot/spot'
 import { type Context, type WakeEvent, type Word, type WordJSON, wordOf } from '../core/spot/spot'
 import type { Warning } from '../core/lex'
@@ -28,6 +28,11 @@ export interface InputEvents {
   speechstart: { start: number }
   speechend: { start: number; end: number; level?: PhraseLevel }
   speechcancel: { start: number }
+  turn: { pause: number; probability: number; hesitation: number; at: number }
+  turnend: { start: number; end: number; probability: number; hesitation: number; at: number }
+  interruptstart: { start: number }
+  interrupt: { start: number; at: number }
+  interruptcancel: { start: number; end: number }
   mode: { mode: Mode; reason?: RawReason }
   status: Status
   voiceprint: Voiceprint
@@ -475,6 +480,21 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       case 'speechend':
         this.emit('speechend', { start: e.start, end: e.end, ...('voiceDb' in e && { level: { voiceDb: e.voiceDb, noiseDb: e.noiseDb, refDb: e.refDb } }) })
         break
+      case 'turn':
+        this.emit('turn', { pause: e.pause, probability: e.probability, hesitation: e.hesitation, at: e.at })
+        break
+      case 'turnend':
+        this.emit('turnend', { start: e.start, end: e.end, probability: e.probability, hesitation: e.hesitation, at: e.at })
+        break
+      case 'interruptstart':
+        this.emit('interruptstart', { start: e.start })
+        break
+      case 'interrupt':
+        this.emit('interrupt', { start: e.start, at: e.at })
+        break
+      case 'interruptcancel':
+        this.emit('interruptcancel', { start: e.start, end: e.end })
+        break
       case 'wake':
         this.emit('wake', e as unknown as WakeEvent)
         break
@@ -874,6 +894,8 @@ export function createCallInput(opts: CallOptions = {}): Promise<CallInput> {
 export interface AgentOptions extends FocusOptions {
   output?: Partial<OutputOptions> & { port?: MessagePort }
   withTrack?: boolean
+  turn?: boolean | Partial<TurnOptions>
+  interrupt?: boolean | Partial<InterruptOptions>
   wake?: never
 }
 
@@ -926,6 +948,8 @@ class AgentInput extends AlkoveInput {
       trace: this.opts.trace,
       stats: this.opts.stats,
       output: { ...this.output(), audio: true, utterance: true },
+      turn: this.opts.turn ?? true,
+      interrupt: this.opts.interrupt ?? true,
     }
   }
 

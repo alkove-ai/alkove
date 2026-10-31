@@ -127,6 +127,32 @@ def test_listen_and_hold_make_the_phrases(models):
     assert [e["type"] for e in events[2:]] == ["speechstart", "speechcancel"]
 
 
+def test_speech_over_the_far_end_interrupts_it_or_is_a_backchannel(models):
+    # long phrases while the agent speaks cut it; a short one gives its volume back; nothing without interrupt or without the far end
+    with wave.open(str(FIXTURES / "speech.wav")) as w:
+        x = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float32) / 32768
+    gap = np.zeros(int(1.5 * 16000), np.float32)
+    pcm = np.concatenate([gap, x, gap, x[int(1.2 * 16000) : int(1.6 * 16000)], gap])
+
+    def run(far, **kw):
+        for k in (alkove.Chain(models, **kw), alkove.Live(models, 16000, **kw), alkove.Turns(models, 16000, **kw)):
+            k.far_end_active(far)
+            events = []
+            for i in range(0, len(pcm) - 255, 256):
+                if isinstance(k, alkove.Turns):
+                    events += k.push(pcm[i : i + 256])
+                else:
+                    events += (k.step if isinstance(k, alkove.Chain) else k.push)(pcm[i : i + 256])[1]
+            yield [e["type"] for e in events if e["type"].startswith("interrupt")]
+
+    for kinds in run(True, interrupt=True):
+        assert kinds[:2] == ["interruptstart", "interrupt"] and kinds[2:] == ["interruptstart", "interruptcancel"], kinds
+    assert all(k == [] for k in run(False, interrupt=True))
+    assert all(k == [] for k in run(True))
+    with pytest.raises(ValueError):
+        alkove.Chain(models, turn=alkove.TurnParams(min_pause=2.0))
+
+
 def test_a_hold_in_a_silence_has_no_voice_level(models):
     c = alkove.Chain(models, levels=True)
     silence = np.zeros(256, np.float32)

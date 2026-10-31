@@ -198,6 +198,12 @@ describe('the workers, before the core and on it', () => {
       raw: [100, 160],
     },
     {
+      name: 'an agent that hears the turns, interrupted at first',
+      models: ['focus', 'cue'],
+      opts: { pipeline: 'agent', chain: { gate: false, normalize: true, strength: 1, print: null }, keepRecent: 0, turn: true, interrupt: { minDuration: 0.7 } },
+      audio: speech(20),
+    },
+    {
       name: 'a wake listener on the raw mic, only for my voice',
       models: [],
       reference: print,
@@ -225,6 +231,7 @@ describe('the workers, before the core and on it', () => {
     expect(seen).toEqual({
       'a call that learns the print, traced, kept, with stats': expect.arrayContaining(['print.learn', 'learn', 'voiceprint', 'speechstart', 'speechend', 'trace', 'timing', 'focus.print']),
       'an agent: audio and utterances at 24 kHz in int16, raw hops on the way': expect.arrayContaining(['speechstart', 'speechend']),
+      'an agent that hears the turns, interrupted at first': expect.arrayContaining(['speechstart', 'speechend', 'turn', 'turnend', 'interruptstart', 'interrupt']),
       'a wake listener on the raw mic, only for my voice': expect.arrayContaining(['wake', 'heard', 'trace']),
       'enrolling a word on the raw mic': expect.arrayContaining(['take', 'enrolled']),
     })
