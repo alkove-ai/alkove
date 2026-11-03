@@ -7,7 +7,8 @@ final class MicTests: XCTestCase {
     func testTheTapsSamplesComeOutAsTheCoresResamplerGivesThem() throws {
         let pcm = try resample(Fixtures.wav("mix.wav"), from: 16000, to: 48000)
         let mic = Mic(echoCancellation: false)
-        let ring = Ring(capacity: 96000)
+        // the whole file: a slow simulator reading behind the feeder would otherwise lose the oldest samples
+        let ring = Ring(capacity: pcm.count)
         try mic.attach(ring, rate: 48000)
         let feeder = Thread {
             var i = 0
