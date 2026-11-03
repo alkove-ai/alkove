@@ -25,7 +25,7 @@ version = "0.4.0"
 dependencies = [
  "alkove-core",
  "alkove-engine",
- "alkove-json",
+ "alkove-native",
  "jni-sys 0.3.0",
 ]
 
@@ -46,14 +46,15 @@ version = "0.4.0"
 dependencies = [
  "alkove-core",
  "alkove-engine",
- "alkove-json",
+ "alkove-native",
 ]
 
 [[package]]
-name = "alkove-json"
+name = "alkove-native"
 version = "0.4.0"
 dependencies = [
  "alkove-core",
+ "alkove-engine",
 ]
 
 [[package]]

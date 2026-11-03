@@ -1,5 +1,4 @@
 #!/bin/sh
-# Alkove's Swift library: libalkove.a for the iPhone, the simulator and the Mac, as ios/build/AlkoveFFI.xcframework
 set -eu
 cd "$(dirname "$0")/.."
 export IPHONEOS_DEPLOYMENT_TARGET=15.0 MACOSX_DEPLOYMENT_TARGET=12.0

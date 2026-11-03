@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/engine", "crates/core", "crates/wasm", "crates/voice", "crates/spot-mcu", "crates/json", "integrations/esphome/lib", "python", "android/jni", "ios/ffi"]
+members = ["crates/engine", "crates/core", "crates/wasm", "crates/voice", "crates/spot-mcu", "crates/native", "integrations/esphome/lib", "python", "android/jni", "ios/ffi"]
 # the Python extension builds with maturin, against a Python; the Android library with cargo-ndk; the Swift one with ios/build.sh; the voice binary needs a microphone stack and Cactus's libneedle
 default-members = ["crates/engine", "crates/core", "crates/wasm"]
 resolver = "2"
@@ -32,7 +32,6 @@ panic = "unwind"
 inherits = "release"
 panic = "unwind"
 
-# the Swift library: a panic throws in Swift instead of ending the app
 [profile.ios]
 inherits = "release"
 panic = "unwind"

@@ -10,10 +10,10 @@ publish = false
 
 [lib]
 name = "alkove"
-crate-type = ["staticlib", "rlib"]
+crate-type = ["staticlib"]
 doctest = false
 
 [dependencies]
 alkove-core = { path = "../../crates/core" }
 alkove-engine = { path = "../../crates/engine" }
-alkove-json = { path = "../../crates/json" }
+alkove-native = { path = "../../crates/native" }

@@ -126,7 +126,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-ndk --version 4.1.2 --locked
       - run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-      - run: cargo clippy --profile android -p alkove-android -p alkove-json --all-targets -- -D warnings
-      - run: cargo test -p alkove-android -p alkove-json
+      - run: cargo clippy --profile android -p alkove-android -p alkove-native --all-targets -- -D warnings
+      - run: cargo test -p alkove-android -p alkove-native
       - run: ./gradlew --no-daemon :alkove:testDebugUnitTest :livekit:testDebugUnitTest :alkove:assembleRelease :livekit:assembleRelease :example:assembleRelease
         working-directory: android
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --profile ios -p alkove-ios -p alkove-native --all-targets -- -D warnings
+      - run: cargo test -p alkove-ios -p alkove-native
+      - run: ios/build.sh
+      - run: swift test

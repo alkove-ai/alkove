@@ -1,6 +1,6 @@
 [package]
-name = "alkove-json"
-description = "JSON read and written as JavaScript does, for the native SDKs"
+name = "alkove-native"
+description = "What the native SDKs share above the core: its objects for a binding, values in and out, and JSON as JavaScript writes it"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,3 +13,4 @@ doctest = false
 
 [dependencies]
 alkove-core = { path = "../core" }
+alkove-engine = { path = "../engine" }

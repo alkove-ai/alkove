@@ -1,4 +1,4 @@
-// The C ABI of ios/ffi/src/lib.rs, kept by hand: every declaration matches one #[no_mangle] function there.
+// kept by hand: the header test in ../src/lib.rs compares each declaration with its export
 #ifndef ALKOVE_H
 #define ALKOVE_H
 
@@ -47,28 +47,28 @@ AlkChain *alk_chain_new(const AlkModel *focus, const AlkModel *cue, const uint8_
 void alk_chain_free(AlkChain *h);
 int32_t alk_chain_step(AlkChain *h, const float *pcm, size_t n, float *output, size_t output_cap, double *events, size_t events_cap, float *focus, size_t focus_cap, AlkError *err);
 void alk_chain_set_print(AlkChain *h, const float *print, size_t n, AlkError *err);
-void alk_chain_set_strength(AlkChain *h, double s);
-void alk_chain_set_enabled(AlkChain *h, bool on);
-void alk_chain_listen(AlkChain *h, bool on);
-void alk_chain_hold(AlkChain *h, bool on);
-double alk_chain_get(AlkChain *h, int32_t what);
+void alk_chain_set_strength(AlkChain *h, double s, AlkError *err);
+void alk_chain_set_enabled(AlkChain *h, bool on, AlkError *err);
+void alk_chain_listen(AlkChain *h, bool on, AlkError *err);
+void alk_chain_hold(AlkChain *h, bool on, AlkError *err);
+double alk_chain_get(AlkChain *h, int32_t what, AlkError *err);
 
 AlkLive *alk_live_new(const AlkModel *focus, const AlkModel *cue, double rate, const uint8_t *options, size_t options_len, AlkError *err);
 void alk_live_free(AlkLive *h);
 size_t alk_live_push(AlkLive *h, const float *pcm, size_t n, float *output, size_t output_cap, size_t *events, AlkError *err);
-const double *alk_live_events(AlkLive *h, size_t *len);
+const double *alk_live_events(AlkLive *h, size_t *len, AlkError *err);
 void alk_live_set_print(AlkLive *h, const float *print, size_t n, AlkError *err);
-void alk_live_set_strength(AlkLive *h, double s);
-void alk_live_set_enabled(AlkLive *h, bool on);
-void alk_live_listen(AlkLive *h, bool on);
-void alk_live_hold(AlkLive *h, bool on);
-double alk_live_get(AlkLive *h, int32_t what);
+void alk_live_set_strength(AlkLive *h, double s, AlkError *err);
+void alk_live_set_enabled(AlkLive *h, bool on, AlkError *err);
+void alk_live_listen(AlkLive *h, bool on, AlkError *err);
+void alk_live_hold(AlkLive *h, bool on, AlkError *err);
+double alk_live_get(AlkLive *h, int32_t what, AlkError *err);
 
-AlkTracker *alk_tracker_new(double confidence, double exit_confidence, double start_secs, double stop_secs, double frame_secs);
+AlkTracker *alk_tracker_new(double confidence, double exit_confidence, double start_secs, double stop_secs, double frame_secs, AlkError *err);
 void alk_tracker_free(AlkTracker *h);
-int32_t alk_tracker_push(AlkTracker *h, double p, int64_t k, double *output);
-void alk_tracker_reset(AlkTracker *h);
-bool alk_tracker_get(AlkTracker *h, int32_t what);
+int32_t alk_tracker_push(AlkTracker *h, double p, int64_t k, double *output, AlkError *err);
+void alk_tracker_reset(AlkTracker *h, AlkError *err);
+bool alk_tracker_get(AlkTracker *h, int32_t what, AlkError *err);
 
 AlkProcessor *alk_processor_new(const AlkModel *focus, const AlkModel *cue, const AlkModel *spot, const uint8_t *options, size_t options_len, AlkError *err);
 void alk_processor_free(AlkProcessor *h);
@@ -79,7 +79,7 @@ AlkBytes alk_process(const AlkModel *focus, const AlkModel *cue, const AlkModel 
 AlkFloats alk_resample(const float *pcm, size_t n, double in_rate, double out_rate, AlkError *err);
 AlkResampler *alk_resampler_new(double in_rate, double out_rate, bool aligned, AlkError *err);
 void alk_resampler_free(AlkResampler *h);
-const float *alk_resampler_push(AlkResampler *h, const float *pcm, size_t n, size_t *len);
+const float *alk_resampler_push(AlkResampler *h, const float *pcm, size_t n, size_t *len, AlkError *err);
 
 AlkLex *alk_lex_new(const AlkModel *m, AlkError *err);
 void alk_lex_free(AlkLex *h);
@@ -110,7 +110,7 @@ AlkBytes alk_learner_learn(AlkLearner *h, AlkTimbre *timbre, const float *pcm, s
 AlkBytes alk_learner_offer(AlkLearner *h, AlkTimbre *timbre, const float *pcm, size_t n, AlkError *err);
 AlkBytes alk_learner_voiceprint(AlkLearner *h, bool raw, AlkError *err);
 AlkBytes alk_learner_state(AlkLearner *h, AlkError *err);
-void alk_learner_forget(AlkLearner *h);
+void alk_learner_forget(AlkLearner *h, AlkError *err);
 
 AlkPipeline *alk_pipeline_new(const AlkModel *focus, const AlkModel *cue, const AlkModel *spot, const uint8_t *options, size_t options_len, AlkError *err);
 void alk_pipeline_free(AlkPipeline *h);
@@ -119,16 +119,16 @@ int32_t alk_pipeline_raw(AlkPipeline *h, const float *pcm, size_t n, AlkError *e
 AlkBytes alk_pipeline_outs(AlkPipeline *h, AlkError *err);
 void alk_pipeline_spot(AlkPipeline *h, const AlkModel *m, AlkError *err);
 void alk_pipeline_set(AlkPipeline *h, const uint8_t *change, size_t change_len, AlkError *err);
-void alk_pipeline_verified(AlkPipeline *h, uint32_t key, bool same, double score);
+void alk_pipeline_verified(AlkPipeline *h, uint32_t key, bool same, double score, AlkError *err);
 void alk_pipeline_record(AlkPipeline *h, double seconds, AlkError *err);
 AlkBytes alk_pipeline_recent(AlkPipeline *h, AlkError *err);
 AlkBytes alk_pipeline_stats(AlkPipeline *h, AlkError *err);
-double alk_pipeline_get(AlkPipeline *h, int32_t what);
+double alk_pipeline_get(AlkPipeline *h, int32_t what, AlkError *err);
 
 AlkCoach *alk_coach_new(const uint8_t *args, size_t args_len, AlkError *err);
 void alk_coach_free(AlkCoach *h);
 double alk_coach_learner(AlkCoach *h, const uint8_t *args, size_t args_len, AlkError *err);
-void alk_coach_forget(AlkCoach *h);
+void alk_coach_forget(AlkCoach *h, AlkError *err);
 AlkBytes alk_coach_window(AlkCoach *h, AlkTimbre *timbre, const float *pcm, size_t n, double far_quiet_ms, double t, AlkError *err);
 AlkBytes alk_coach_verify(AlkCoach *h, AlkTimbre *timbre, const float *pcm, size_t n, AlkError *err);
 
