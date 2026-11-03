@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   purge:
-    # the SDK's releases only, not the Claude Code mod's voice-v*
+    # the SDK's releases only, not the integrations'
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 355
