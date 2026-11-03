@@ -52,7 +52,7 @@ for await e in input.events {
 input.close()
 ```
 
-The SDK opens the microphone through `AVAudioEngine`, with the audio session in `.playAndRecord` and the `.voiceChat` mode, Apple's echo canceller, then brings it to 16 kHz with its own resampler and runs Focus and Cue on its own thread. A wake listener and an enrollment use the `.measurement` mode: nothing of the platform's in front of Spot. A call or Siri taking the microphone gives `.mic(.muted)` and `.status(.interrupted)`, then `.unmuted` and `.running`; a route change (headphones, AirPods) restarts the capture in place.
+The SDK opens the microphone through `AVAudioEngine` with Apple's voice processing, its echo canceller (the audio session in `.playAndRecord`, `.voiceChat` on iOS), then brings it to 16 kHz with its own resampler and runs Focus and Cue on its own thread. The echo canceller takes away what the device's own speakers play, the agent's voice included, and lowers other apps' sound as little as the system allows (iOS 17, macOS 14). A wake listener and an enrollment run without it (`.measurement` on iOS): nothing of the platform's in front of Spot. A call or Siri taking the microphone gives `.mic(.muted)` and `.status(.interrupted)`, then `.unmuted` and `.running`; a route change (headphones, AirPods) restarts the capture in place.
 
 The options are those of [`createAgentInput`](/docs/start/agent/): `voiceprint`, `learn` (with `farEnd: true`: call `input.farEndActive(true)` and `false` around your agent's playback), `strength`, `normalize`, `speech`, `output`, `keepRecent`, `trace`, `stats`. `try await input.record(seconds: 10)` gives the next ten seconds as a stereo WAV, the microphone on the left, the output on the right.
 
