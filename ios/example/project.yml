@@ -28,6 +28,19 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.alkove.example
         EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
         CODE_SIGN_STYLE: Automatic
+  AlkoveExampleTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [ExampleTests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ai.alkove.example.tests
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    dependencies:
+      - target: AlkoveExample
+      - package: Alkove
+        product: Alkove
   AlkoveExampleUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -44,4 +57,4 @@ schemes:
       targets:
         AlkoveExample: all
     test:
-      targets: [AlkoveExampleUITests]
+      targets: [AlkoveExampleUITests, AlkoveExampleTests]

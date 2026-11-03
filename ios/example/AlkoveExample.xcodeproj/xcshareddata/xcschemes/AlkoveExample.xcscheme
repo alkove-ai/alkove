@@ -50,6 +50,17 @@
                ReferencedContainer = "container:AlkoveExample.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "03A9CF7F474AF1295A68A97A"
+               BuildableName = "AlkoveExampleTests.xctest"
+               BlueprintName = "AlkoveExampleTests"
+               ReferencedContainer = "container:AlkoveExample.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

@@ -10,6 +10,8 @@
 		49EC3008566BD80FF5691D48 /* ExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73178E76B116326EF6931767 /* ExampleApp.swift */; };
 		63AEE69428C00AF4CA408847 /* ExampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DF9D06EE4B33C2734CC3FB /* ExampleUITests.swift */; };
 		B245C2BEA197CC2B62F2312D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35E18A69EE06D1FEB64EB75 /* ContentView.swift */; };
+		BBECE00258FC3CE3B1E60000 /* Alkove in Frameworks */ = {isa = PBXBuildFile; productRef = 9D0E6A0F065821BC323CB801 /* Alkove */; };
+		F236FE6F0F659EAA5525350F /* MicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C2F5FA211A2EF0EE270E00D /* MicTests.swift */; };
 		F53A5542C516C247D96EC922 /* Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A483933C344278DA2BB84485 /* Demo.swift */; };
 		F9C1515155F9EA2D0160D1FF /* Alkove in Frameworks */ = {isa = PBXBuildFile; productRef = 1449C1619AD58DA4576D0C11 /* Alkove */; };
 /* End PBXBuildFile section */
@@ -22,12 +24,21 @@
 			remoteGlobalIDString = 0C34D7E42B8321CFD939DCCA;
 			remoteInfo = AlkoveExample;
 		};
+		F723DA501C749CE52359498B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1FAF3E88C47566B2808B96F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0C34D7E42B8321CFD939DCCA;
+			remoteInfo = AlkoveExample;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		15BB71659E1831B5E54E99D4 /* AlkoveExampleTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AlkoveExampleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		17DC77238465D0530DDD443E /* AlkoveExampleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AlkoveExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1989BEE9B014782658D24000 /* AlkoveExample.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AlkoveExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		47DF9D06EE4B33C2734CC3FB /* ExampleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExampleUITests.swift; sourceTree = "<group>"; };
+		5C2F5FA211A2EF0EE270E00D /* MicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicTests.swift; sourceTree = "<group>"; };
 		6ECAA3895BC82328AE94155B /* alkove */ = {isa = PBXFileReference; lastKnownFileType = folder; name = alkove; path = ../..; sourceTree = SOURCE_ROOT; };
 		73178E76B116326EF6931767 /* ExampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExampleApp.swift; sourceTree = "<group>"; };
 		A483933C344278DA2BB84485 /* Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Demo.swift; sourceTree = "<group>"; };
@@ -36,6 +47,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A1B22355DD3DBF6358839E49 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BBECE00258FC3CE3B1E60000 /* Alkove in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C5225CE85C2E397FDB5DCFEB /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -47,10 +66,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		10C88DBCBB7C98189A51D35D /* ExampleTests */ = {
+			isa = PBXGroup;
+			children = (
+				5C2F5FA211A2EF0EE270E00D /* MicTests.swift */,
+			);
+			path = ExampleTests;
+			sourceTree = "<group>";
+		};
 		58CDD80DCA6994B6876AF0CC /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				1989BEE9B014782658D24000 /* AlkoveExample.app */,
+				15BB71659E1831B5E54E99D4 /* AlkoveExampleTests.xctest */,
 				17DC77238465D0530DDD443E /* AlkoveExampleUITests.xctest */,
 			);
 			name = Products;
@@ -79,6 +107,7 @@
 			isa = PBXGroup;
 			children = (
 				A9108860D1F734DB10F72D51 /* Example */,
+				10C88DBCBB7C98189A51D35D /* ExampleTests */,
 				F919CE41FA193C0F50CBDFEC /* ExampleUITests */,
 				A0F21ED772313FBA876573D3 /* Packages */,
 				58CDD80DCA6994B6876AF0CC /* Products */,
@@ -96,6 +125,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		03A9CF7F474AF1295A68A97A /* AlkoveExampleTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A6B04C87C5297CF1A97A2C20 /* Build configuration list for PBXNativeTarget "AlkoveExampleTests" */;
+			buildPhases = (
+				88DAA9B6E90EF0121A9F132D /* Sources */,
+				A1B22355DD3DBF6358839E49 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				04738AF142D2F6A4F1C101F1 /* PBXTargetDependency */,
+			);
+			name = AlkoveExampleTests;
+			packageProductDependencies = (
+				9D0E6A0F065821BC323CB801 /* Alkove */,
+			);
+			productName = AlkoveExampleTests;
+			productReference = 15BB71659E1831B5E54E99D4 /* AlkoveExampleTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		0C34D7E42B8321CFD939DCCA /* AlkoveExample */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D564E42403D64EF59199F39D /* Build configuration list for PBXNativeTarget "AlkoveExample" */;
@@ -168,12 +217,21 @@
 			projectRoot = "";
 			targets = (
 				0C34D7E42B8321CFD939DCCA /* AlkoveExample */,
+				03A9CF7F474AF1295A68A97A /* AlkoveExampleTests */,
 				C79854B29320B823E56DAEEB /* AlkoveExampleUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
+		88DAA9B6E90EF0121A9F132D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F236FE6F0F659EAA5525350F /* MicTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C2B493013728C9015128C8AC /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -195,6 +253,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		04738AF142D2F6A4F1C101F1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0C34D7E42B8321CFD939DCCA /* AlkoveExample */;
+			targetProxy = F723DA501C749CE52359498B /* PBXContainerItemProxy */;
+		};
 		E1F7647233E3D5AC5074D7D5 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 0C34D7E42B8321CFD939DCCA /* AlkoveExample */;
@@ -339,6 +402,24 @@
 			};
 			name = Debug;
 		};
+		51EFA4EFAC4C821FE001E6DB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.alkove.example.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AlkoveExample.app/AlkoveExample";
+			};
+			name = Debug;
+		};
 		521F1E8B077FE0BA8F4AEAD6 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -392,6 +473,24 @@
 			};
 			name = Release;
 		};
+		B656587AA6885A521F39D66D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.alkove.example.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AlkoveExample.app/AlkoveExample";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -400,6 +499,15 @@
 			buildConfigurations = (
 				2E86F26224AAC83966200B30 /* Debug */,
 				17A1B7A8ABE430AD9B22961C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A6B04C87C5297CF1A97A2C20 /* Build configuration list for PBXNativeTarget "AlkoveExampleTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				51EFA4EFAC4C821FE001E6DB /* Debug */,
+				B656587AA6885A521F39D66D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -433,6 +541,10 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		1449C1619AD58DA4576D0C11 /* Alkove */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Alkove;
+		};
+		9D0E6A0F065821BC323CB801 /* Alkove */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Alkove;
 		};
