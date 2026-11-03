@@ -7,6 +7,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -118,6 +119,8 @@ abstract class AlkoveInput internal constructor(
     private var record: CompletableDeferred<ByteArray>? = null
     private var hint: Hint? = null
     private var dropped = false
+    private var rawRetryAt = 0L
+    private var rawFailing = false
 
     @Volatile
     private var farActive = false
@@ -174,8 +177,8 @@ abstract class AlkoveInput internal constructor(
         }
         setStatus(Status.RUNNING)
         setMode(Mode.RAW, RawReason.LOADING)
-        thread = Thread(::run, "alkove-mic").apply { start() }
         scope.launch { startModels(MODELS_RETRY_MS) }
+        thread = Thread(::run, "alkove-mic").apply { start() }
     }
 
     // the agent's audio while no model runs: loading, failed, crashed
@@ -289,6 +292,7 @@ abstract class AlkoveInput internal constructor(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             if (closed) return
             diag("models.failed", "warn", mapOf("message" to "Models not loaded, raw microphone; retry in ${wait / 1000} s.", "error" to (e.message ?: e.toString())))
             setMode(Mode.RAW, RawReason.FAILED)
@@ -302,6 +306,8 @@ abstract class AlkoveInput internal constructor(
         shift = (frames - HOP).toDouble() / Alkove.RATE - Native.pipelineGet(pipe, 0)
         activeSince = System.currentTimeMillis()
         retryAt = 0
+        rawRetryAt = 0
+        rawFailing = false
         showActive()
     }
 
@@ -351,6 +357,14 @@ abstract class AlkoveInput internal constructor(
     private fun step() {
         val now = System.currentTimeMillis()
         if (retryAt != 0L && now >= retryAt && pipe != 0L) activate()
+        if (pipe == 0L && rawPipe == 0L && rawRetryAt != 0L && now >= rawRetryAt) {
+            rawRetryAt = 0
+            try {
+                makeRawPipe()
+            } catch (_: Throwable) {
+                rawRetryAt = now + 1000
+            }
+        }
         val active = pipe != 0L && retryAt == 0L
         val h = if (pipe != 0L) pipe else rawPipe
         try {
@@ -364,13 +378,21 @@ abstract class AlkoveInput internal constructor(
             } else if (h != 0L && rawOutput() != null) pending = Native.pipelineRaw(h, hop)
             if (pending > 0) drain(h)
         } catch (e: Throwable) {
-            crashed(e)
+            if (pipe != 0L) crashed(e) else rawFailed(e, now)
             return
         }
         if (active && (frames / HOP) % 8 == 0L) {
             val backlog = mic.backlogMs()
             if (backlog != null && backlog > OVERLOAD_MS) overload(backlog, now)
         }
+    }
+
+    private fun rawFailed(e: Throwable, now: Long) {
+        if (!rawFailing) failed("raw", e)
+        rawFailing = true
+        if (rawPipe != 0L) Native.pipelineFree(rawPipe)
+        rawPipe = 0
+        rawRetryAt = now + 1000
     }
 
     // the core failed on a hop: raw microphone, the pipeline dropped, the models again later
@@ -384,7 +406,7 @@ abstract class AlkoveInput internal constructor(
         try {
             makeRawPipe()
         } catch (t: Throwable) {
-            failed("raw", t)
+            rawFailed(t, System.currentTimeMillis())
         }
         scope.launch {
             delay(MODELS_RETRY_MS)

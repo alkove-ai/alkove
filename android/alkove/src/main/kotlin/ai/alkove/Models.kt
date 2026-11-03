@@ -118,6 +118,7 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
         @JvmStatic
         @JvmOverloads
         fun fetch(names: Collection<String>, cache: File, download: Boolean = true, baseUrl: String? = null, onProgress: ((Progress) -> Unit)? = null): Map<String, File> {
+            val names = names.distinct()
             val missing = names.filter { !path(cache, it).exists() }
             val total = missing.sumOf { spec(it).num("bytes") }
             var before = 0L
@@ -168,7 +169,7 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
         ): Models {
             val loaded = LinkedHashMap<String, Model>()
             try {
-                for (name in names) {
+                for (name in names.distinct()) {
                     val data = when (val src = files[name]) {
                         is ByteArray -> src
                         is File -> src.readBytes()
