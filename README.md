@@ -15,6 +15,7 @@
   <a href="https://www.npmjs.com/package/alkove"><img alt="npm" src="https://img.shields.io/npm/v/alkove?color=e0702c&label=npm&cacheSeconds=3600"></a>
   <a href="https://pypi.org/project/alkove/"><img alt="PyPI" src="https://img.shields.io/pypi/v/alkove?color=e0702c&label=pypi&cacheSeconds=3600"></a>
   <a href="https://alkove.ai/docs/start/android/"><img alt="Android" src="https://img.shields.io/badge/android-v0.4.0-e0702c"></a>
+  <a href="https://alkove.ai/docs/start/ios/"><img alt="iOS" src="https://img.shields.io/badge/ios-v0.4.1-e0702c"></a>
   <a href="./LICENSE"><img alt="Apache-2.0, code and weights" src="https://img.shields.io/badge/code%20%2B%20weights-Apache--2.0-13254a"></a>
   <a href="https://huggingface.co/alkove-ai"><img alt="Models on Hugging Face" src="https://img.shields.io/badge/models-Hugging%20Face-13254a"></a>
 </p>
