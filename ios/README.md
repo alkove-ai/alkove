@@ -31,3 +31,16 @@ xcodebuild test -scheme Alkove -destination 'platform=iOS Simulator,name=iPhone 
 ```
 
 The example's project comes from `example/project.yml` (XcodeGen); the generated `.xcodeproj` is in the repository.
+
+`Package.swift` takes `ios/build/AlkoveFFI.xcframework` when it is there, else the zip on the GitHub release `vX.Y.Z`. SwiftPM caches the manifest: after building or deleting `ios/build` for the first time, run `swift package --manifest-cache none describe` once, or `swift package purge-cache`.
+
+## Releasing
+
+Neither script sends anything.
+
+```sh
+ios/release.sh X.Y.Z            # the zip for the release vX.Y.Z, its checksum in Package.swift, the zip checked
+ios/livekit/publish.sh X.Y.Z    # alkove-livekit-swift in ios/build, on alkove X.Y.Z by its URL, committed and tagged
+```
+
+Then commit `Package.swift` with the release, tag `vX.Y.Z` on that commit, `gh release upload vX.Y.Z ios/build/AlkoveFFI.xcframework.zip`, and push `ios/build/alkove-livekit-swift` (`gh repo create alkove-ai/alkove-livekit-swift --public --source ios/build/alkove-livekit-swift --push` the first time). The zip uploaded must be the one `release.sh` checksummed: building it again changes its bytes.
