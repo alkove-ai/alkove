@@ -10,6 +10,8 @@ rm -f "$zip"
 (cd ios/build && ditto -c -k --keepParent AlkoveFFI.xcframework AlkoveFFI.xcframework.zip)
 sum=$(swift package compute-checksum "$zip")
 perl -pi -e "s/^let version = \".*\"/let version = \"$v\"/; s/^let checksum = \".*\"/let checksum = \"$sum\"/" Package.swift
+perl -pi -e "s/^    public static let version = \".*\"/    public static let version = \"$v\"/" ios/Sources/Alkove/Alkove.swift
+grep -q "public static let version = \"$v\"" ios/Sources/Alkove/Alkove.swift || { echo "Alkove.swift not updated"; exit 1; }
 grep -q "let version = \"$v\"" Package.swift && grep -q "let checksum = \"$sum\"" Package.swift || { echo "Package.swift not updated"; exit 1; }
 # the zip as SwiftPM will unpack it: a package on it alone must build and give the version
 check=$(mktemp -d)

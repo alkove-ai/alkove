@@ -4,7 +4,7 @@ import PackageDescription
 
 // ios/release.sh sets these two for the zip on the GitHub release vVERSION
 let version = "0.4.1"
-let checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+let checksum = "99c468ce0d125f3d2b2230108f800c58a064d861f7b5310d24eae539577699f7"
 
 // ios/build.sh's XCFramework when it is there (a clone that built it), else the release's zip: a package fetched by SwiftPM has no ios/build
 let local = "ios/build/AlkoveFFI.xcframework"

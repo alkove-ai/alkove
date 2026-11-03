@@ -2,7 +2,9 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## Unreleased
+## 0.4.1 (2026-11-03)
+
+The Swift package arrives and the Android library moves to 0.4.1; npm and PyPI stay at 0.4.0, unchanged (the same core, the web's wasm the same to the bit), and so do the integrations.
 
 - iOS and macOS: the `Alkove` Swift package (iOS 15, macOS 12, arm64), the same core natively, the web's digests to the bit on a Mac and in the iOS simulator. The primitives (`Processor`, `process`, `Chain`, `Live`, `Lex`, `Listener`, `Enroller`, `Timbre`, `Voiceprint`, `VoiceprintLearner`), the real-time inputs on the microphone (`AgentInput`, `WakeListener`, `Spot.enroll`) and `CallProcessor`. A preview: not yet tried on an iPhone's microphone.
 - `alkove-livekit-swift`: `AlkoveFocus`, Focus as LiveKit Swift's capture post-processor.

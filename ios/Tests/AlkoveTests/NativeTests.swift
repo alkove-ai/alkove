@@ -3,7 +3,7 @@ import XCTest
 
 final class NativeTests: XCTestCase {
     func testInfo() {
-        XCTAssertEqual(Alkove.version, "0.4.0")
+        XCTAssertEqual(Alkove.version.split(separator: ".").prefix(2), (Alkove.info["version"]?.str ?? "").split(separator: ".").prefix(2), "the core's minor")
         XCTAssertEqual(Models.all, ["focus", "cue", "spot", "timbre", "lex"])
     }
 
