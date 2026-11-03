@@ -8,7 +8,7 @@
 
 <p align="center">
   Voice isolation, wake words, voice activity and voiceprints, on the device.<br>
-  In the browser, in Python and on Android. No server, no key, no telemetry.
+  In the browser, in Python, on Android and on iOS. No server, no key, no telemetry.
 </p>
 
 <p align="center">
@@ -23,6 +23,7 @@
   <a href="https://alkove.ai/#demo"><b>Try it on your voice</b></a> ·
   <a href="https://alkove.ai/docs/">Docs</a> ·
   <a href="https://alkove.ai/docs/start/android/">Android</a> ·
+  <a href="https://alkove.ai/docs/start/ios/">iOS</a> ·
   <a href="./integrations/livekit">LiveKit Agents</a> ·
   <a href="./integrations/pipecat">Pipecat</a> ·
   <a href="./integrations/esphome">Home Assistant</a>
@@ -84,6 +85,20 @@ val input = AgentInput.start(context, AgentOptions(output = Output(Format.S16, r
 ```
 
 Wake words, files, a LiveKit room (`ai.alkove:alkove-livekit`): [the Android quick start](https://alkove.ai/docs/start/android/).
+
+### On iOS and macOS
+
+```swift
+.package(url: "https://github.com/alkove-ai/alkove.git", from: "0.4.1")
+```
+
+```swift
+let input = try await AgentInput.start(AgentOptions(output: Output(format: .s16, rate: 24000))) { chunk in
+    socket.send(chunk) // only the user's voice goes out
+}
+```
+
+A preview, not yet tried on an iPhone's microphone. Wake words, files, a LiveKit room (`alkove-livekit-swift`): [the iOS quick start](https://alkove.ai/docs/start/ios/).
 
 ### LiveKit Agents
 
@@ -166,6 +181,7 @@ Weights on [Hugging Face](https://huggingface.co/alkove-ai), downloaded once, ch
 | [`packages/alkove`](./packages/alkove) | the web library (npm) |
 | [`python`](./python) | the Python package (PyPI) |
 | [`android`](./android) | the Android library and its LiveKit plugin ([maven.alkove.ai](https://maven.alkove.ai)) |
+| [`ios`](./ios) | the Swift package (iOS, macOS), its LiveKit plugin and an example app |
 | [`integrations/livekit`](./integrations/livekit) | Focus and Cue for LiveKit Agents |
 | [`integrations/pipecat`](./integrations/pipecat) | Focus and Cue for Pipecat |
 | [`integrations/claude-code`](./integrations/claude-code) | voice commands for Claude Code: a mod and its binary, released on their own (`voice-v*`) |

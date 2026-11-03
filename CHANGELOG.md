@@ -2,6 +2,12 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
+## Unreleased
+
+- iOS and macOS: the `Alkove` Swift package (iOS 15, macOS 12, arm64), the same core natively, the web's digests to the bit on a Mac and in the iOS simulator. The primitives (`Processor`, `process`, `Chain`, `Live`, `Lex`, `Listener`, `Enroller`, `Timbre`, `Voiceprint`, `VoiceprintLearner`), the real-time inputs on the microphone (`AgentInput`, `WakeListener`, `Spot.enroll`) and `CallProcessor`. A preview: not yet tried on an iPhone's microphone.
+- `alkove-livekit-swift`: `AlkoveFocus`, Focus as LiveKit Swift's capture post-processor.
+- Android: after an engine crash, the agent gets the raw microphone at once instead of nothing until the models are back, and a recording under way fails (`engine.failed`) instead of waiting forever; a model name given twice is loaded once.
+
 ## 0.4.0 (2026-10-31)
 
 Every package moves to 0.4 (npm, Python, Android), with `livekit-plugins-alkove` and `pipecat-alkove` 1.1.0 and `wyoming-alkove` 0.2.0 on `alkove>=0.4.0,<0.5`. Cue gets an end of turn head: `speech` is the same to the bit, and every digest of a call, of the primitives and of the files too. Nothing to change in your code; an agent input now also gives turns and interruptions.
