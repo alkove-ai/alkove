@@ -143,4 +143,5 @@ jobs:
       - run: swift test
       - run: swift build
         working-directory: ios/livekit
+      - run: xcodebuild build -quiet -project ios/example/AlkoveExample.xcodeproj -scheme AlkoveExample -destination "generic/platform=iOS Simulator" CODE_SIGNING_ALLOWED=NO
       - run: xcodebuild test -quiet -scheme Alkove -destination "platform=iOS Simulator,name=$(xcrun simctl list devices available | grep -m1 -o 'iPhone [^(]*' | sed 's/ *$//')"

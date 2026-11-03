@@ -1,0 +1,440 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		49EC3008566BD80FF5691D48 /* ExampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73178E76B116326EF6931767 /* ExampleApp.swift */; };
+		63AEE69428C00AF4CA408847 /* ExampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DF9D06EE4B33C2734CC3FB /* ExampleUITests.swift */; };
+		B245C2BEA197CC2B62F2312D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35E18A69EE06D1FEB64EB75 /* ContentView.swift */; };
+		F53A5542C516C247D96EC922 /* Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A483933C344278DA2BB84485 /* Demo.swift */; };
+		F9C1515155F9EA2D0160D1FF /* Alkove in Frameworks */ = {isa = PBXBuildFile; productRef = 1449C1619AD58DA4576D0C11 /* Alkove */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		2F89D482334D0A8ADDB6B0EC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1FAF3E88C47566B2808B96F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0C34D7E42B8321CFD939DCCA;
+			remoteInfo = AlkoveExample;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		17DC77238465D0530DDD443E /* AlkoveExampleUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AlkoveExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1989BEE9B014782658D24000 /* AlkoveExample.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AlkoveExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		47DF9D06EE4B33C2734CC3FB /* ExampleUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExampleUITests.swift; sourceTree = "<group>"; };
+		6ECAA3895BC82328AE94155B /* alkove */ = {isa = PBXFileReference; lastKnownFileType = folder; name = alkove; path = ../..; sourceTree = SOURCE_ROOT; };
+		73178E76B116326EF6931767 /* ExampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExampleApp.swift; sourceTree = "<group>"; };
+		A483933C344278DA2BB84485 /* Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Demo.swift; sourceTree = "<group>"; };
+		D084BB6D46F0A93F21C85D1C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E35E18A69EE06D1FEB64EB75 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C5225CE85C2E397FDB5DCFEB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F9C1515155F9EA2D0160D1FF /* Alkove in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		58CDD80DCA6994B6876AF0CC /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1989BEE9B014782658D24000 /* AlkoveExample.app */,
+				17DC77238465D0530DDD443E /* AlkoveExampleUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A0F21ED772313FBA876573D3 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				6ECAA3895BC82328AE94155B /* alkove */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		A9108860D1F734DB10F72D51 /* Example */ = {
+			isa = PBXGroup;
+			children = (
+				E35E18A69EE06D1FEB64EB75 /* ContentView.swift */,
+				A483933C344278DA2BB84485 /* Demo.swift */,
+				73178E76B116326EF6931767 /* ExampleApp.swift */,
+				D084BB6D46F0A93F21C85D1C /* Info.plist */,
+			);
+			path = Example;
+			sourceTree = "<group>";
+		};
+		E20E95FD87EAD6A583DDA7BE = {
+			isa = PBXGroup;
+			children = (
+				A9108860D1F734DB10F72D51 /* Example */,
+				F919CE41FA193C0F50CBDFEC /* ExampleUITests */,
+				A0F21ED772313FBA876573D3 /* Packages */,
+				58CDD80DCA6994B6876AF0CC /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F919CE41FA193C0F50CBDFEC /* ExampleUITests */ = {
+			isa = PBXGroup;
+			children = (
+				47DF9D06EE4B33C2734CC3FB /* ExampleUITests.swift */,
+			);
+			path = ExampleUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0C34D7E42B8321CFD939DCCA /* AlkoveExample */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D564E42403D64EF59199F39D /* Build configuration list for PBXNativeTarget "AlkoveExample" */;
+			buildPhases = (
+				C2B493013728C9015128C8AC /* Sources */,
+				C5225CE85C2E397FDB5DCFEB /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AlkoveExample;
+			packageProductDependencies = (
+				1449C1619AD58DA4576D0C11 /* Alkove */,
+			);
+			productName = AlkoveExample;
+			productReference = 1989BEE9B014782658D24000 /* AlkoveExample.app */;
+			productType = "com.apple.product-type.application";
+		};
+		C79854B29320B823E56DAEEB /* AlkoveExampleUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E790E203AE08193A21A57534 /* Build configuration list for PBXNativeTarget "AlkoveExampleUITests" */;
+			buildPhases = (
+				D6C04CA250B8B4015C5A0DB5 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E1F7647233E3D5AC5074D7D5 /* PBXTargetDependency */,
+			);
+			name = AlkoveExampleUITests;
+			packageProductDependencies = (
+			);
+			productName = AlkoveExampleUITests;
+			productReference = 17DC77238465D0530DDD443E /* AlkoveExampleUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1FAF3E88C47566B2808B96F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					0C34D7E42B8321CFD939DCCA = {
+						ProvisioningStyle = Automatic;
+					};
+					C79854B29320B823E56DAEEB = {
+						TestTargetID = 0C34D7E42B8321CFD939DCCA;
+					};
+				};
+			};
+			buildConfigurationList = 4C6DC8EAC3F981E2C7CE8D39 /* Build configuration list for PBXProject "AlkoveExample" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E20E95FD87EAD6A583DDA7BE;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				50C253B4E0EB9B3C32DBC62D /* XCLocalSwiftPackageReference "../.." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 58CDD80DCA6994B6876AF0CC /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0C34D7E42B8321CFD939DCCA /* AlkoveExample */,
+				C79854B29320B823E56DAEEB /* AlkoveExampleUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C2B493013728C9015128C8AC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B245C2BEA197CC2B62F2312D /* ContentView.swift in Sources */,
+				F53A5542C516C247D96EC922 /* Demo.swift in Sources */,
+				49EC3008566BD80FF5691D48 /* ExampleApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D6C04CA250B8B4015C5A0DB5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				63AEE69428C00AF4CA408847 /* ExampleUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		E1F7647233E3D5AC5074D7D5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0C34D7E42B8321CFD939DCCA /* AlkoveExample */;
+			targetProxy = 2F89D482334D0A8ADDB6B0EC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		17A1B7A8ABE430AD9B22961C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		2C132AF27850C64CEC989FA8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.alkove.example.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AlkoveExample;
+			};
+			name = Debug;
+		};
+		2E86F26224AAC83966200B30 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		521F1E8B077FE0BA8F4AEAD6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.alkove.example.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AlkoveExample;
+			};
+			name = Release;
+		};
+		6E0A61D8A68411B6CCB9ABC6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = Example/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.alkove.example;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B18A2D1380EE4D7187561F45 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = Example/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.alkove.example;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4C6DC8EAC3F981E2C7CE8D39 /* Build configuration list for PBXProject "AlkoveExample" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E86F26224AAC83966200B30 /* Debug */,
+				17A1B7A8ABE430AD9B22961C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D564E42403D64EF59199F39D /* Build configuration list for PBXNativeTarget "AlkoveExample" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6E0A61D8A68411B6CCB9ABC6 /* Debug */,
+				B18A2D1380EE4D7187561F45 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E790E203AE08193A21A57534 /* Build configuration list for PBXNativeTarget "AlkoveExampleUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2C132AF27850C64CEC989FA8 /* Debug */,
+				521F1E8B077FE0BA8F4AEAD6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		50C253B4E0EB9B3C32DBC62D /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1449C1619AD58DA4576D0C11 /* Alkove */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Alkove;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A1FAF3E88C47566B2808B96F /* Project object */;
+}

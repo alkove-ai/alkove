@@ -1,0 +1,46 @@
+name: AlkoveExample
+options:
+  bundleIdPrefix: ai.alkove
+  deploymentTarget:
+    iOS: "15.0"
+packages:
+  Alkove:
+    path: ../..
+targets:
+  AlkoveExample:
+    type: application
+    platform: iOS
+    sources: [Example]
+    dependencies:
+      - package: Alkove
+        product: Alkove
+    info:
+      path: Example/Info.plist
+      properties:
+        CFBundleDisplayName: Alkove
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight, UIInterfaceOrientationPortraitUpsideDown]
+        NSMicrophoneUsageDescription: The demo runs Alkove's models on your microphone, on this device.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.alkove.example
+        CODE_SIGN_STYLE: Automatic
+  AlkoveExampleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [ExampleUITests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ai.alkove.example.uitests
+    dependencies:
+      - target: AlkoveExample
+schemes:
+  AlkoveExample:
+    build:
+      targets:
+        AlkoveExample: all
+    test:
+      targets: [AlkoveExampleUITests]
