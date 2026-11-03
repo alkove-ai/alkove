@@ -156,10 +156,11 @@ public class AlkoveInput: @unchecked Sendable {
     private var record: CheckedContinuation<Data, Error>?
     private var dropped = false
     private var muted = false
-    private var failNextStep = false
+    private var failHops = 0
+    private var rawRetryAt = 0.0
+    private var rawFailing = false
 
-    // the tests' way into crashed()
-    func failNextHop() { lock { failNextStep = true } }
+    func failNextHops(_ n: Int) { command { [self] in failHops = n } }
 
     // the background's own: Timbre for the print or the voice of a wake
     private let bg = DispatchQueue(label: "alkove-background", qos: .userInitiated)
@@ -201,11 +202,12 @@ public class AlkoveInput: @unchecked Sendable {
         }
         setStatus(.running)
         setMode(.raw, .loading)
+        let models = Task { await startModels(modelsRetryMs) }
+        lock { loading = models }
         let t = Thread { [self] in run() }
         t.name = "alkove-mic"
         t.qualityOfService = .userInteractive
         t.start()
-        loading = Task { await startModels(modelsRetryMs) }
     }
 
     // the agent's audio while no model runs: loading, failed, crashed
@@ -264,7 +266,7 @@ public class AlkoveInput: @unchecked Sendable {
     }
 
     private func startModels(_ wait: Double) async {
-        if lock({ closed }) { return }
+        if lock({ closed }) || Task.isCancelled { return }
         do {
             let wantSpot = lock { spotWords } != nil
             let m = try await Alkove.models(models() + (wantSpot ? ["spot"] : []), baseURL: baseURL)
@@ -322,6 +324,7 @@ public class AlkoveInput: @unchecked Sendable {
             diag("models.failed", "warn", [("message", .str("Models not loaded, raw microphone; retry in \(Int(wait / 1000)) s.")), ("error", .str("\(error)"))])
             setMode(.raw, .failed)
             try? await Task.sleep(nanoseconds: UInt64(wait * 1e6))
+            if Task.isCancelled { return }
             await startModels(min(2 * wait, modelsRetryMaxMs))
         }
     }
@@ -341,6 +344,8 @@ public class AlkoveInput: @unchecked Sendable {
         shift = Double(frames - hop) / Double(Alkove.rate) - ((try? Native.call { alk_pipeline_get(p, 0, $0) }) ?? 0)
         activeSince = nowMs()
         retryAt = 0
+        rawRetryAt = 0
+        rawFailing = false
         showActive()
     }
 
@@ -386,15 +391,23 @@ public class AlkoveInput: @unchecked Sendable {
     private func step() {
         let now = nowMs()
         if retryAt != 0, now >= retryAt, pipe != nil { activate() }
+        if pipe == nil, rawPipe == nil, rawRetryAt != 0, now >= rawRetryAt {
+            rawRetryAt = 0
+            do {
+                try makeRawPipe()
+            } catch {
+                rawRetryAt = now + 1000
+            }
+        }
         let active = pipe != nil && retryAt == 0
         let h = pipe ?? rawPipe
         do {
             var pending: Int32 = 0
+            if failHops > 0, h != nil {
+                failHops -= 1
+                throw AlkoveError(.state, "", "a hop failed (test)")
+            }
             if active, let p = pipe {
-                if lock({ failNextStep }) {
-                    lock { failNextStep = false }
-                    throw AlkoveError(.state, "", "a step failed (test)")
-                }
                 let t0 = DispatchTime.now().uptimeNanoseconds
                 pending = try hopIn.withUnsafeBufferPointer { i in
                     try hopOut.withUnsafeMutableBufferPointer { o in
@@ -407,10 +420,18 @@ public class AlkoveInput: @unchecked Sendable {
             }
             if pending > 0, let h { try drain(h) }
         } catch {
-            crashed(error)
+            if pipe != nil { crashed(error) } else { rawFailed(error, now) }
             return
         }
         if active, (frames / hop) % 8 == 0, let backlog = source.backlogMs(), backlog > overloadMs { overload(backlog, now) }
+    }
+
+    private func rawFailed(_ e: Error, _ now: Double) {
+        if !rawFailing { failed("raw", e) }
+        rawFailing = true
+        if let r = rawPipe { alk_pipeline_free(r) }
+        rawPipe = nil
+        rawRetryAt = now + 1000
     }
 
     // the core failed on a hop: raw microphone, the pipeline dropped, the models again later
@@ -424,12 +445,14 @@ public class AlkoveInput: @unchecked Sendable {
         do {
             try makeRawPipe()
         } catch {
-            failed("raw", error)
+            rawFailed(error, nowMs())
         }
-        loading = Task { [weak self] in
+        let t = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(modelsRetryMs * 1e6))
+            if Task.isCancelled { return }
             await self?.startModels(modelsRetryMs)
         }
+        lock { loading = t }
     }
 
     private func overload(_ backlogMs: Double, _ now: Double) {
@@ -762,7 +785,7 @@ public class AlkoveInput: @unchecked Sendable {
         }
         guard first else { return }
         setStatus(.closed)
-        loading?.cancel()
+        lock { loading }?.cancel()
         source.close()
         if Thread.current.name != "alkove-mic" { _ = done.wait(timeout: .now() + 0.5) }
         lock {

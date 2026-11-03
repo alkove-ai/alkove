@@ -33,7 +33,10 @@ final class AlkoveFocusTests: XCTestCase {
         while i + 480 <= pcm.count {
             var frame = pcm[i ..< i + 480].map { $0 * 32768 }
             frame.withUnsafeMutableBufferPointer { a in
-                stereo.withUnsafeMutableBufferPointer { b in focus.process([a.baseAddress!, b.baseAddress!], frames: 480) }
+                stereo.withUnsafeMutableBufferPointer { b in
+                    let ptrs = [a.baseAddress!, b.baseAddress!]
+                    focus.process(channels: 2, frames: 480) { ptrs[$0] }
+                }
             }
             XCTAssertEqual(stereo, frame, "every channel gets channel 0's output")
             got += frame
@@ -57,7 +60,7 @@ final class AlkoveFocusTests: XCTestCase {
         var i = 0
         while i + 480 <= pcm.count {
             var frame = pcm[i ..< i + 480].map { $0 * 32768 }
-            frame.withUnsafeMutableBufferPointer { focus.process([$0.baseAddress!], frames: 480) }
+            frame.withUnsafeMutableBufferPointer { b in focus.process(channels: 1, frames: 480) { _ in b.baseAddress! } }
             var ref = Array(pcm[i ..< i + 480])
             try call.process(&ref, rate: 48000)
             XCTAssertEqual(frame, ref.map { $0 * 32768 })

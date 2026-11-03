@@ -1,7 +1,6 @@
 // swift-tools-version:5.9
 import PackageDescription
 
-// its own package: LiveKit's WebRTC is 2.3 GB of artifacts that an app using Alkove alone must not download
 let package = Package(
     name: "AlkoveLiveKit",
     platforms: [.iOS(.v15), .macOS(.v12)],

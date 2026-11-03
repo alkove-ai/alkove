@@ -8,6 +8,8 @@ final class Demo: ObservableObject {
     @Published var focusOn = true
     @Published var wakeOn = false
     @Published var busy = false
+    @Published var agentStarting = false
+    @Published var wakeStarting = false
     private var agent: AgentInput?
     private var wake: WakeListener?
 
@@ -46,13 +48,18 @@ final class Demo: ObservableObject {
             agentOn = false
             return
         }
+        guard !agentStarting else { return }
+        agentStarting = true
         Task {
             do {
                 let a = try await AgentInput.start(AgentOptions(keepRecent: 30, stats: true))
+                if !focusOn { a.setEnabled(false) }
                 agent = a
                 agentOn = true
+                agentStarting = false
                 for await e in a.events { show(e) }
             } catch {
+                agentStarting = false
                 say("agent failed: \(error)")
             }
         }
@@ -104,6 +111,8 @@ final class Demo: ObservableObject {
             wakeOn = false
             return
         }
+        guard !wakeStarting else { return }
+        wakeStarting = true
         Task {
             do {
                 let w = try await word(text, lang)
@@ -111,8 +120,10 @@ final class Demo: ObservableObject {
                 let l = try await WakeListener.start(WakeOptions(words: [w], context: "anywhere"))
                 wake = l
                 wakeOn = true
+                wakeStarting = false
                 for await e in l.events { show(e) }
             } catch {
+                wakeStarting = false
                 say("wake failed: \(error)")
             }
         }

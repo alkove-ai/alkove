@@ -78,6 +78,11 @@ public final class Models: @unchecked Sendable {
         return data
     }
 
+    static func unique(_ names: [String]) -> [String] {
+        var seen = Set<String>()
+        return names.filter { seen.insert($0).inserted }
+    }
+
     static func file(_ name: String) throws -> String { try spec(name)["file"]?.str ?? "" }
 
     static func path(_ cache: URL, _ name: String) throws -> URL {
@@ -102,7 +107,7 @@ public final class Models: @unchecked Sendable {
     /// The models from files or bytes the app holds, checked against the sha256 this version pins (`models.hash`).
     public static func load(_ names: [String], files: [String: Data]) throws -> Models {
         var loaded = [String: Model]()
-        for n in names {
+        for n in unique(names) {
             guard let data = files[n] else { throw AlkoveError(.argument, "", "\(n): no file given") }
             loaded[n] = try Model(name: n, bytes: try checked(n, data))
         }
@@ -112,12 +117,13 @@ public final class Models: @unchecked Sendable {
     /// The .alk files of a folder (the app's bundle, a folder it downloaded), checked against their sha256.
     public static func load(_ names: [String], directory: URL) throws -> Models {
         var files = [String: Data]()
-        for n in names where files[n] == nil { files[n] = try Data(contentsOf: directory.appendingPathComponent(try file(n))) }
+        for n in unique(names) { files[n] = try Data(contentsOf: directory.appendingPathComponent(try file(n))) }
         return try load(names, files: files)
     }
 
     /// The models from the cache, downloaded there first from Hugging Face at this version's revision (or `baseURL`) when missing.
     public static func load(_ names: [String] = ["focus", "cue"], cache: URL = cacheDirectory, download: Bool = true, baseURL: URL? = nil, progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> Models {
+        let names = unique(names)
         let paths = try await fetch(names, cache: cache, download: download, baseURL: baseURL, progress: progress)
         var loaded = [String: Model]()
         for n in names {
@@ -137,6 +143,7 @@ public final class Models: @unchecked Sendable {
     /// Downloads the models into `cache` once, checked by their sha256, and gives their files; `download: false` only reads the cache.
     @discardableResult
     public static func fetch(_ names: [String], cache: URL = cacheDirectory, download: Bool = true, baseURL: URL? = nil, progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> [String: URL] {
+        let names = unique(names)
         let fm = FileManager.default
         let missing = try names.filter { !fm.fileExists(atPath: try path(cache, $0).path) }
         let total = try missing.reduce(0) { $0 + Int(try spec($1)["bytes"]?.num ?? 0) }

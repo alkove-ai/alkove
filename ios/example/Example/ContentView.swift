@@ -7,7 +7,7 @@ struct ContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button(demo.agentOn ? "Agent: stop" : "Agent: start") { demo.toggleAgent() }.accessibilityIdentifier("agent")
+            Button(demo.agentOn ? "Agent: stop" : "Agent: start") { demo.toggleAgent() }.disabled(demo.agentStarting).accessibilityIdentifier("agent")
             Button(demo.focusOn ? "Focus: on" : "Focus: off") { demo.toggleFocus() }.disabled(!demo.agentOn)
             Button("Record 10 s (raw | Focus)") { demo.recordTen() }.disabled(!demo.agentOn)
             HStack {
@@ -18,7 +18,7 @@ struct ContentView: View {
             .autocorrectionDisabled()
             HStack {
                 Button("Compile") { demo.compileWord(word, lang) }.accessibilityIdentifier("compile")
-                Button(demo.wakeOn ? "Wake word: stop" : "Wake word: start") { demo.toggleWake(word, lang) }.accessibilityIdentifier("wake")
+                Button(demo.wakeOn ? "Wake word: stop" : "Wake word: start") { demo.toggleWake(word, lang) }.disabled(demo.wakeStarting).accessibilityIdentifier("wake")
             }
             Button("Bench (native)") { demo.bench() }.disabled(demo.busy).accessibilityIdentifier("bench")
             ScrollView {

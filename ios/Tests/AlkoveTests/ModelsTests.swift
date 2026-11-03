@@ -9,7 +9,7 @@ final class ModelsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: cache) }
         XCTAssertFalse(Models.cached(["cue"], cache: cache))
         let seen = Seen()
-        let m = try await Models.load(["cue"], cache: cache) { seen.last = $0 }
+        let m = try await Models.load(["cue", "cue"], cache: cache) { seen.last = $0 }
         XCTAssertTrue(m.contains("cue") && Models.cached(["cue"], cache: cache))
         XCTAssertEqual(seen.last?.loaded, seen.last?.total)
         let path = try Models.path(cache, "cue")

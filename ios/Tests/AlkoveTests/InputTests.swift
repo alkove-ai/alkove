@@ -318,7 +318,7 @@ final class InputTests: XCTestCase {
         wait("the models") { input.mode == .focus }
         let recording = Task { try await input.record(seconds: 5) }
         try await Task.sleep(nanoseconds: 200_000_000)
-        input.failNextHop()
+        input.failNextHops(1)
         wait("raw") { input.mode == .raw }
         do {
             _ = try await recording.value
@@ -359,5 +359,45 @@ final class InputTests: XCTestCase {
 
     func testANameTwiceLoadsOnce() throws {
         XCTAssertEqual(try Models.load(["cue", "cue"], directory: Fixtures.modelDir).names, ["cue"])
+    }
+
+    // the raw pipeline failing on every hop after a crash: one crash, one load of the models, not one per hop
+    func testARawPipelineFailingAfterACrashLoadsTheModelsOnce() async throws {
+        let input = try AgentInput.start(AgentOptions(), source: ScriptedSource([]), onAudio: nil)
+        let (events, task) = collect(input)
+        wait("the models") { input.mode == .focus }
+        input.failNextHops(2)
+        wait("the models again", timeout: 10) { input.mode == .raw }
+        wait("the models again", timeout: 10) { input.mode == .focus }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        input.close()
+        task.cancel()
+        let codes = events.value.compactMap { e -> String? in if case let .diag(d) = e { return d.code == "worker.error" ? "\(d.code) \(d.data["on"]?.str ?? "")" : d.code } else { return nil } }
+        XCTAssertEqual(codes.filter { $0 == "engine.crash" }.count, 1, "\(codes)")
+        XCTAssertEqual(codes.filter { $0 == "worker.error raw" }.count, 1, "\(codes)")
+        let modes = events.value.compactMap { if case let .mode(m, r) = $0 { return "\(m) \(r?.rawValue ?? "")" } else { return nil } }
+        XCTAssertEqual(modes, ["focus ", "raw failed", "focus "])
+    }
+
+    // the raw pipeline failing again and again while the models wait: built again each second, the agent's audio back before them
+    func testTheRawMicrophoneComesBackWhileTheModelsWait() async throws {
+        let bytes = Box(0)
+        let input = try AgentInput.start(AgentOptions(), source: ScriptedSource([]), onAudio: { c in bytes.update { $0 += c.count } })
+        let (events, task) = collect(input)
+        wait("the models") { input.mode == .focus }
+        // the crash, then the raw pipeline at once, 1 s and 2 s later: back at 3 s, the models at 5 s
+        input.failNextHops(4)
+        wait("raw") { input.mode == .raw }
+        try await Task.sleep(nanoseconds: 3_300_000_000)
+        let before = bytes.value
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        XCTAssertEqual(input.mode, .raw, "the models come back 5 s after the crash")
+        XCTAssertGreaterThan(bytes.value - before, 16000 * 4 / 2, "raw float32 at 16 kHz again")
+        wait("the models again", timeout: 10) { input.mode == .focus }
+        input.close()
+        task.cancel()
+        let codes = events.value.compactMap { e -> String? in if case let .diag(d) = e { return d.code == "worker.error" ? "raw" : d.code } else { return nil } }
+        XCTAssertEqual(codes.filter { $0 == "engine.crash" }.count, 1, "\(codes)")
+        XCTAssertEqual(codes.filter { $0 == "raw" }.count, 1, "one diag for the raw pipeline's failures: \(codes)")
     }
 }

@@ -37,14 +37,15 @@ public final class AlkoveFocus: NSObject, AudioCustomProcessingDelegate, @unchec
     public func audioProcessingInitialize(sampleRate _: Int, channels _: Int) { processor.reset() }
 
     public func audioProcessingProcess(audioBuffer: LKAudioBuffer) {
-        process((0 ..< audioBuffer.channels).map { audioBuffer.rawBuffer(forChannel: $0) }, frames: audioBuffer.frames)
+        process(channels: audioBuffer.channels, frames: audioBuffer.frames) { audioBuffer.rawBuffer(forChannel: $0) }
     }
 
     public func audioProcessingRelease() { processor.reset() }
 
     // full band, float at int16 scale, 10 ms at frames × 100 Hz: channel 0 processed, written to every channel
-    func process(_ channels: [UnsafeMutablePointer<Float>], frames n: Int) {
-        guard let first = channels.first, n > 0 else { return }
+    func process(channels: Int, frames n: Int, _ channel: (Int) -> UnsafeMutablePointer<Float>) {
+        guard channels > 0, n > 0 else { return }
+        let first = channel(0)
         if frame.count < n { frame = [Float](repeating: 0, count: n) }
         for i in 0 ..< n { frame[i] = first[i] / 32768 }
         // an error must not reach WebRTC's audio thread: the frame goes through as it came
@@ -57,7 +58,8 @@ public final class AlkoveFocus: NSObject, AudioCustomProcessingDelegate, @unchec
             return
         }
         failed = false
-        for c in channels {
+        for k in 0 ..< channels {
+            let c = channel(k)
             for i in 0 ..< n { c[i] = frame[i] * 32768 }
         }
         if let cb = onEvent { events.forEach(cb) }

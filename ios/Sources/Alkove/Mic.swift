@@ -43,19 +43,21 @@ final class Ring: @unchecked Sendable {
         return count
     }
 
-    // up to `into.count` samples, waiting up to `timeout` for some; 0 on a timeout
+    // up to `into.count` samples, waiting up to `timeout` for some; 0 on a timeout, a wake(), or a signal left by writes already read
     func take(into: inout [Float], timeout: Double) -> Int {
-        for _ in 0 ..< 2 {
-            os_unfair_lock_lock(&lock)
-            let n = min(count, into.count)
-            for i in 0 ..< n { into[i] = buf[(read + i) % buf.count] }
-            read = (read + n) % buf.count
-            count -= n
-            os_unfair_lock_unlock(&lock)
-            if n > 0 { return n }
-            if ready.wait(timeout: .now() + timeout) == .timedOut { return 0 }
-        }
-        return 0
+        let n = drain(into: &into)
+        if n > 0 || ready.wait(timeout: .now() + timeout) == .timedOut { return n }
+        return drain(into: &into)
+    }
+
+    private func drain(into: inout [Float]) -> Int {
+        os_unfair_lock_lock(&lock)
+        let n = min(count, into.count)
+        for i in 0 ..< n { into[i] = buf[(read + i) % buf.count] }
+        read = (read + n) % buf.count
+        count -= n
+        os_unfair_lock_unlock(&lock)
+        return n
     }
 
     func wake() { ready.signal() }
@@ -197,21 +199,28 @@ final class Mic: AudioSource, @unchecked Sendable {
     // the ring the tap fills at the hardware's rate; a new rate gets a new resampler; false once closed
     @discardableResult
     func attach(_ r: Ring, rate hw: Double, engine e: AVAudioEngine? = nil) throws -> Bool {
-        let rs = hw == Double(rate) ? nil : try? Resampler(from: Int(hw), to: rate)
-        if hw != Double(rate), rs == nil || hw != hw.rounded() {
+        guard hw.isFinite, hw >= 1 else { throw AlkoveError(code: "mic.not-found", message: "No microphone rate (\(hw) Hz).") }
+        let hz = Int(hw.rounded())
+        let same = state { hwRate > 0 && Int(hwRate.rounded()) == hz }
+        let rs = same || hz == rate ? nil : try? Resampler(from: hz, to: rate)
+        if !same, hz != rate, rs == nil {
             throw AlkoveError(code: "mic.not-found", message: "No way from the microphone's \(hw) Hz to \(rate) Hz.")
         }
-        return state {
-            if closed { return false }
+        let (attached, old) = state { () -> (Bool, Ring?) in
+            if closed { return (false, nil) }
+            let old = ring
             engine = e
             ring = r
             gone = false
-            if hwRate != hw {
+            if !same {
                 hwRate = hw
                 resampler = rs
             }
-            return true
+            return (true, old)
         }
+        // the reader may wait on the ring the old engine no longer fills
+        old?.wake()
+        return attached
     }
 
     // a route or format change stops the engine: started again in place, the hops go on

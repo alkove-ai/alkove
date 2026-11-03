@@ -48,4 +48,34 @@ final class MicTests: XCTestCase {
         XCTAssertEqual(Array(out[..<4]), [3, 4, 5, 6])
         XCTAssertEqual(ring.take(into: &out, timeout: 0.01), 0)
     }
+
+    func testAWakeEndsTheWaitAtOnce() {
+        let ring = Ring(capacity: 4)
+        var out = [Float](repeating: 0, count: 4)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { ring.wake() }
+        let t0 = Date()
+        XCTAssertEqual(ring.take(into: &out, timeout: 2), 0)
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.5)
+    }
+
+    // a route change: the reader waiting on the old engine's ring goes on with the new one at once
+    func testANewRingWakesTheReader() throws {
+        let mic = Mic(echoCancellation: false)
+        try mic.attach(Ring(capacity: 32000), rate: 16000)
+        let fresh = Ring(capacity: 32000)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
+            _ = try? mic.attach(fresh, rate: 16000)
+            let x = [Float](repeating: 0.5, count: 256)
+            x.withUnsafeBufferPointer { fresh.write($0.baseAddress!, 256) }
+        }
+        var hop = [Float](repeating: 0, count: 256)
+        let t0 = Date()
+        XCTAssertEqual(hop.withUnsafeMutableBufferPointer { mic.read($0) }, 256)
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.5)
+        XCTAssertEqual(hop, [Float](repeating: 0.5, count: 256))
+    }
+
+    func testAFractionalHardwareRateOpens() {
+        XCTAssertNoThrow(try Mic(echoCancellation: false).attach(Ring(capacity: 4), rate: 47999.99))
+    }
 }

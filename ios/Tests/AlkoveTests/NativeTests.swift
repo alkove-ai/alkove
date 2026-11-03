@@ -17,4 +17,8 @@ final class NativeTests: XCTestCase {
         let v: Value = .obj([("a", 1.5), ("b", .arr(["x", nil, true])), ("f", .floats([0.25, -1])), ("d", .bytes(Data([1, 2, 3])))])
         XCTAssertEqual(try Value.decode(v.encoded()), v)
     }
+
+    func testEachNameOnceInItsFirstPlace() {
+        XCTAssertEqual(Models.unique(["focus", "cue", "focus", "spot", "cue"]), ["focus", "cue", "spot"])
+    }
 }
