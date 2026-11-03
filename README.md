@@ -70,7 +70,7 @@ const wake = await createWakeListener({ words: [word] })
 wake.on('wake', ({ audio }) => startListening(audio))
 ```
 
-Voice agents, files, Node and the primitives: [the `alkove` package](./packages/alkove).
+Voice agents, files, Node and the primitives: [the `alkove` package](./packages/alkove). With React, `useAgentInput`, `useCallInput` and `useWakeListener` from `alkove/react`: [the React guide](https://alkove.ai/docs/guides/react/).
 
 ### On Android
 
@@ -188,7 +188,7 @@ Weights on [Hugging Face](https://huggingface.co/alkove-ai), downloaded once, ch
 | [`crates/engine`](./crates/engine) | the inference engine and the `.alk` format |
 | [`crates/core`](./crates/core) | the features, written once in Rust for every package |
 | [`bench`](./bench) | every benchmark number, with its datasets and protocol |
-| [`examples`](./examples) | two plain HTML pages on the built package |
+| [`examples`](./examples) | two React apps (Next.js, Vite) and two plain HTML pages |
 
 Building from source: [CONTRIBUTING.md](./CONTRIBUTING.md).
 

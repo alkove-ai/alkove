@@ -56,6 +56,16 @@ wake.on('wake', ({ word, start, audio }) => …)
 
 Any word, typed in one of 7 languages (fr, en, es, it, pt, ca, ro). By default it counts only after a pause (far fewer false alarms; "Bon, Camille, on y va ?" does not wake it, use `context: 'both'` for that). Enrolling the word (the user says it 3 times) sets its thresholds on their voice. `onlyMyVoice: print` ignores other voices.
 
+## React
+
+```tsx
+import { useAgentInput } from 'alkove/react'
+
+const { status, error } = useAgentInput({ enabled: on, on: { utterance: ({ pcm }) => transcribe(pcm) } })
+```
+
+`useAgentInput`, `useCallInput` and `useWakeListener` take the options of their function, plus `enabled` and `on`. The input opens with the component and closes with it, strict mode and Next.js included. [The React guide](https://alkove.ai/docs/guides/react/); two apps in [`examples`](https://github.com/alkove-ai/alkove/tree/main/examples) (Next.js, Vite).
+
 ## Files, offline
 
 ```ts

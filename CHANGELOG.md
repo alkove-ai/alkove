@@ -2,9 +2,11 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## Unreleased
+## 0.4.2 (2026-11-03)
 
-- React: `useAgentInput`, `useCallInput` and `useWakeListener` in `alkove/react` (React 18 and later, optional). The same options as `createAgentInput`, `createCallInput` and `createWakeListener`, plus `enabled` and `on`; they return `status`, `mode`, `error`, `track`, `input` and `resume`. The input opens with the component and closes with it; `strength` and `voiceprint` apply live, any other option opens a new input; React's strict mode never holds the microphone twice. Marked `'use client'` for Next.js.
+npm only: the React hooks. PyPI, Android, Swift and the integrations stay where they are; the core, the engine and the models do not move (the wasm the same to the bit).
+
+- React: `useAgentInput`, `useCallInput` and `useWakeListener` in `alkove/react` (React 18 and later, optional). The same options as `createAgentInput`, `createCallInput` and `createWakeListener`, plus `enabled` and `on`; they return `status`, `mode`, `error`, `track`, `input` and `resume`. The input opens with the component and closes with it; `strength` and `voiceprint` apply live, any other option opens a new input; React's strict mode never holds the microphone twice. Marked `'use client'` for Next.js. The [React guide](https://alkove.ai/docs/guides/react/), and two apps in `examples`: `next-agent` (Next.js) and `vite-wake` (Vite).
 
 ## 0.4.1 (2026-11-03)
 
