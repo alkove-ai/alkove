@@ -1,6 +1,8 @@
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { build } from 'esbuild'
+
 import { startServer } from './server'
 
 const pkg = join(import.meta.dirname, '../..')
@@ -14,6 +16,15 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const snap = join(pkg, '.cache/browser', String(process.pid))
   mkdirSync(snap, { recursive: true })
   cpSync(dist, join(snap, 'dist'), { recursive: true })
+  // React for the hooks' page, one ESM file: dist/react.js finds it through the page's import map
+  await build({
+    stdin: { contents: "import * as R from 'react'; export default R; export const { createElement, StrictMode, useCallback, useEffect, useRef, useState } = R; export { createRoot } from 'react-dom/client'", resolveDir: pkg },
+    bundle: true,
+    format: 'esm',
+    outfile: join(snap, 'dist/react-vendor.js'),
+    define: { 'process.env.NODE_ENV': '"development"' },
+    logLevel: 'warning',
+  })
   const { origin, server } = await startServer({ dist: join(snap, 'dist'), models, fixtures: join(pkg, 'test/fixtures'), pages: join(import.meta.dirname, 'pages') })
   process.env.ALKOVE_ORIGIN = origin
   process.env.ALKOVE_DIST = join(snap, 'dist')

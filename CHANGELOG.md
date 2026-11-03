@@ -2,6 +2,10 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
+## Unreleased
+
+- React: `useAgentInput`, `useCallInput` and `useWakeListener` in `alkove/react` (React 18 and later, optional). The same options as `createAgentInput`, `createCallInput` and `createWakeListener`, plus `enabled` and `on`; they return `status`, `mode`, `error`, `track`, `input` and `resume`. The input opens with the component and closes with it; `strength` and `voiceprint` apply live, any other option opens a new input; React's strict mode never holds the microphone twice. Marked `'use client'` for Next.js.
+
 ## 0.4.1 (2026-11-03)
 
 The Swift package arrives and the Android library moves to 0.4.1; npm and PyPI stay at 0.4.0, unchanged (the same core, the web's wasm the same to the bit), and so do the integrations.

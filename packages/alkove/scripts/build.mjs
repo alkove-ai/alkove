@@ -54,19 +54,21 @@ const assets = {
 }
 await build({
   ...common,
-  entryPoints: [join(root, 'src/index.ts')],
+  entryPoints: [join(root, 'src/index.ts'), join(root, 'src/react.ts')],
   outdir: dist,
   splitting: true,
   platform: 'neutral',
-  external: ['node:*', 'module', 'worker_threads'],
+  external: ['node:*', 'module', 'worker_threads', 'react'],
   // next to alkove-engine.wasm, which the runtime finds through its own module URL
   chunkNames: '[name]-[hash]',
   plugins: [assets],
 })
 await build({ ...common, entryPoints: [join(root, 'src/cli.ts')], outfile: join(dist, 'cli.js'), platform: 'node', banner: { js: '#!/usr/bin/env node' } })
 copyFileSync(wasm, join(dist, 'alkove-engine.wasm'))
+// esbuild drops module directives: Next.js needs it first in the file to run the hooks on the client
+writeFileSync(join(dist, 'react.js'), `'use client';\n${readFileSync(join(dist, 'react.js'), 'utf8')}`)
 
 execFileSync('npx', ['tsc', '-p', 'tsconfig.build.json'], { cwd: root, stdio: 'inherit' })
 
 const kb = (p) => `${(readFileSync(p).length / 1024).toFixed(0)} KB`
-console.log(`index.js ${kb(join(dist, 'index.js'))}, worker ${kb(join(dist, 'alkove-worker.js'))}, worklet ${kb(join(dist, 'alkove-worklet.js'))}, wasm ${kb(join(dist, 'alkove-engine.wasm'))}`)
+console.log(`index.js ${kb(join(dist, 'index.js'))}, react.js ${kb(join(dist, 'react.js'))}, worker ${kb(join(dist, 'alkove-worker.js'))}, worklet ${kb(join(dist, 'alkove-worklet.js'))}, wasm ${kb(join(dist, 'alkove-engine.wasm'))}`)

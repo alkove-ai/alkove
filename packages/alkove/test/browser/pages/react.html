@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>alkove/react</title>
+<link rel="icon" href="data:,">
+<script type="importmap">{ "imports": { "react": "/dist/react-vendor.js" } }</script>
+<div id="root"></div>
+<script type="module">
+  import * as lib from '/browser/lib.js'
+  import * as React from '/dist/react-vendor.js'
+  import * as hooks from '/dist/react.js'
+  window.lib = lib
+  window.React = React
+  window.hooks = hooks
+  window.libReady = true
+</script>

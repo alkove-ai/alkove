@@ -79,6 +79,6 @@ Creating an input fails only when there is no sound at all: no permission, no mi
 ## Next steps
 
 1. [Install](/docs/start/install/) the package and check the browser.
-2. Follow the quick start for your use: [call](/docs/start/call/), [voice agent](/docs/start/agent/), [wake word](/docs/start/wake-word/) or [files](/docs/start/files/).
+2. Follow the quick start for your use: [call](/docs/start/call/), [voice agent](/docs/start/agent/), [wake word](/docs/start/wake-word/) or [files](/docs/start/files/). With React, the [hooks](/docs/guides/react/) wrap the same inputs.
 3. Before production, [self-host the models](/docs/guides/self-hosting/) and set your [Content Security Policy](/docs/guides/csp/).
 4. Read [Privacy](/docs/guides/privacy/) if you store voiceprints: they are biometric data.
