@@ -18,7 +18,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   cpSync(dist, join(snap, 'dist'), { recursive: true })
   // React for the hooks' page, one ESM file: dist/react.js finds it through the page's import map
   await build({
-    stdin: { contents: "import * as R from 'react'; export default R; export const { createElement, StrictMode, useCallback, useEffect, useRef, useState } = R; export { createRoot } from 'react-dom/client'", resolveDir: pkg },
+    stdin: { contents: "import * as R from 'react'; export default R; export const { createElement, StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState } = R; export { createRoot } from 'react-dom/client'", resolveDir: pkg },
     bundle: true,
     format: 'esm',
     outfile: join(snap, 'dist/react-vendor.js'),

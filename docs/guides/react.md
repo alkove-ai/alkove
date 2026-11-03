@@ -6,6 +6,7 @@ sidebar:
 ---
 
 ```tsx
+import { useState } from 'react'
 import { useAgentInput } from 'alkove/react'
 
 function Agent({ ws }: { ws: WebSocket }) {
@@ -36,7 +37,7 @@ The hooks come with the `alkove` package, under `alkove/react`, for React 18 and
 | `status` | `'off'` before the input opens or after it closed, then the input's own: `'starting'`, `'running'`, `'blocked'`, `'interrupted'` |
 | `mode` | `'focus'`, `'focus+print'`, `'spot'`, `'spot+print'` or `'raw'`; `null` while closed |
 | `error` | what kept the input from opening, an [`AlkoveError`](/docs/guides/errors/) such as `mic.denied` or `page.insecure`; `null` otherwise |
-| `track` | the output track, for `RTCPeerConnection.addTrack` or LiveKit; follows `trackchange` |
+| `track` | the output track, for `RTCPeerConnection.addTrack` or LiveKit; follows `trackchange`, which a bound input (`bind()`) does not send: it swaps the sender's track itself |
 | `input` | the input itself once open, for `listen()`, `hold()`, `record()`, `bind()`… |
 | `resume` | to call in a click when `status` is `'blocked'`: the browser kept the audio suspended until a user gesture |
 
@@ -46,13 +47,14 @@ The hooks come with the `alkove` package, under `alkove/react`, for React 18 and
 
 ## Strict mode and Next.js
 
-React's strict mode mounts each component twice in development: the first opening is cancelled, and a new input only opens once the previous one has closed. Two inputs never hold the microphone at once.
+React's strict mode mounts each component twice in development: the first opening is cancelled. Inputs open one after the other, across every hook of the page, a new one once the previous has opened or failed: two inputs never hold the microphone at once, even when a component is mounted again while its input still opens.
 
 `alkove/react` is marked `'use client'`: import it from a client component. Nothing touches the browser until a hook runs.
 
 ## A call
 
 ```tsx
+import { useEffect } from 'react'
 import { useCallInput } from 'alkove/react'
 
 function Call({ pc }: { pc: RTCPeerConnection }) {

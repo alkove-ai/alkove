@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, render, renderHook } from '@testing-library/react'
 import { StrictMode, createElement, type ReactNode } from 'react'
+import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 class Fake {
@@ -53,6 +54,7 @@ class Fake {
 
 let gate: Promise<void> | null = null
 let fail: Error | null = null
+let held: unknown = null
 const calls: string[] = []
 const make = (kind: string) =>
   vi.fn(async (opts: Record<string, unknown>) => {
@@ -60,12 +62,16 @@ const make = (kind: string) =>
     if (gate) await gate
     calls.push(`${kind}:end`)
     if (fail) throw fail
-    return new Fake(opts)
+    const f = new Fake(opts)
+    // as the SDK does: what the input raised while opening comes on the next task
+    if (held) setTimeout(() => f.emit('diag', held), 0)
+    return f
   })
 
 vi.mock('../src/recipes/input', () => ({ createAgentInput: make('agent'), createCallInput: make('call'), createWakeListener: make('wake') }))
 
-const { useAgentInput, useCallInput, useWakeListener, same } = await import('../src/react')
+const { useAgentInput, useCallInput, useWakeListener } = await import('../src/react')
+const { same } = await import('../src/same')
 const input = await import('../src/recipes/input')
 
 const flush = () => act(() => new Promise<void>((r) => setTimeout(r, 0)))
@@ -75,6 +81,7 @@ beforeEach(() => {
   Fake.all = []
   gate = null
   fail = null
+  held = null
   calls.length = 0
   vi.mocked(input.createAgentInput).mockClear()
 })
@@ -194,6 +201,72 @@ describe('alkove/react', () => {
     expect(fn).toHaveBeenCalledWith({ code: 'x' })
     rerender({})
     expect(Fake.all[0]!.listens('diag')).toBe(false)
+  })
+
+  it('a diag the input raised while opening reaches on.diag', async () => {
+    held = { code: 'mic.processed' }
+    const fn = vi.fn()
+    // React's own scheduler, as in an app; the order against the SDK's held events is checked in a browser (react.spec.ts)
+    const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    g.IS_REACT_ACT_ENVIRONMENT = false
+    const root = createRoot(document.createElement('div'))
+    function Agent() {
+      useAgentInput({ on: { diag: fn } })
+      return null
+    }
+    try {
+      root.render(createElement(Agent))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(fn).toHaveBeenCalledWith({ code: 'mic.processed' })
+    } finally {
+      root.unmount()
+      g.IS_REACT_ACT_ENVIRONMENT = true
+    }
+  })
+
+  it('a remount while the previous input opens waits for it: never two inputs at once', async () => {
+    let open!: () => void
+    gate = new Promise((r) => (open = r))
+    const first = renderHook(() => useAgentInput())
+    await flush()
+    first.unmount()
+    const second = renderHook(() => useAgentInput())
+    await flush()
+    expect(calls).toEqual(['agent:start'])
+    gate = null
+    open()
+    await flush()
+    expect(calls).toEqual(['agent:start', 'agent:end', 'agent:start', 'agent:end'])
+    expect(alive()).toEqual([second.result.current.input])
+  })
+
+  it('a structural option and the voiceprint changed together: the new print goes to the new input only', async () => {
+    const p1 = { alkove: 'voiceprint', embedding: [1] }
+    const p2 = { alkove: 'voiceprint', embedding: [2] }
+    const { rerender } = renderHook((p: { near: boolean; print: object }) => useAgentInput({ near: p.near, voiceprint: p.print as never }), { initialProps: { near: true, print: p1 } })
+    await flush()
+    rerender({ near: false, print: p2 })
+    await flush()
+    expect(Fake.all[0]!.prints).toEqual([])
+    expect(Fake.all[1]!.opts.voiceprint).toEqual(p2)
+    expect(Fake.all[1]!.prints).toEqual([])
+  })
+
+  it('strength removed goes back to the default', async () => {
+    const { rerender } = renderHook((p: { strength?: number }) => useCallInput({ strength: p.strength }), { initialProps: { strength: 0.3 } as { strength?: number } })
+    await flush()
+    rerender({})
+    await flush()
+    expect(Fake.all[0]!.strength).toEqual([1])
+  })
+
+  it('switched off after a failed opening: the error goes', async () => {
+    fail = new Error('mic.denied')
+    const { result, rerender } = renderHook(({ enabled }) => useAgentInput({ enabled }), { initialProps: { enabled: true } })
+    await flush()
+    expect(result.current.error).toBe(fail)
+    rerender({ enabled: false })
+    expect(result.current.error).toBeNull()
   })
 
   it('trackchange gives the new track', async () => {

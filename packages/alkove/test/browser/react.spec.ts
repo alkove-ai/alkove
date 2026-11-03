@@ -47,6 +47,28 @@ test.describe('alkove/react', () => {
     expect(r.after).toBe('disposed')
   })
 
+  test('a diag raised while the input opens reaches on.diag', async ({ page }) => {
+    const r: any = await page.evaluate(async () => {
+      const { lib, React, hooks } = window
+      const ctx = new AudioContext({ sampleRate: 48000 })
+      const player = new lib.Player(ctx)
+      const stale = { alkove: 'voiceprint', model: 'timbre-0', source: 'raw', centers: [] }
+      const codes: string[] = []
+      let state: any = null
+      function Agent() {
+        state = hooks.useAgentInput({ stream: player.stream, audioContext: ctx, voiceprint: stale, on: { diag: (d: any) => codes.push(d.code) } })
+        return null
+      }
+      const root = React.createRoot(document.getElementById('root'))
+      root.render(React.createElement(Agent))
+      await lib.until(() => state?.input, 30000, 'input opened')
+      await lib.sleep(300)
+      root.unmount()
+      return codes
+    })
+    expect(r).toContain('voiceprint.reset')
+  })
+
   test('useCallInput gives the output track; enabled: false disposes the input', async ({ page }) => {
     const r: any = await page.evaluate(async () => {
       const { lib, React, hooks } = window
