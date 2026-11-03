@@ -8,12 +8,14 @@ enum Fixtures {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     static let dir = repo.appendingPathComponent("packages/alkove/test/fixtures")
     static let modelDir = repo.appendingPathComponent("packages/alkove/.cache/models")
+    // CI sets it: a missing model there fails the test instead of skipping it
+    static let required = ProcessInfo.processInfo.environment["ALKOVE_MODELS_REQUIRED"] != nil
     static let golden: Value = try! Json.parse(String(contentsOf: dir.appendingPathComponent("core.json"), encoding: .utf8))
 
     // the SDK's test models; the tests are skipped without them
     static func load(_ names: String...) throws -> Models {
         let files = try names.map { try Models.file($0) }
-        try XCTSkipUnless(files.allSatisfy { FileManager.default.fileExists(atPath: modelDir.appendingPathComponent($0).path) }, "no models in packages/alkove/.cache/models")
+        if !required { try XCTSkipUnless(files.allSatisfy { FileManager.default.fileExists(atPath: modelDir.appendingPathComponent($0).path) }, "no models in packages/alkove/.cache/models") }
         return try Models.load(names, directory: modelDir)
     }
 

@@ -1,6 +1,7 @@
 """The integration against the Pipecat classes it plugs into, on the SDK's test files."""
 
 import asyncio
+import os
 import wave
 from pathlib import Path
 
@@ -31,7 +32,8 @@ ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = ROOT / "packages/alkove/test/fixtures"
 MODELS = ROOT / "packages/alkove/.cache/models"
 
-pytestmark = pytest.mark.skipif(not (MODELS / "alkove-focus-1-preview.alk").exists(), reason="the models are not in packages/alkove/.cache/models")
+# CI sets ALKOVE_MODELS_REQUIRED: a missing model there fails the tests instead of skipping them
+pytestmark = pytest.mark.skipif(not (MODELS / "alkove-focus-1-preview.alk").exists() and not os.environ.get("ALKOVE_MODELS_REQUIRED"), reason="the models are not in packages/alkove/.cache/models")
 
 
 @pytest.fixture(scope="module")

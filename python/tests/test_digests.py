@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import os
 import struct
 import wave
 from pathlib import Path
@@ -26,6 +27,8 @@ def load(names):
         return alkove.Models.load(names, dir=MODELS)
     if all(alkove.MANIFEST["models"][n].get("revision") for n in names):
         return alkove.Models.load(names)
+    if os.environ.get("ALKOVE_MODELS_REQUIRED"):
+        pytest.fail("no models, and CI requires them")
     pytest.skip("no models: not in packages/alkove/.cache/models, not on Hugging Face in this version")
 
 

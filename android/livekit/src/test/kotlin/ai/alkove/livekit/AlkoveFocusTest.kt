@@ -17,7 +17,7 @@ class AlkoveFocusTest {
 
     private fun models(): Models {
         val dir = File(repo, "packages/alkove/.cache/models")
-        assumeTrue("no models in packages/alkove/.cache/models", File(dir, "alkove-focus-1-preview.alk").exists())
+        if (System.getenv("ALKOVE_MODELS_REQUIRED") == null) assumeTrue("no models in packages/alkove/.cache/models", File(dir, "alkove-focus-1-preview.alk").exists())
         return Models.load(listOf("focus", "cue"), dir = dir)
     }
 

@@ -71,7 +71,7 @@ final class Box<T>: @unchecked Sendable {
 final class InputTests: XCTestCase {
     override func setUp() async throws {
         let dir = Fixtures.modelDir
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: dir.appendingPathComponent(try Models.file("focus")).path), "no models in packages/alkove/.cache/models")
+        if !Fixtures.required { try XCTSkipUnless(FileManager.default.fileExists(atPath: dir.appendingPathComponent(try Models.file("focus")).path), "no models in packages/alkove/.cache/models") }
         Alkove.loader = { name, _ in try Models.load([name], directory: dir).model(name)! }
     }
 

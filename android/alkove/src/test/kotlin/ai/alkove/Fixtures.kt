@@ -17,6 +17,7 @@ object Fixtures {
     fun load(vararg names: String): Models {
         val local = names.all { File(modelDir, Models.MANIFEST["models"].obj()[it].obj().str("file")).exists() }
         if (local) return Models.load(names.toList(), dir = modelDir)
+        check(System.getenv("ALKOVE_MODELS_REQUIRED") == null) { "no models in packages/alkove/.cache/models, and CI requires them" }
         assumeTrue("no models in packages/alkove/.cache/models", System.getenv("ALKOVE_FETCH") != null)
         return Models.load(names.toList(), cache = File(System.getProperty("java.io.tmpdir"), "alkove-test"))
     }

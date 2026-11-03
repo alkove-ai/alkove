@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+# the tests that need the models fail without them instead of skipping: each job that runs them fetches them first
+env:
+  ALKOVE_MODELS_REQUIRED: 1
+
 jobs:
   # the engine's tests compare its kernels to plain loops, to the bit: passing on every target means the same bits everywhere
   engine:
@@ -70,8 +74,14 @@ jobs:
       - run: corepack enable && pnpm install --frozen-lockfile
       - run: pnpm --filter alkove build
       - run: pnpm --filter alkove check
+      - uses: actions/cache@v4
+        with:
+          path: packages/alkove/.cache/models
+          key: models-${{ hashFiles('crates/core/models.json') }}
+      - run: python3 scripts/fetch-models.py
+      - run: pnpm --filter alkove test
 
-  # the wheels on every target but Intel macOS, which release.yml builds and tests; the digests of the web SDK once the models can be downloaded
+  # the wheels on every target but Intel macOS, which release.yml builds and tests; the digests of the web SDK, the models from Hugging Face
   python:
     strategy:
       matrix:
@@ -110,9 +120,14 @@ jobs:
           manylinux: auto
       - run: pip install python/dist/*.whl "livekit-agents==1.8.10" "pipecat-ai==1.15.0" "wyoming[zeroconf]==1.10.2" pyyaml pytest
       - run: pip install --no-deps -e integrations/livekit -e integrations/pipecat -e integrations/wyoming -e integrations/esphome
+      - uses: actions/cache@v4
+        with:
+          path: packages/alkove/.cache/models
+          key: models-${{ hashFiles('crates/core/models.json') }}
+      - run: python3 scripts/fetch-models.py
       - run: python -m pytest -q integrations/livekit/tests integrations/pipecat/tests integrations/wyoming/tests integrations/esphome/tests
 
-  # the Android library: its binding, its tests on the host JVM (the web's digests once the models can be downloaded), the AARs and the example minified (R8 against the consumer rules)
+  # the Android library: its binding, its tests on the host JVM (the web's digests, on the models fetched from Hugging Face), the AARs and the example minified (R8 against the consumer rules)
   android:
     runs-on: ubuntu-latest
     steps:
@@ -128,6 +143,11 @@ jobs:
       - run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
       - run: cargo clippy --profile android -p alkove-android -p alkove-native --all-targets -- -D warnings
       - run: cargo test -p alkove-android -p alkove-native
+      - uses: actions/cache@v4
+        with:
+          path: packages/alkove/.cache/models
+          key: models-${{ hashFiles('crates/core/models.json') }}
+      - run: python3 scripts/fetch-models.py
       - run: ./gradlew --no-daemon :alkove:testDebugUnitTest :livekit:testDebugUnitTest :alkove:assembleRelease :livekit:assembleRelease :example:assembleRelease
         working-directory: android
 
@@ -140,8 +160,13 @@ jobs:
       - run: cargo clippy --profile ios -p alkove-ios -p alkove-native --all-targets -- -D warnings
       - run: cargo test -p alkove-ios -p alkove-native
       - run: ios/build.sh
+      - uses: actions/cache@v4
+        with:
+          path: packages/alkove/.cache/models
+          key: models-${{ hashFiles('crates/core/models.json') }}
+      - run: python3 scripts/fetch-models.py
       - run: swift test
       - run: swift test
         working-directory: ios/livekit
       - run: xcodebuild build -quiet -project ios/example/AlkoveExample.xcodeproj -scheme AlkoveExample -destination "generic/platform=iOS Simulator" CODE_SIGNING_ALLOWED=NO
-      - run: xcodebuild test -quiet -scheme Alkove -destination "platform=iOS Simulator,name=$(xcrun simctl list devices available | grep -m1 -o 'iPhone [^(]*' | sed 's/ *$//')"
+      - run: TEST_RUNNER_ALKOVE_MODELS_REQUIRED=1 xcodebuild test -quiet -scheme Alkove -destination "platform=iOS Simulator,name=$(xcrun simctl list devices available | grep -m1 -o 'iPhone [^(]*' | sed 's/ *$//')"
