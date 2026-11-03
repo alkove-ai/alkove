@@ -2,15 +2,19 @@
 import XCTest
 
 final class NativeTests: XCTestCase {
-    func testInfo() throws {
-        XCTAssertGreaterThan(try Native.info().count, 1000)
+    func testInfo() {
+        XCTAssertEqual(Alkove.version, "0.4.0")
+        XCTAssertEqual(Models.all, ["focus", "cue", "spot", "timbre", "lex"])
     }
 
     func testErrorsReachSwift() {
-        XCTAssertThrowsError(try Native.jsonParse(Data("{\"a\":".utf8))) { e in
-            let n = e as! NativeError
-            XCTAssertEqual(n.kind, 2)
-            XCTAssertEqual(n.message, "JSON: unexpected end")
+        XCTAssertThrowsError(try Json.parse("{\"a\":")) { e in
+            XCTAssertEqual(e as? AlkoveError, AlkoveError(.argument, "", "JSON: unexpected end"))
         }
+    }
+
+    func testValuesRoundTrip() throws {
+        let v: Value = .obj([("a", 1.5), ("b", .arr(["x", nil, true])), ("f", .floats([0.25, -1])), ("d", .bytes(Data([1, 2, 3])))])
+        XCTAssertEqual(try Value.decode(v.encoded()), v)
     }
 }

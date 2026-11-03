@@ -141,3 +141,4 @@ jobs:
       - run: cargo test -p alkove-ios -p alkove-native
       - run: ios/build.sh
       - run: swift test
+      - run: xcodebuild test -quiet -scheme Alkove -destination "platform=iOS Simulator,name=$(xcrun simctl list devices available | grep -m1 -o 'iPhone [^(]*' | sed 's/ *$//')"

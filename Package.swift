@@ -11,6 +11,6 @@ let package = Package(
         // ios/build.sh builds it; a release points here to the zip on its GitHub release instead
         .binaryTarget(name: "AlkoveFFI", path: "ios/build/AlkoveFFI.xcframework"),
         .target(name: "Alkove", dependencies: ["AlkoveFFI"], path: "ios/Sources/Alkove"),
-        .testTarget(name: "AlkoveTests", dependencies: ["Alkove"], path: "ios/Tests/AlkoveTests"),
+        .testTarget(name: "AlkoveTests", dependencies: ["Alkove", "AlkoveFFI"], path: "ios/Tests/AlkoveTests"),
     ]
 )
