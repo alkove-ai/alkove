@@ -3,17 +3,19 @@
 import { useAgentInput } from 'alkove/react'
 import { useState } from 'react'
 
-type Item = { kind: 'phrase'; url: string; seconds: number } | { kind: 'turn'; probability: number }
+// `at`: a phrase where it starts, a turn where the user stopped; the turn's decision often comes before its phrase's audio
+type Item = { kind: 'phrase'; at: number; url: string; seconds: number } | { kind: 'turn'; at: number; probability: number }
 
 export function Agent() {
   const [on, setOn] = useState(false)
   const [items, setItems] = useState<Item[]>([])
+  const add = (it: Item) => setItems((l) => [...l, it].sort((a, b) => a.at - b.at))
   const { status, mode, error, resume } = useAgentInput({
     enabled: on,
     on: {
       // what a speech-to-text would get: 16 kHz mono, one segment per sentence
-      utterance: ({ pcm, start, end }) => setItems((l) => [...l, { kind: 'phrase', url: URL.createObjectURL(wav(new Float32Array(pcm))), seconds: end - start }]),
-      turnend: ({ probability }) => setItems((l) => [...l, { kind: 'turn', probability }]),
+      utterance: ({ pcm, start, end }) => add({ kind: 'phrase', at: start, url: URL.createObjectURL(wav(new Float32Array(pcm))), seconds: end - start }),
+      turnend: ({ end, probability }) => add({ kind: 'turn', at: end, probability }),
     },
   })
 

@@ -12,7 +12,7 @@ export function App() {
   const { status, error, resume } = useWakeListener({
     enabled: !!word,
     words: word ? [word] : [],
-    on: { wake: ({ word, score }) => setWakes((l) => [`${new Date().toLocaleTimeString()} « ${word} » ${score.toFixed(2)}`, ...l]) },
+    on: { wake: ({ word }) => setWakes((l) => [`${new Date().toLocaleTimeString()}: « ${word} »`, ...l]) },
   })
 
   // any typed word, no training: Lex turns it into phonemes for Spot
