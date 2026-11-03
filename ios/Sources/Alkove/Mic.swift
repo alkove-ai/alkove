@@ -87,6 +87,8 @@ final class Mic: AudioSource, @unchecked Sendable {
     private var onSilenced: (Bool) -> Void = { _ in }
     private let state = Lock()
     private let restarting = NSLock()
+    // AVAudioEngine posts its configuration change holding its own lock: touching an engine there deadlocks
+    private let control = DispatchQueue(label: "alkove-mic-control")
     private var gone = false
     private var closed = false
 
@@ -141,20 +143,27 @@ final class Mic: AudioSource, @unchecked Sendable {
         let nc = NotificationCenter.default
         // any engine's change: restart() builds a new one each time, the current one is checked
         observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: nil) { [weak self] n in
-            guard let self, let e = n.object as? AVAudioEngine, e === self.state({ self.engine }) else { return }
-            self.restart()
+            guard let self, let e = n.object as? AVAudioEngine else { return }
+            self.control.async { [weak self] in
+                guard let self, e === self.state({ self.engine }), !e.isRunning else { return }
+                self.restart()
+            }
         })
         #if os(iOS)
             observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: s, queue: nil) { [weak self] n in self?.interrupted(n) })
         #endif
     }
 
-    private func start() throws {
-        let e = AVAudioEngine()
+    // the same engine again after a configuration change: enabling voice processing on a new one changes its configuration again
+    private func start(_ reuse: AVAudioEngine? = nil) throws {
+        let e = reuse ?? AVAudioEngine()
         let input = e.inputNode
-        #if os(macOS)
-            if echoCancellation { try? input.setVoiceProcessingEnabled(true) }
-        #endif
+        if reuse == nil, echoCancellation {
+            try? input.setVoiceProcessingEnabled(true)
+            if #available(macOS 14.0, iOS 17.0, *) {
+                input.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
+            }
+        }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw AlkoveError(code: "mic.not-found", message: "No microphone here (\(format)).")
@@ -232,7 +241,7 @@ final class Mic: AudioSource, @unchecked Sendable {
         old.inputNode.removeTap(onBus: 0)
         old.stop()
         do {
-            try start()
+            try start(old)
         } catch {
             state { gone = true }
             state { ring }.wake()
@@ -245,9 +254,11 @@ final class Mic: AudioSource, @unchecked Sendable {
             if type == .began {
                 onSilenced(true)
             } else {
-                try? AVAudioSession.sharedInstance().setActive(true)
-                restart()
-                onSilenced(false)
+                control.async { [weak self] in
+                    try? AVAudioSession.sharedInstance().setActive(true)
+                    self?.restart()
+                    self?.onSilenced(false)
+                }
             }
         }
     #endif
