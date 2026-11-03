@@ -121,6 +121,9 @@ abstract class AlkoveInput internal constructor(
     private var dropped = false
     private var rawRetryAt = 0L
     private var rawFailing = false
+    private var failHops = 0
+
+    internal fun failNextHops(n: Int) = command { failHops = n }
 
     @Volatile
     private var farActive = false
@@ -369,6 +372,10 @@ abstract class AlkoveInput internal constructor(
         val h = if (pipe != 0L) pipe else rawPipe
         try {
             var pending = 0
+            if (failHops > 0 && h != 0L) {
+                failHops--
+                throw IllegalStateException("a hop failed (test)")
+            }
             if (active) {
                 val t0 = System.nanoTime()
                 pending = Native.pipelineStep(pipe, hop, farQuietMs, out)

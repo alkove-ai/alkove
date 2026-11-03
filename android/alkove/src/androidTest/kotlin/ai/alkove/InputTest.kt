@@ -74,6 +74,61 @@ class InputTest {
         assertEquals(end.level, utterance.level)
     }
 
+    private fun modes(events: List<Event>) = events.filterIsInstance<Event.ModeChange>().map { "${it.mode} ${it.reason ?: ""}".trim() }
+
+    private fun codes(events: List<Event>) = events.filterIsInstance<Event.Diag>().map { if (it.code == "worker.error") "worker.error ${it.data["on"]}" else it.code }
+
+    private suspend fun until(what: String, timeout: Long, ok: () -> Boolean) {
+        val end = System.currentTimeMillis() + timeout
+        while (!ok()) {
+            check(System.currentTimeMillis() < end) { "timed out: $what" }
+            kotlinx.coroutines.delay(20)
+        }
+    }
+
+    // the raw pipeline failing after a crash: one crash, one load of the models, not one per hop
+    @Test
+    fun aRawPipelineFailingAfterACrashLoadsTheModelsOnce() = runBlocking {
+        val input = AgentInput.start(context, AgentOptions())
+        val events = java.util.Collections.synchronizedList(ArrayList<Event>())
+        val job = launch { input.events.collect { events.add(it) } }
+        until("the models", 10_000) { input.mode == Mode.FOCUS }
+        input.failNextHops(2)
+        until("raw", 5_000) { input.mode == Mode.RAW }
+        until("the models again", 10_000) { input.mode == Mode.FOCUS }
+        kotlinx.coroutines.delay(300)
+        input.close()
+        job.join()
+        val c = codes(events.toList())
+        assertEquals(c.toString(), 1, c.count { it == "engine.crash" })
+        assertEquals(c.toString(), 1, c.count { it == "worker.error raw" })
+        assertEquals(listOf("FOCUS", "RAW FAILED", "FOCUS"), modes(events.toList()))
+    }
+
+    // the raw pipeline failing again and again while the models wait: built again each second, the agent's audio back before them
+    @Test
+    fun theRawMicrophoneComesBackWhileTheModelsWait() = runBlocking {
+        val bytes = AtomicLong()
+        val input = AgentInput.start(context, AgentOptions()) { bytes.addAndGet(it.size.toLong()) }
+        val events = java.util.Collections.synchronizedList(ArrayList<Event>())
+        val job = launch { input.events.collect { events.add(it) } }
+        until("the models", 10_000) { input.mode == Mode.FOCUS }
+        // the crash, then the raw pipeline at once, 1 s and 2 s later: back at 3 s, the models at 5 s
+        input.failNextHops(4)
+        until("raw", 5_000) { input.mode == Mode.RAW }
+        kotlinx.coroutines.delay(3_300)
+        val before = bytes.get()
+        kotlinx.coroutines.delay(1_000)
+        assertEquals("the models come back 5 s after the crash", Mode.RAW, input.mode)
+        assertTrue("raw float32 at 16 kHz again: ${bytes.get() - before} bytes", bytes.get() - before > 16000 * 4 / 2)
+        until("the models again", 10_000) { input.mode == Mode.FOCUS }
+        input.close()
+        job.join()
+        val c = codes(events.toList())
+        assertEquals(c.toString(), 1, c.count { it == "engine.crash" })
+        assertEquals(c.toString(), 1, c.count { it == "worker.error raw" })
+    }
+
     @Test
     fun wakeListenerStartsAndCloses() = runBlocking {
         val word = compile("/kamij/")
