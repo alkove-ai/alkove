@@ -7,3 +7,4 @@ target/
 ios/build/
 .build/
 .swiftpm/
+ios/livekit/Package.resolved

@@ -24,6 +24,12 @@ public struct Diag: Equatable, Sendable {
     public let code: String
     public let level: String
     public let data: Value
+
+    public init(code: String, level: String, data: Value) {
+        self.code = code
+        self.level = level
+        self.data = data
+    }
 }
 
 /// The user's words from speech start to speech end, with their pre-roll, in the output's format and rate.
