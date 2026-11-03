@@ -165,7 +165,7 @@ abstract class AlkoveInput internal constructor(
     internal fun start() {
         if (!Alkove.supported) return startUnsupported()
         printed = voiceprint != null
-        rawOutput()?.let { rawPipe = Native.pipelineNew(0, 0, 0, Values.encode(mapOf("chain" to null, "output" to it))) }
+        makeRawPipe()
         try {
             mic.open(::silenced)
         } catch (e: Throwable) {
@@ -176,6 +176,11 @@ abstract class AlkoveInput internal constructor(
         setMode(Mode.RAW, RawReason.LOADING)
         thread = Thread(::run, "alkove-mic").apply { start() }
         scope.launch { startModels(MODELS_RETRY_MS) }
+    }
+
+    // the agent's audio while no model runs: loading, failed, crashed
+    private fun makeRawPipe() {
+        if (rawPipe == 0L) rawOutput()?.let { rawPipe = Native.pipelineNew(0, 0, 0, Values.encode(mapOf("chain" to null, "output" to it))) }
     }
 
     private fun startUnsupported() {
@@ -374,6 +379,13 @@ abstract class AlkoveInput internal constructor(
         setMode(Mode.RAW, RawReason.FAILED)
         if (pipe != 0L) Native.pipelineFree(pipe)
         pipe = 0
+        record?.completeExceptionally(AlkoveException("engine.failed", "The engine stopped during the recording."))
+        record = null
+        try {
+            makeRawPipe()
+        } catch (t: Throwable) {
+            failed("raw", t)
+        }
         scope.launch {
             delay(MODELS_RETRY_MS)
             startModels(MODELS_RETRY_MS)
