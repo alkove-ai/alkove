@@ -8,6 +8,8 @@ final class ScriptedSource: AudioSource, @unchecked Sendable {
     private let script: [Float]
     private let lock = Lock()
     private var at = 0
+    // silence at the pace of a clock, as a microphone gives it: a slow machine's sleeps do not slow it down
+    private var due = 0.0
     private var closed = false
     private var lose: Int?
     var ready: () -> Bool = { true }
@@ -40,7 +42,9 @@ final class ScriptedSource: AudioSource, @unchecked Sendable {
             if !ready() || start >= script.count {
                 for i in 0 ..< hop.count { hop[i] = 0 }
                 if start == 0 { lock { idleHops += 1 } }
-                Thread.sleep(forTimeInterval: 0.016)
+                let now = Date().timeIntervalSinceReferenceDate
+                due = max(due, now - 0.2) + Double(hop.count) / 16000
+                if due > now { Thread.sleep(forTimeInterval: due - now) }
                 return hop.count
             }
             for i in 0 ..< hop.count { hop[i] = start + i < script.count ? script[start + i] : 0 }
