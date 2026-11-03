@@ -1,0 +1,19 @@
+[package]
+name = "alkove-ios"
+description = "The Swift package of Alkove: the core and the engine behind a C ABI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "alkove"
+crate-type = ["staticlib", "rlib"]
+doctest = false
+
+[dependencies]
+alkove-core = { path = "../../crates/core" }
+alkove-engine = { path = "../../crates/engine" }
+alkove-json = { path = "../../crates/json" }

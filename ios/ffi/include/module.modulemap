@@ -1,0 +1,4 @@
+module AlkoveFFI {
+    header "alkove.h"
+    export *
+}
