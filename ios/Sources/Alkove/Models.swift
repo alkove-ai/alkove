@@ -14,7 +14,7 @@ public final class Model: @unchecked Sendable {
 }
 
 /// Bytes downloaded so far, out of `total`.
-public struct Progress: Equatable, Sendable {
+public struct DownloadProgress: Equatable, Sendable {
     public let loaded: Int
     public let total: Int
 }
@@ -113,7 +113,7 @@ public final class Models: @unchecked Sendable {
     }
 
     /// The models from the cache, downloaded there first from Hugging Face at this version's revision (or `baseURL`) when missing.
-    public static func load(_ names: [String] = ["focus", "cue"], cache: URL = cacheDirectory, download: Bool = true, baseURL: URL? = nil, progress: (@Sendable (Progress) -> Void)? = nil) async throws -> Models {
+    public static func load(_ names: [String] = ["focus", "cue"], cache: URL = cacheDirectory, download: Bool = true, baseURL: URL? = nil, progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> Models {
         let paths = try await fetch(names, cache: cache, download: download, baseURL: baseURL, progress: progress)
         var loaded = [String: Model]()
         for n in names {
@@ -132,7 +132,7 @@ public final class Models: @unchecked Sendable {
 
     /// Downloads the models into `cache` once, checked by their sha256, and gives their files; `download: false` only reads the cache.
     @discardableResult
-    public static func fetch(_ names: [String], cache: URL = cacheDirectory, download: Bool = true, baseURL: URL? = nil, progress: (@Sendable (Progress) -> Void)? = nil) async throws -> [String: URL] {
+    public static func fetch(_ names: [String], cache: URL = cacheDirectory, download: Bool = true, baseURL: URL? = nil, progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> [String: URL] {
         let fm = FileManager.default
         let missing = try names.filter { !fm.fileExists(atPath: try path(cache, $0).path) }
         let total = try missing.reduce(0) { $0 + Int(try spec($1)["bytes"]?.num ?? 0) }
@@ -156,7 +156,7 @@ public final class Models: @unchecked Sendable {
         return out
     }
 
-    private static func get(_ url: URL, name: String, before: Int, total: Int, progress: (@Sendable (Progress) -> Void)?) async throws -> Data {
+    private static func get(_ url: URL, name: String, before: Int, total: Int, progress: (@Sendable (DownloadProgress) -> Void)?) async throws -> Data {
         do {
             let (bytes, response) = try await URLSession.shared.bytes(from: url)
             if let h = response as? HTTPURLResponse, !(200 ..< 300).contains(h.statusCode) {
@@ -171,11 +171,11 @@ public final class Models: @unchecked Sendable {
                 if chunk.count == 64 * 1024 {
                     data.append(contentsOf: chunk)
                     chunk.removeAll(keepingCapacity: true)
-                    progress?(Progress(loaded: before + data.count, total: total))
+                    progress?(DownloadProgress(loaded: before + data.count, total: total))
                 }
             }
             data.append(contentsOf: chunk)
-            progress?(Progress(loaded: before + data.count, total: total))
+            progress?(DownloadProgress(loaded: before + data.count, total: total))
             return data
         } catch let e as AlkoveError {
             throw e
