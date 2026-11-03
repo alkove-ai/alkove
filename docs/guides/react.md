@@ -74,10 +74,22 @@ An input opened again, after an option changed, comes as a new `input`: the effe
 ## A wake word
 
 ```tsx
+import { Spot, type Word } from 'alkove'
 import { useWakeListener } from 'alkove/react'
+import { useEffect, useState } from 'react'
 
 function Wake({ onWake }: { onWake: () => void }) {
-  useWakeListener({ words: ['hey nova'], on: { wake: onWake } })
+  const [word, setWord] = useState<Word | null>(null)
+  useEffect(() => {
+    Spot.compile('Hey Nova', { lang: 'en' }).then(setWord)
+  }, [])
+  useWakeListener({ enabled: !!word, words: word ? [word] : [], on: { wake: onWake } })
   return null
 }
 ```
+
+`words` takes compiled words, as [`createWakeListener`](/docs/start/wake-word/) does: a `Word` from `Spot.compile`, or its JSON saved earlier.
+
+## Examples
+
+Two apps in the repository, [`examples/next-agent`](https://github.com/alkove-ai/alkove/tree/main/examples/next-agent) (Next.js, `useAgentInput`: each sentence back as a clip, the ends of turns) and [`examples/vite-wake`](https://github.com/alkove-ai/alkove/tree/main/examples/vite-wake) (Vite, `useWakeListener` on a word typed in the page).

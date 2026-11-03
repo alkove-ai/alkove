@@ -56,6 +56,7 @@ jobs:
       - run: corepack enable && pnpm install --frozen-lockfile
       - run: pnpm --filter alkove build
       - run: pnpm --filter alkove check
+      - run: pnpm --filter "./examples/*" build
       - uses: actions/cache@v4
         with:
           path: packages/alkove/.cache/models
