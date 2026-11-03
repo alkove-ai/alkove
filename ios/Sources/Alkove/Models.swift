@@ -33,6 +33,8 @@ public final class Models: @unchecked Sendable {
 
     func ptr(_ name: String) -> OpaquePointer? { loaded[name]?.handle.ptr }
 
+    func model(_ name: String) -> Model? { loaded[name] }
+
     func need(_ names: String...) throws {
         let missing = names.filter { loaded[$0] == nil }
         if !missing.isEmpty {
