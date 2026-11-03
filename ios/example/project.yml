@@ -26,6 +26,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.alkove.example
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
         CODE_SIGN_STYLE: Automatic
   AlkoveExampleUITests:
     type: bundle.ui-testing
