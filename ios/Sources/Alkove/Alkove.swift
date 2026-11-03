@@ -17,7 +17,7 @@ public enum Alkove {
         try await Models.load([name], baseURL: base).model(name)!
     }
 
-    private static let shared = SharedModels()
+    static let shared = SharedModels()
 
     /// The models the real-time inputs share in this process: loaded once, from the cache or Hugging Face (`baseURL` for your own host).
     public static func models(_ names: [String], baseURL: URL? = nil) async throws -> Models {
@@ -38,6 +38,8 @@ public enum Alkove {
 // each model loaded once per process, the ones still loading shared by whoever waits for them; a failed load is tried again by the next caller
 actor SharedModels {
     private var tasks = [String: Task<Model, Error>]()
+
+    func clear() { tasks.removeAll() }
 
     func get(_ name: String, _ base: URL?) async throws -> Model {
         let t = tasks[name] ?? Task { try await Alkove.loader(name, base) }

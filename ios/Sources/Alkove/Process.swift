@@ -329,6 +329,14 @@ public final class Resampler: @unchecked Sendable {
         handle = try Handle(Native.call { alk_resampler_new(Double(inRate), Double(outRate), aligned, $0) }) { alk_resampler_free($0) }
     }
 
+    // the samples ready, without a copy: valid only inside `out`
+    func push(_ pcm: UnsafeBufferPointer<Float>, _ out: (UnsafeBufferPointer<Float>) -> Void) {
+        lock {
+            var len = 0
+            if let p = try? Native.call({ alk_resampler_push(handle.ptr, pcm.baseAddress, pcm.count, &len, $0) }) { out(UnsafeBufferPointer(start: p, count: len)) }
+        }
+    }
+
     /// Samples at `inRate`, any length; the ones ready at `outRate`.
     public func push(_ pcm: [Float]) throws -> [Float] {
         try lock {

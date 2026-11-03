@@ -77,11 +77,16 @@ final class Mic: AudioSource, @unchecked Sendable {
     private var resampler: Resampler?
     private var hwRate = 0.0
     private var chunk = [Float](repeating: 0, count: 2048)
-    private var pending = [Float]()
+    // the 16 kHz samples not yet in a hop, from pendStart
+    private var pend = [Float](repeating: 0, count: 16384)
+    private var pendStart = 0
+    private var pendCount = 0
     private var observers = [NSObjectProtocol]()
     private var onSilenced: (Bool) -> Void = { _ in }
     private let state = Lock()
+    private let restarting = NSLock()
     private var gone = false
+    private var closed = false
 
     init(echoCancellation: Bool, rate: Int = Alkove.rate) {
         self.echoCancellation = echoCancellation
@@ -104,8 +109,21 @@ final class Mic: AudioSource, @unchecked Sendable {
         #endif
     }
 
+    private static var denied: Bool {
+        #if os(iOS)
+            AVAudioSession.sharedInstance().recordPermission == .denied
+        #else
+            [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .audio))
+        #endif
+    }
+
     func open(_ onSilenced: @escaping (Bool) -> Void) throws {
+        if Mic.denied { throw AlkoveError(code: "mic.denied", message: "The microphone is not allowed: the user withdrew it.") }
         self.onSilenced = onSilenced
+        state {
+            closed = false
+            gone = false
+        }
         #if os(iOS)
             let s = AVAudioSession.sharedInstance()
             do {
@@ -116,11 +134,17 @@ final class Mic: AudioSource, @unchecked Sendable {
             } catch {
                 throw AlkoveError(code: "mic.busy", message: "The audio session could not start: \(error.localizedDescription)")
             }
-            let nc = NotificationCenter.default
-            observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: s, queue: nil) { [weak self] n in self?.interrupted(n) })
         #endif
         try start()
-        observers.append(NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in self?.restart() })
+        let nc = NotificationCenter.default
+        // any engine's change: restart() builds a new one each time, the current one is checked
+        observers.append(nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: nil) { [weak self] n in
+            guard let self, let e = n.object as? AVAudioEngine, e === self.state({ self.engine }) else { return }
+            self.restart()
+        })
+        #if os(iOS)
+            observers.append(nc.addObserver(forName: AVAudioSession.interruptionNotification, object: s, queue: nil) { [weak self] n in self?.interrupted(n) })
+        #endif
     }
 
     private func start() throws {
@@ -158,30 +182,51 @@ final class Mic: AudioSource, @unchecked Sendable {
             input.removeTap(onBus: 0)
             throw AlkoveError(code: "mic.busy", message: "The microphone could not start: \(error.localizedDescription)")
         }
-        attach(r, rate: format.sampleRate, engine: e)
+        do {
+            if try !attach(r, rate: format.sampleRate, engine: e) {
+                input.removeTap(onBus: 0)
+                e.stop()
+            }
+        } catch {
+            input.removeTap(onBus: 0)
+            e.stop()
+            throw error
+        }
     }
 
-    // the ring the tap fills at the hardware's rate; a new rate gets a new resampler
-    func attach(_ r: Ring, rate hw: Double, engine e: AVAudioEngine? = nil) {
-        state {
+    // the ring the tap fills at the hardware's rate; a new rate gets a new resampler; false once closed
+    @discardableResult
+    func attach(_ r: Ring, rate hw: Double, engine e: AVAudioEngine? = nil) throws -> Bool {
+        let rs = hw == Double(rate) ? nil : try? Resampler(from: Int(hw), to: rate)
+        if hw != Double(rate), rs == nil || hw != hw.rounded() {
+            throw AlkoveError(code: "mic.not-found", message: "No way from the microphone's \(hw) Hz to \(rate) Hz.")
+        }
+        return state {
+            if closed { return false }
             engine = e
             ring = r
             gone = false
             if hwRate != hw {
                 hwRate = hw
-                resampler = Int(hw) == rate ? nil : try? Resampler(from: Int(hw), to: rate)
+                resampler = rs
             }
+            return true
         }
     }
 
     // a route or format change stops the engine: started again in place, the hops go on
     private func restart() {
-        state { engine }?.inputNode.removeTap(onBus: 0)
-        state { engine }?.stop()
+        restarting.lock()
+        defer { restarting.unlock() }
+        let old = state { closed ? nil : engine }
+        guard let old else { return }
+        old.inputNode.removeTap(onBus: 0)
+        old.stop()
         do {
             try start()
         } catch {
             state { gone = true }
+            state { ring }.wake()
         }
     }
 
@@ -198,41 +243,54 @@ final class Mic: AudioSource, @unchecked Sendable {
         }
     #endif
 
-    func read(_ hop: UnsafeMutableBufferPointer<Float>) -> Int {
-        while pending.count < hop.count {
-            if state({ gone }) { return -1 }
-            let r = state { ring }
-            let n = r.take(into: &chunk, timeout: 2)
-            if n == 0 {
-                // two seconds without a sample: the microphone is held by a call, or gone; the input waits on
-                continue
+    private func append(_ x: UnsafeBufferPointer<Float>) {
+        if pendStart + pendCount + x.count > pend.count {
+            pend.withUnsafeMutableBufferPointer { p in
+                for i in 0 ..< pendCount { p[i] = p[pendStart + i] }
             }
-            if let rs = state({ resampler }) {
-                pending += (try? rs.push(Array(chunk[..<n]))) ?? []
-            } else {
-                pending += chunk[..<n]
+            pendStart = 0
+            if pendCount + x.count > pend.count { pend += [Float](repeating: 0, count: pendCount + x.count - pend.count) }
+        }
+        for i in 0 ..< x.count { pend[pendStart + pendCount + i] = x[i] }
+        pendCount += x.count
+    }
+
+    func read(_ hop: UnsafeMutableBufferPointer<Float>) -> Int {
+        while pendCount < hop.count {
+            if state({ gone }) { return -1 }
+            let (r, rs) = state { (ring, resampler) }
+            // up to two seconds without a sample: a call holds the microphone, or it is gone; the input waits on
+            let n = r.take(into: &chunk, timeout: 2)
+            if n == 0 { continue }
+            chunk.withUnsafeBufferPointer { c in
+                let x = UnsafeBufferPointer(rebasing: c[..<n])
+                if let rs { rs.push(x, append) } else { append(x) }
             }
         }
-        for i in 0 ..< hop.count { hop[i] = pending[i] }
-        pending.removeFirst(hop.count)
+        for i in 0 ..< hop.count { hop[i] = pend[pendStart + i] }
+        pendStart += hop.count
+        pendCount -= hop.count
         return hop.count
     }
 
     func backlogMs() -> Double? {
         let (r, hw) = state { (ring, hwRate) }
         guard hw > 0 else { return nil }
-        return 1000 * (Double(r.filled) / hw + Double(pending.count) / Double(rate))
+        return 1000 * (Double(r.filled) / hw + Double(pendCount) / Double(rate))
     }
 
     func close() {
         for o in observers { NotificationCenter.default.removeObserver(o) }
         observers.removeAll()
         let (e, r) = state { () -> (AVAudioEngine?, Ring) in
+            closed = true
             gone = true
             defer { engine = nil }
             return (engine, ring)
         }
         r.wake()
+        restarting.lock()
+        restarting.unlock()
         e?.inputNode.removeTap(onBus: 0)
         e?.stop()
         #if os(iOS)

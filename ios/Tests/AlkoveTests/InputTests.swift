@@ -309,4 +309,55 @@ final class InputTests: XCTestCase {
         XCTAssertTrue(out[..<lead].allSatisfy { $0 == 0 })
         XCTAssertEqual(Array(out[lead...]), Array(ref[..<(out.count - lead)]))
     }
+
+    // a crash in the core: raw audio to the agent at once, the recording under way failed, the models again 5 s later
+    func testACrashSendsTheRawMicrophoneAndFailsTheRecording() async throws {
+        let bytes = Box(0)
+        let input = try AgentInput.start(AgentOptions(), source: ScriptedSource([]), onAudio: { c in bytes.update { $0 += c.count } })
+        let (events, task) = collect(input)
+        wait("the models") { input.mode == .focus }
+        let recording = Task { try await input.record(seconds: 5) }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        input.failNextHop()
+        wait("raw") { input.mode == .raw }
+        do {
+            _ = try await recording.value
+            XCTFail("the recording went on")
+        } catch let e as AlkoveError {
+            XCTAssertEqual(e.code, "engine.failed")
+        }
+        let before = bytes.value
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        XCTAssertGreaterThan(bytes.value - before, 16000 * 4 / 2, "raw float32 at 16 kHz while the models wait")
+        wait("the models again", timeout: 10) { input.mode == .focus }
+        input.close()
+        task.cancel()
+        let modes = events.value.compactMap { if case let .mode(m, r) = $0 { return "\(m) \(r?.rawValue ?? "")" } else { return nil } }
+        XCTAssertEqual(modes, ["focus ", "raw failed", "focus "])
+    }
+
+    // closed while Timbre loads: no coach made after the one close() freed
+    func testAnInputClosedWhileTimbreLoadsMakesNoCoach() async throws {
+        let dir = Fixtures.modelDir
+        await Alkove.shared.clear()
+        Alkove.loader = { name, _ in
+            if name == "timbre" { try await Task.sleep(nanoseconds: 800_000_000) }
+            return try Models.load([name], directory: dir).model(name)!
+        }
+        let input = try AgentInput.start(AgentOptions(learn: true, farEnd: true), source: ScriptedSource([]), onAudio: nil)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        input.close()
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertFalse(input.hasCoach)
+        await Alkove.shared.clear()
+    }
+
+    func testAMicrophoneRateWithNoWayTo16kHz() {
+        XCTAssertThrowsError(try Mic(echoCancellation: false).attach(Ring(capacity: 4), rate: 0)) { XCTAssertEqual(($0 as! AlkoveError).code, "mic.not-found") }
+        XCTAssertNoThrow(try Mic(echoCancellation: false).attach(Ring(capacity: 4), rate: 44100))
+    }
+
+    func testANameTwiceLoadsOnce() throws {
+        XCTAssertEqual(try Models.load(["cue", "cue"], directory: Fixtures.modelDir).names, ["cue"])
+    }
 }

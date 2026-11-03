@@ -111,7 +111,9 @@ public final class Models: @unchecked Sendable {
 
     /// The .alk files of a folder (the app's bundle, a folder it downloaded), checked against their sha256.
     public static func load(_ names: [String], directory: URL) throws -> Models {
-        try load(names, files: Dictionary(uniqueKeysWithValues: names.map { n in (n, try Data(contentsOf: directory.appendingPathComponent(try file(n)))) }))
+        var files = [String: Data]()
+        for n in names where files[n] == nil { files[n] = try Data(contentsOf: directory.appendingPathComponent(try file(n))) }
+        return try load(names, files: files)
     }
 
     /// The models from the cache, downloaded there first from Hugging Face at this version's revision (or `baseURL`) when missing.
@@ -159,30 +161,56 @@ public final class Models: @unchecked Sendable {
     }
 
     private static func get(_ url: URL, name: String, before: Int, total: Int, progress: (@Sendable (DownloadProgress) -> Void)?) async throws -> Data {
+        let d = Download { progress?(DownloadProgress(loaded: before + $0, total: total)) }
+        let session = URLSession(configuration: .ephemeral, delegate: d, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
         do {
-            let (bytes, response) = try await URLSession.shared.bytes(from: url)
-            if let h = response as? HTTPURLResponse, !(200 ..< 300).contains(h.statusCode) {
-                throw AlkoveError(code: "models.fetch", message: "HTTP \(h.statusCode): \(url)")
-            }
-            var data = Data()
-            data.reserveCapacity(Int(response.expectedContentLength > 0 ? response.expectedContentLength : 0))
-            var chunk = [UInt8]()
-            chunk.reserveCapacity(64 * 1024)
-            for try await b in bytes {
-                chunk.append(b)
-                if chunk.count == 64 * 1024 {
-                    data.append(contentsOf: chunk)
-                    chunk.removeAll(keepingCapacity: true)
-                    progress?(DownloadProgress(loaded: before + data.count, total: total))
-                }
-            }
-            data.append(contentsOf: chunk)
-            progress?(DownloadProgress(loaded: before + data.count, total: total))
+            let (data, status) = try await d.run(session.dataTask(with: url))
+            if !(200 ..< 300).contains(status) { throw AlkoveError(code: "models.fetch", message: "HTTP \(status): \(url)") }
             return data
         } catch let e as AlkoveError {
             throw e
         } catch {
             throw AlkoveError(code: "models.fetch", message: "\(name): \(error.localizedDescription)")
         }
+    }
+}
+
+// a download in blocks as the network gives them, its progress counted on the way
+private final class Download: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let onProgress: (Int) -> Void
+    private var data = Data()
+    private var status = 0
+    private var done: CheckedContinuation<(Data, Int), Error>?
+
+    init(_ onProgress: @escaping (Int) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func run(_ task: URLSessionDataTask) async throws -> (Data, Int) {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { c in
+                done = c
+                task.resume()
+            }
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    func urlSession(_: URLSession, dataTask _: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        status = (response as? HTTPURLResponse)?.statusCode ?? 200
+        if response.expectedContentLength > 0 { data.reserveCapacity(Int(response.expectedContentLength)) }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_: URLSession, dataTask _: URLSessionDataTask, didReceive d: Data) {
+        data.append(d)
+        onProgress(data.count)
+    }
+
+    func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error { done?.resume(throwing: error) } else { done?.resume(returning: (data, status)) }
+        done = nil
     }
 }

@@ -156,6 +156,10 @@ public class AlkoveInput: @unchecked Sendable {
     private var record: CheckedContinuation<Data, Error>?
     private var dropped = false
     private var muted = false
+    private var failNextStep = false
+
+    // the tests' way into crashed()
+    func failNextHop() { lock { failNextStep = true } }
 
     // the background's own: Timbre for the print or the voice of a wake
     private let bg = DispatchQueue(label: "alkove-background", qos: .userInitiated)
@@ -187,9 +191,7 @@ public class AlkoveInput: @unchecked Sendable {
 
     func start() throws {
         printed = voiceprint != nil
-        if let o = rawOutput() {
-            rawPipe = try Native.bytes(Value.obj([("chain", nil), ("output", o)]).encoded()) { p, n in try Native.call { alk_pipeline_new(nil, nil, nil, p, n, $0) } }
-        }
+        try makeRawPipe()
         do {
             try source.open { [weak self] in self?.silenced($0) }
         } catch {
@@ -204,6 +206,12 @@ public class AlkoveInput: @unchecked Sendable {
         t.qualityOfService = .userInteractive
         t.start()
         loading = Task { await startModels(modelsRetryMs) }
+    }
+
+    // the agent's audio while no model runs: loading, failed, crashed
+    private func makeRawPipe() throws {
+        guard rawPipe == nil, let o = rawOutput() else { return }
+        rawPipe = try Native.bytes(Value.obj([("chain", nil), ("output", o)]).encoded()) { p, n in try Native.call { alk_pipeline_new(nil, nil, nil, p, n, $0) } }
     }
 
     func emit(_ e: Event) {
@@ -266,14 +274,20 @@ public class AlkoveInput: @unchecked Sendable {
                 let refValue = reference()?.value ?? .null
                 let start = voiceprint?.value ?? .null
                 let learn = learning()
-                lock { bgReady = true }
-                bg.async { [self] in
-                    timbre = t
-                    coach = try? Native.bytes(Value.obj([("reference", refValue)]).encoded()) { p, n in try Native.call { alk_coach_new(p, n, $0) } }
-                    if learn, let c = coach {
-                        _ = try? Native.bytes(Value.obj([("start", start)]).encoded()) { p, n in try Native.call { alk_coach_learner(c, p, n, $0) } }
+                // queued under the lock close() takes to queue the free: the coach is made before it, or never
+                let made = lock { () -> Bool in
+                    if bgClosed || bgReady { return false }
+                    bgReady = true
+                    bg.async { [self] in
+                        timbre = t
+                        coach = try? Native.bytes(Value.obj([("reference", refValue)]).encoded()) { p, n in try Native.call { alk_coach_new(p, n, $0) } }
+                        if learn, let c = coach {
+                            _ = try? Native.bytes(Value.obj([("start", start)]).encoded()) { p, n in try Native.call { alk_coach_learner(c, p, n, $0) } }
+                        }
                     }
+                    return true
                 }
+                if !made, lock({ bgClosed }) { return }
             }
             let version = lock { settings }
             let opts = pipelineOptions()
@@ -377,6 +391,10 @@ public class AlkoveInput: @unchecked Sendable {
         do {
             var pending: Int32 = 0
             if active, let p = pipe {
+                if lock({ failNextStep }) {
+                    lock { failNextStep = false }
+                    throw AlkoveError(.state, "", "a step failed (test)")
+                }
                 let t0 = DispatchTime.now().uptimeNanoseconds
                 pending = try hopIn.withUnsafeBufferPointer { i in
                     try hopOut.withUnsafeMutableBufferPointer { o in
@@ -401,6 +419,13 @@ public class AlkoveInput: @unchecked Sendable {
         setMode(.raw, .failed)
         if let p = pipe { alk_pipeline_free(p) }
         pipe = nil
+        record?.resume(throwing: AlkoveError(code: "engine.failed", message: "The engine stopped during the recording."))
+        record = nil
+        do {
+            try makeRawPipe()
+        } catch {
+            failed("raw", error)
+        }
         loading = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(modelsRetryMs * 1e6))
             await self?.startModels(modelsRetryMs)
@@ -701,6 +726,8 @@ public class AlkoveInput: @unchecked Sendable {
         }
     }
 
+    var hasCoach: Bool { bg.sync { coach != nil } }
+
     // on the capture thread
     private func applyWords() {
         guard let words = lock({ spotWords }), let p = pipe, let s = lock({ spotModel }) else { return }
@@ -738,11 +765,13 @@ public class AlkoveInput: @unchecked Sendable {
         loading?.cancel()
         source.close()
         if Thread.current.name != "alkove-mic" { _ = done.wait(timeout: .now() + 0.5) }
-        lock { bgClosed = true }
-        bg.async { [self] in
-            if let c = coach { alk_coach_free(c) }
-            coach = nil
-            timbre = nil
+        lock {
+            bgClosed = true
+            bg.async { [self] in
+                if let c = coach { alk_coach_free(c) }
+                coach = nil
+                timbre = nil
+            }
         }
         continuation.finish()
     }

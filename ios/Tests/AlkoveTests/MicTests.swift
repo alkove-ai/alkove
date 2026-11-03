@@ -8,7 +8,7 @@ final class MicTests: XCTestCase {
         let pcm = try resample(Fixtures.wav("mix.wav"), from: 16000, to: 48000)
         let mic = Mic(echoCancellation: false)
         let ring = Ring(capacity: 96000)
-        mic.attach(ring, rate: 48000)
+        try mic.attach(ring, rate: 48000)
         let feeder = Thread {
             var i = 0
             while i < pcm.count {
