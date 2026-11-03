@@ -1,4 +1,4 @@
-//! JSON read and written as JavaScript does, so a word or a print stored on Android is the text the web stores.
+//! JSON read and written as JavaScript does, so a word or a print stored by a native SDK is the text the web stores.
 
 use alkove_core::{Error, Value};
 

@@ -1,0 +1,15 @@
+[package]
+name = "alkove-json"
+description = "JSON read and written as JavaScript does, for the native SDKs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+alkove-core = { path = "../core" }

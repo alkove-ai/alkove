@@ -16,5 +16,6 @@ doctest = false
 [dependencies]
 alkove-core = { path = "../../crates/core" }
 alkove-engine = { path = "../../crates/engine" }
+alkove-json = { path = "../../crates/json" }
 # 0.3.1 re-exports 0.4, which builds proc macros (syn); 0.3.0 has no dependency
 jni-sys = "=0.3.0"

@@ -126,7 +126,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-ndk --version 4.1.2 --locked
       - run: echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-      - run: cargo clippy --profile android -p alkove-android --all-targets -- -D warnings
-      - run: cargo test -p alkove-android
+      - run: cargo clippy --profile android -p alkove-android -p alkove-json --all-targets -- -D warnings
+      - run: cargo test -p alkove-android -p alkove-json
       - run: ./gradlew --no-daemon :alkove:testDebugUnitTest :livekit:testDebugUnitTest :alkove:assembleRelease :livekit:assembleRelease :example:assembleRelease
         working-directory: android

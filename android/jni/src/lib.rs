@@ -3,7 +3,6 @@
 #![allow(non_snake_case, clippy::missing_safety_doc, clippy::too_many_arguments)]
 
 mod env;
-pub mod json;
 
 use std::sync::Arc;
 
@@ -15,6 +14,7 @@ use alkove_core::timbre::{Center, Timbre, Voiceprint};
 use alkove_core::value::obj;
 use alkove_core::{fp, Chain, ChainEvent, ChainOptions, Error, Live, Models, Part, ProcessOptions, Processor, Resampler, SpeechEvent, SpeechParams, SpeechTracker, Value};
 use alkove_engine::Model;
+use alkove_json as json;
 use env::Env;
 use jni_sys::{jboolean, jbyteArray, jclass, jdouble, jdoubleArray, jfloatArray, jint, jlong, JNIEnv};
 
