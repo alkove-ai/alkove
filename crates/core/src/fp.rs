@@ -4,14 +4,21 @@
 pub fn exact<T>(f: impl FnOnce() -> T) -> T {
     let saved = get();
     let ieee = saved & !MASK;
-    if ieee != saved {
-        set(ieee);
+    if ieee == saved {
+        return f();
     }
-    let r = f();
-    if ieee != saved {
-        set(saved);
+    set(ieee);
+    // put back even when `f` panics: the native bindings catch the panic and the caller's thread goes on
+    let _restore = Restore(saved);
+    f()
+}
+
+struct Restore(u64);
+
+impl Drop for Restore {
+    fn drop(&mut self) {
+        set(self.0);
     }
-    r
 }
 
 // MXCSR: flush to zero and denormals are zero, then rounding
@@ -83,6 +90,17 @@ mod tests {
         set(saved);
         assert_eq!(flushed, 0.0);
         assert_eq!(kept, f64::MIN_POSITIVE / 2.0);
+        assert_eq!(after & FLUSH, FLUSH);
+    }
+
+    #[test]
+    fn mode_put_back_after_a_panic() {
+        let saved = get();
+        set(saved | FLUSH);
+        let r = std::panic::catch_unwind(|| exact(|| panic!("in the model")));
+        let after = get();
+        set(saved);
+        assert!(r.is_err());
         assert_eq!(after & FLUSH, FLUSH);
     }
 }
