@@ -50,6 +50,7 @@ Each use has one function. Start from the one that matches your app.
 | A voice agent on a server | `pip install alkove`, or a plugin | [Python](/docs/start/python/), [LiveKit Agents](/docs/guides/livekit/), [Pipecat](/docs/guides/pipecat/) |
 | An Android app | `ai.alkove:alkove`, `AgentInput`, `WakeListener` | [Android](/docs/start/android/) |
 | An iOS or macOS app | the `Alkove` Swift package, `AgentInput`, `WakeListener` | [iOS](/docs/start/ios/) |
+| A React Native app | `@alkove/react-native`, `useAgentInput`, `useWakeListener` | [React Native](/docs/start/react-native/) |
 
 A call or agent input can also listen for words behind Focus with `input.spot()`: one microphone, one Focus, no second input.
 
