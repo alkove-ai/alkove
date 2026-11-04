@@ -3,18 +3,20 @@ import { useState } from 'react';
 import { Button, FlatList, SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Agent } from './Agent';
+import { LiveKit } from './LiveKit';
 
 const LANGS: Lang[] = ['en', 'fr', 'es', 'it', 'pt', 'ca', 'ro'];
 
 export default function App() {
-  const [screen, setScreen] = useState<'wake' | 'agent'>('wake');
+  const [screen, setScreen] = useState<'wake' | 'agent' | 'livekit'>('wake');
   return (
     <SafeAreaView style={styles.page}>
       <View style={styles.row}>
         <Button testID="screen-wake" title="Wake word" onPress={() => setScreen('wake')} />
         <Button testID="screen-agent" title="Agent" onPress={() => setScreen('agent')} />
+        <Button testID="screen-livekit" title="LiveKit" onPress={() => setScreen('livekit')} />
       </View>
-      {screen === 'wake' ? <Wake /> : <Agent />}
+      {screen === 'wake' ? <Wake /> : screen === 'agent' ? <Agent /> : <LiveKit />}
     </SafeAreaView>
   );
 }

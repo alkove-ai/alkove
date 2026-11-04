@@ -1,0 +1,22 @@
+# a LiveKit room joined, the microphone published through AlkoveFocus(): Focus processes the mic's frames, then leaves
+appId: ${APP_ID}
+---
+- launchApp:
+    permissions:
+      microphone: allow
+- tapOn:
+    id: "screen-livekit"
+- tapOn:
+    id: "token"
+- inputText: ${TOKEN}
+- tapOn:
+    id: "join"
+- extendedWaitUntil:
+    visible: "connected"
+    timeout: 120000
+- extendedWaitUntil:
+    visible: "focus on the mic.*"
+    timeout: 60000
+- tapOn:
+    id: "leave"
+- assertVisible: "off"

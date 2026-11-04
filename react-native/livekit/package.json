@@ -1,0 +1,86 @@
+{
+  "name": "@alkove/react-native-livekit",
+  "version": "0.1.0",
+  "description": "Focus in LiveKit React Native's microphone path: keeps the user's voice, removes the other voices and the noise. On the device.",
+  "main": "./lib/module/index.js",
+  "types": "./lib/typescript/src/index.d.ts",
+  "exports": {
+    ".": {
+      "alkove-react-native-source": "./src/index.ts",
+      "types": "./lib/typescript/src/index.d.ts",
+      "default": "./lib/module/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "*.podspec",
+    "!android/build",
+    "!ios/build",
+    "!**/__tests__",
+    "!**/.*"
+  ],
+  "scripts": {
+    "prepare": "bob build",
+    "typecheck": "tsc"
+  },
+  "keywords": [
+    "react-native",
+    "livekit",
+    "noise-cancellation",
+    "voice-isolation",
+    "on-device"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alkove-ai/alkove.git",
+    "directory": "react-native/livekit"
+  },
+  "author": "Eddy Bordi <contact@alkove.ai> (https://alkove.ai)",
+  "license": "Apache-2.0",
+  "homepage": "https://alkove.ai",
+  "peerDependencies": {
+    "@alkove/react-native": "*",
+    "@livekit/react-native": ">=3.0.0",
+    "livekit-client": "^2.15.0",
+    "react-native": "*"
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
+    ]
+  },
+  "codegenConfig": {
+    "name": "AlkoveLiveKitSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.alkove.reactnative.livekit"
+    },
+    "ios": {
+      "modulesProvider": {
+        "AlkoveLiveKit": "AlkoveLiveKitModule"
+      }
+    }
+  },
+  "devDependencies": {
+    "@livekit/react-native": "3.1.0",
+    "livekit-client": "2.23.0"
+  }
+}

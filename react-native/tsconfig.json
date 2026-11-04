@@ -2,7 +2,8 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "@alkove/react-native": ["./src/index"]
+      "@alkove/react-native": ["./src/index"],
+      "@alkove/react-native-livekit": ["./livekit/src/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,

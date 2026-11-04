@@ -10,6 +10,10 @@
     "build:ios": "react-native build-ios --mode Debug"
   },
   "dependencies": {
+    "@alkove/react-native-livekit": "workspace:*",
+    "@livekit/react-native": "3.1.0",
+    "@livekit/react-native-webrtc": "150.1.0",
+    "livekit-client": "2.23.0",
     "react": "19.3.0",
     "react-native": "0.88.1"
   },

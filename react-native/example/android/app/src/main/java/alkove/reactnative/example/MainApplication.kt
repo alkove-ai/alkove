@@ -1,6 +1,8 @@
 package alkove.reactnative.example
 
 import android.app.Application
+import com.livekit.reactnative.LiveKitReactNative
+import com.livekit.reactnative.audio.AudioType
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -22,6 +24,7 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    LiveKitReactNative.setup(this, AudioType.CommunicationAudioType())
     loadReactNative(this)
   }
 }
