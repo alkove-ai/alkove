@@ -24,11 +24,16 @@
   }];
 }
 
-- (void)startWake:(double)id words:(NSArray *)words context:(NSString *)context resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
+- (void)start:(double)id kind:(NSString *)kind options:(NSString *)options resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject
 {
-  [_bridge startWake:id words:words context:context done:^(NSString *json, NSString *code, NSString *message) {
+  [_bridge start:id kind:kind options:options done:^(NSString *json, NSString *code, NSString *message) {
     if (json) resolve(json); else reject(code, message, nil);
   }];
+}
+
+- (void)call:(double)id method:(NSString *)method arg:(NSString *)arg
+{
+  [_bridge call:id method:method arg:arg];
 }
 
 - (void)close:(double)id

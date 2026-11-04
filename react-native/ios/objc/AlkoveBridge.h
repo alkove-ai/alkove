@@ -9,7 +9,8 @@ typedef void (^AlkoveDone)(NSString *_Nullable json, NSString *_Nullable code, N
 
 - (instancetype)initWithSend:(void (^)(double id, NSString *type, NSString *json))send;
 - (void)compile:(NSString *)text langs:(NSArray<NSString *> *)langs done:(AlkoveDone)done;
-- (void)startWake:(double)id words:(NSArray<NSString *> *)words context:(NSString *)context done:(AlkoveDone)done;
+- (void)start:(double)id kind:(NSString *)kind options:(NSString *)options done:(AlkoveDone)done;
+- (void)call:(double)id method:(NSString *)method arg:(NSString *)arg;
 - (void)close:(double)id;
 - (void)closeAll;
 

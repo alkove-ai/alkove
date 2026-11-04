@@ -1,6 +1,6 @@
 # @alkove/react-native
 
-Alkove for React Native, on the native SDKs: `ai.alkove:alkove` on Android, the `Alkove` Swift package on iOS. A preview: `Spot.compile` and `useWakeListener` so far.
+Alkove for React Native, on the native SDKs: `ai.alkove:alkove` on Android, the `Alkove` Swift package on iOS. A preview: `Spot.compile`, `useWakeListener` and `useAgentInput` so far, with the options, events and handle of their web counterparts in `alkove/react`.
 
 ```tsx
 import { Spot, useWakeListener } from '@alkove/react-native'
@@ -8,6 +8,19 @@ import { Spot, useWakeListener } from '@alkove/react-native'
 const word = await Spot.compile('Hey Nova', { lang: 'en' })
 useWakeListener({ enabled: !!word, words: word ? [word] : [], on: { wake: () => startListening() } })
 ```
+
+```tsx
+import { useAgentInput } from '@alkove/react-native'
+
+const { status, input } = useAgentInput({
+  enabled: talking,
+  farEnd: true,
+  on: { utterance: ({ pcm }) => transcribe(pcm), turnend: () => agent.reply(), interrupt: () => player.stop() },
+})
+// input?.farEndActive(true) while the agent speaks
+```
+
+`on.audio` streams the continuous audio (32 ms chunks by default) only when the app gives it.
 
 Android apps add the repository the SDK comes from:
 
@@ -18,4 +31,4 @@ allprojects { repositories { maven { url "https://maven.alkove.ai" } } }
 
 iOS apps need `NSMicrophoneUsageDescription` in `Info.plist`. The simulator slice is arm64 only.
 
-The example app is in [`example`](./example): `corepack yarn install`, then `corepack yarn example android` or `ios`. Its end-to-end flow, `example/e2e/wake.yaml`, runs with [Maestro](https://maestro.dev).
+The example app is in [`example`](./example): `corepack yarn install`, then `corepack yarn example android` or `ios`. Its end-to-end flows, `example/e2e/*.yaml`, run with [Maestro](https://maestro.dev).

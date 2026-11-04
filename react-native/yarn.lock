@@ -35,11 +35,13 @@ __metadata:
     "@react-native/babel-preset": "npm:0.88.1"
     "@react-native/jest-preset": "npm:0.88.1"
     "@types/react": "npm:^19.2.0"
+    "@types/react-test-renderer": "npm:^19"
     del-cli: "npm:^8.0.1"
     jest: "npm:^29.7.0"
     react: "npm:19.3.0"
     react-native: "npm:0.88.1"
     react-native-builder-bob: "npm:^0.44.1"
+    react-test-renderer: "npm:19.3.0"
     turbo: "npm:^2.11.10"
     typescript: "npm:^6.0.3"
   peerDependencies:
@@ -2525,7 +2527,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/react@npm:^19.2.0":
+"@types/react-test-renderer@npm:^19":
+  version: 19.3.0
+  resolution: "@types/react-test-renderer@npm:19.3.0"
+  dependencies:
+    "@types/react": "npm:*"
+  checksum: 10c0/37f5588f698a057a33c1f4d5fd28a042f3df7f29a3554ddebb7f9c8ecd3e5fba085e5b12d14b30734c30b51959ef17544650b2a9704d629d0af251f126d8ae73
+  languageName: node
+  linkType: hard
+
+"@types/react@npm:*, @types/react@npm:^19.2.0":
   version: 19.3.0
   resolution: "@types/react@npm:19.3.0"
   dependencies:
@@ -6008,6 +6019,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-is@npm:^19.3.0":
+  version: 19.3.1
+  resolution: "react-is@npm:19.3.1"
+  checksum: 10c0/428e02d986d56f1859c57756084489f6d2900fd686905003c405b32f1168738b78772bfa4bb6c706f5ac821199171522c28bf6434281f524f901459390a19606
+  languageName: node
+  linkType: hard
+
 "react-native-builder-bob@npm:^0.44.1":
   version: 0.44.1
   resolution: "react-native-builder-bob@npm:0.44.1"
@@ -6099,6 +6117,18 @@ __metadata:
   version: 0.14.2
   resolution: "react-refresh@npm:0.14.2"
   checksum: 10c0/875b72ef56b147a131e33f2abd6ec059d1989854b3ff438898e4f9310bfcc73acff709445b7ba843318a953cb9424bcc2c05af2b3d80011cee28f25aef3e2ebb
+  languageName: node
+  linkType: hard
+
+"react-test-renderer@npm:19.3.0":
+  version: 19.3.0
+  resolution: "react-test-renderer@npm:19.3.0"
+  dependencies:
+    react-is: "npm:^19.3.0"
+    scheduler: "npm:^0.28.0"
+  peerDependencies:
+    react: ^19.3.0
+  checksum: 10c0/40b64160bbc42d72e9ab60327cc3646865656f314a28a31a7496460d19a1a1af89c0785573010fe758f2deeca362185cec6304b15e22c4770fde3736f56716fe
   languageName: node
   linkType: hard
 
@@ -6287,7 +6317,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"scheduler@npm:0.28.0":
+"scheduler@npm:0.28.0, scheduler@npm:^0.28.0":
   version: 0.28.0
   resolution: "scheduler@npm:0.28.0"
   checksum: 10c0/783c8e5ce89d41273a02ed6dc0e3d24bd60e05c9e8f7e3adfc6c82e7c69935500d90e343f1ee26d592fc7504e8a2532573c6368def3e93bfe812391fa53efaf4

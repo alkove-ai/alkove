@@ -30,7 +30,27 @@ export interface Diag {
   [key: string]: unknown;
 }
 
+export interface PhraseLevel {
+  voiceDb: number | null;
+  noiseDb: number;
+  refDb: number | null;
+}
+
+export type VoiceprintJSON = Record<string, unknown>;
+
 export interface InputEvents {
+  speechstart: { start: number };
+  speechend: { start: number; end: number; level?: PhraseLevel };
+  speechcancel: { start: number };
+  turn: { pause: number; probability: number; hesitation: number; at: number };
+  turnend: { start: number; end: number; probability: number; hesitation: number; at: number };
+  interruptstart: { start: number };
+  interrupt: { start: number; at: number };
+  interruptcancel: { start: number; end: number };
+  utterance: { pcm: ArrayBuffer; start: number; end: number; level?: PhraseLevel };
+  audio: ArrayBuffer;
+  voiceprint: VoiceprintJSON;
+  learn: { progress: number };
   wake: WakeEvent;
   mode: { mode: Mode; reason?: string };
   status: Status;
@@ -99,10 +119,33 @@ export interface WakeOptions {
   context?: Context;
 }
 
+export interface AgentOptions {
+  voiceprint?: VoiceprintJSON | null;
+  learn?: boolean;
+  farEnd?: boolean;
+  strength?: number;
+  normalize?: boolean;
+  speech?: Partial<{ confidence: number; exitConfidence: number; startSecs: number; stopSecs: number }>;
+  output?: Partial<{ format: 'f32' | 's16'; rate: number; chunkMs: number }>;
+  levels?: boolean;
+  near?: boolean | { gapDb?: number };
+  turn?: boolean | Partial<{ threshold: number; minPause: number; maxPause: number }>;
+  interrupt?: boolean | Partial<{ minDuration: number }>;
+}
+
+// what a running input takes from the app, as the web input's methods
+export interface InputHandle {
+  listen(on: boolean): void;
+  hold(): void;
+  release(): void;
+  farEndActive(on: boolean): void;
+}
+
 export interface InputState {
   status: Status | 'off';
   mode: Mode | null;
   error: Error | null;
+  input: InputHandle | null;
 }
 
 let ids = 0;
@@ -129,23 +172,56 @@ async function micAllowed(): Promise<void> {
 
 const wordJSON = (w: Word | Record<string, unknown> | string) => (typeof w === 'string' ? w : JSON.stringify(w instanceof Word ? w.toJSON() : w));
 
-export function useWakeListener(options: WakeOptions & HookOptions): InputState {
-  const { enabled = true, on, ...rest } = options;
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const B64_INDEX = new Uint8Array(128).map((_, i) => Math.max(0, B64.indexOf(String.fromCharCode(i))));
+
+function bytes(b64: string): ArrayBuffer {
+  const n = b64.length;
+  const pad = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  const out = new Uint8Array((n * 3) / 4 - pad);
+  let o = 0;
+  for (let i = 0; i < n; i += 4) {
+    const v = (B64_INDEX[b64.charCodeAt(i)]! << 18) | (B64_INDEX[b64.charCodeAt(i + 1)]! << 12) | (B64_INDEX[b64.charCodeAt(i + 2)]! << 6) | B64_INDEX[b64.charCodeAt(i + 3)]!;
+    if (o < out.length) out[o++] = v >> 16;
+    if (o < out.length) out[o++] = (v >> 8) & 255;
+    if (o < out.length) out[o++] = v & 255;
+  }
+  return out.buffer;
+}
+
+function decode(type: string, json: string): unknown {
+  const v = JSON.parse(json);
+  if (type === 'audio') return bytes(v);
+  if (type === 'utterance') return { ...v, pcm: bytes(v.pcm) };
+  return v;
+}
+
+const LIVE = ['strength', 'voiceprint'] as const;
+type Live = { strength?: number; voiceprint?: VoiceprintJSON | null };
+
+function useInput(kind: 'wake' | 'agent', options: object & HookOptions, live: readonly (keyof Live)[]): InputState {
+  const { enabled = true, on, ...opts } = options;
+  // the continuous audio only crosses to JS for an app that listens to it
+  const rest = { ...opts, audio: !!on?.audio } as Record<string, unknown> & Live;
   const handlers = useRef(on);
   const latest = useRef(rest);
-  const shape = useRef({ value: rest as object, version: 0 });
-  const version = same(shape.current.value, rest) ? shape.current.version : shape.current.version + 1;
+  const structural = Object.fromEntries(Object.entries(rest).filter(([k]) => !(live as readonly string[]).includes(k)));
+  const shape = useRef({ value: structural as object, version: 0 });
+  const version = same(shape.current.value, structural) ? shape.current.version : shape.current.version + 1;
 
   // refs written once React commits: a render it throws away changes nothing
   useEffect(() => {
     handlers.current = on;
     latest.current = rest;
-    if (version !== shape.current.version) shape.current = { value: rest, version };
+    if (version !== shape.current.version) shape.current = { value: structural, version };
   });
 
   const [status, setStatus] = useState<Status | 'off'>('off');
   const [mode, setMode] = useState<Mode | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [input, setInput] = useState<InputHandle | null>(null);
+  const current = useRef(0);
+  const applied = useRef<Live>({});
 
   useEffect(() => {
     if (!enabled) return;
@@ -161,13 +237,18 @@ export function useWakeListener(options: WakeOptions & HookOptions): InputState 
       const o = latest.current;
       id = ++ids;
       off = listen(id, (e) => {
-        const v = JSON.parse(e.json);
-        if (e.type === 'status') setStatus(v);
-        if (e.type === 'mode') setMode(v.mode);
+        const v = decode(e.type, e.json);
+        if (e.type === 'status') setStatus(v as Status);
+        if (e.type === 'mode') setMode((v as { mode: Mode }).mode);
         (handlers.current?.[e.type as keyof InputEvents] as ((v: unknown) => void) | undefined)?.(v);
       });
-      const r = JSON.parse(await Native.startWake(id, o.words.map(wordJSON), o.context ?? 'pause'));
+      const payload = kind === 'wake' ? { words: (o.words as WakeOptions['words']).map(wordJSON), context: o.context ?? 'pause' } : o;
+      applied.current = { strength: o.strength ?? 1, voiceprint: o.voiceprint ?? null };
+      const r = JSON.parse(await Native.start(id, kind, JSON.stringify(payload)));
       if (cancelled) return;
+      current.current = id;
+      const call = (method: string, arg: unknown = null) => Native.call(id, method, JSON.stringify(arg));
+      setInput({ listen: (on) => call('listen', on), hold: () => call('hold'), release: () => call('release'), farEndActive: (on) => call('farEndActive', on) });
       setStatus(r.status);
       setMode(r.mode);
     });
@@ -180,17 +261,41 @@ export function useWakeListener(options: WakeOptions & HookOptions): InputState 
     });
     return () => {
       cancelled = true;
+      current.current = 0;
       // after its opening: a close sent before the start would leave the input open
       void opening.finally(() => {
         off?.();
         if (id) Native.close(id);
       });
+      setInput(null);
       setStatus('off');
       setMode(null);
       setError(null);
     };
-  }, [enabled, version]);
+  }, [enabled, version, kind]);
 
-  return { status, mode, error };
+  const strength = live.includes('strength') ? rest.strength : undefined;
+  const voiceprint = live.includes('voiceprint') ? rest.voiceprint : undefined;
+  useEffect(() => {
+    const id = current.current;
+    if (!id) return;
+    if (live.includes('strength') && (strength ?? 1) !== applied.current.strength) {
+      applied.current.strength = strength ?? 1;
+      Native.call(id, 'setStrength', JSON.stringify(applied.current.strength));
+    }
+    if (live.includes('voiceprint') && !same(voiceprint ?? null, applied.current.voiceprint ?? null)) {
+      applied.current.voiceprint = voiceprint ?? null;
+      Native.call(id, 'setVoiceprint', JSON.stringify(applied.current.voiceprint));
+    }
+  }, [input, strength, voiceprint, live]);
+
+  return { status, mode, error, input };
 }
 
+export function useWakeListener(options: WakeOptions & HookOptions): InputState {
+  return useInput('wake', options, []);
+}
+
+export function useAgentInput(options: AgentOptions & HookOptions = {}): InputState {
+  return useInput('agent', options, LIVE);
+}

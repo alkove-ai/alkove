@@ -2,9 +2,24 @@ import { Spot, useWakeListener, type Lang, type Word } from '@alkove/react-nativ
 import { useState } from 'react';
 import { Button, FlatList, SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { Agent } from './Agent';
+
 const LANGS: Lang[] = ['en', 'fr', 'es', 'it', 'pt', 'ca', 'ro'];
 
 export default function App() {
+  const [screen, setScreen] = useState<'wake' | 'agent'>('wake');
+  return (
+    <SafeAreaView style={styles.page}>
+      <View style={styles.row}>
+        <Button testID="screen-wake" title="Wake word" onPress={() => setScreen('wake')} />
+        <Button testID="screen-agent" title="Agent" onPress={() => setScreen('agent')} />
+      </View>
+      {screen === 'wake' ? <Wake /> : <Agent />}
+    </SafeAreaView>
+  );
+}
+
+function Wake() {
   const [text, setText] = useState('Hey Nova');
   const [lang, setLang] = useState<Lang>('en');
   const [word, setWord] = useState<Word | null>(null);
@@ -26,7 +41,7 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.page}>
+    <>
       <Text style={styles.title}>Wake word</Text>
       <TextInput testID="word" style={styles.input} value={text} onChangeText={setText} />
       <View style={styles.row}>
@@ -39,13 +54,13 @@ export default function App() {
       {word?.warnings.map((w) => <Text key={w.code}>{w.message}</Text>)}
       {(error || failure) && <Text testID="error">{error ? `${(error as { code?: string }).code ?? ''} ${error.message}` : failure}</Text>}
       <FlatList testID="wakes" data={wakes} keyExtractor={(w, i) => `${i}${w}`} renderItem={({ item }) => <Text>{item}</Text>} />
-    </SafeAreaView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, padding: 16, gap: 8 },
-  title: { fontSize: 22, fontWeight: '600', marginTop: 32 },
+  page: { flex: 1, padding: 16, paddingTop: 48, gap: 8 },
+  title: { fontSize: 22, fontWeight: '600' },
   input: { borderWidth: 1, borderColor: '#999', padding: 8, fontSize: 16 },
   row: { flexDirection: 'row', flexWrap: 'wrap' },
 });

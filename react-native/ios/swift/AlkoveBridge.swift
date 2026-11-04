@@ -19,27 +19,58 @@ import Alkove
       do {
         let word = try Lex(models: try await Alkove.models(["lex"])).compile(text, lang: langs)
         let warnings = word.warnings.map { ["code": $0.code, "message": $0.message] }
-        done(try Self.json(["word": try JSONSerialization.jsonObject(with: Data(word.toJson().utf8)), "warnings": warnings]), nil, nil)
+        done(try Self.json(["word": try Self.parse(word.toJson()), "warnings": warnings]), nil, nil)
       } catch {
         Self.fail(error, done)
       }
     }
   }
 
-  @objc public func startWake(_ id: Double, words: [String], context: String, done: @escaping Done) {
-    Task {
+  @objc public func start(_ id: Double, kind: String, options: String, done: @escaping Done) {
+    Task<Void, Never> {
       do {
-        let listener = try await WakeListener.start(WakeOptions(words: try words.map { try Self.word($0) }, context: context))
-        let task = Task { [weak self] in
-          for await e in listener.events { self?.forward(id, e) }
+        let input = try await self.open(id, kind, options)
+        let task = Task<Void, Never> { [weak self] in
+          for await e in input.events { self?.forward(id, e) }
         }
-        let old = lock.withLock { inputs.updateValue((listener, task), forKey: Int(id)) }
+        let old = self.lock.withLock { self.inputs.updateValue((input, task), forKey: Int(id)) }
         old?.task.cancel()
         old?.input.close()
-        done(try Self.json(["mode": Self.mode(listener.mode), "status": Self.status(listener.status)]), nil, nil)
+        done(try Self.json(["mode": Self.mode(input.mode), "status": Self.status(input.status)]), nil, nil)
       } catch {
         Self.fail(error, done)
       }
+    }
+  }
+
+  private func open(_ id: Double, _ kind: String, _ options: String) async throws -> AlkoveInput {
+    let o = try Self.parse(options) as? [String: Any] ?? [:]
+    switch kind {
+    case "wake":
+      let words = try (o["words"] as? [String] ?? []).map { try Self.word($0) }
+      return try await WakeListener.start(WakeOptions(words: words, context: o["context"] as? String ?? "pause"))
+    case "agent":
+      var audio: (@Sendable (Data) -> Void)?
+      if o["audio"] as? Bool == true {
+        audio = { [weak self] chunk in self?.emit(id, "audio", chunk.base64EncodedString()) }
+      }
+      return try await AgentInput.start(try Self.agentOptions(o), onAudio: audio)
+    default:
+      throw AlkoveError(code: "engine.failed", message: "no input \(kind)")
+    }
+  }
+
+  @objc public func call(_ id: Double, method: String, arg: String) {
+    guard let input = lock.withLock({ inputs[Int(id)]?.input }) else { return }
+    let v = (try? Self.parse("[\(arg)]") as? [Any])?.first
+    switch method {
+    case "listen": input.listen(v as? Bool ?? true)
+    case "hold": input.hold()
+    case "release": input.release()
+    case "farEndActive": input.farEndActive(v as? Bool ?? false)
+    case "setStrength": input.setStrength((v as? NSNumber)?.doubleValue ?? 1)
+    case "setVoiceprint": input.setVoiceprint(Self.voiceprint(v))
+    default: break
     }
   }
 
@@ -60,22 +91,77 @@ import Alkove
     }
   }
 
+  private func emit(_ id: Double, _ type: String, _ v: Any) {
+    if let json = try? Self.json(v) { send(id, type, json) }
+  }
+
   private func forward(_ id: Double, _ e: Event) {
-    let out: (String, Any)
     switch e {
-    case let .wake(w): out = ("wake", ["word": w.word, "score": w.score, "threshold": w.threshold, "context": w.context, "start": w.start, "end": w.end])
-    case let .mode(m, reason): out = ("mode", ["mode": Self.mode(m), "reason": reason?.rawValue as Any])
-    case let .status(s): out = ("status", Self.status(s))
-    case let .diag(d): out = ("diag", ["code": d.code, "level": d.level])
-    case let .mic(s): out = ("mic", ["state": s.rawValue])
+    case let .wake(w): emit(id, "wake", ["word": w.word, "score": w.score, "threshold": w.threshold, "context": w.context, "start": w.start, "end": w.end])
+    case let .speechStart(start): emit(id, "speechstart", ["start": start])
+    case let .speechEnd(start, end, level): emit(id, "speechend", Self.level(["start": start, "end": end], level))
+    case let .speechCancel(start): emit(id, "speechcancel", ["start": start])
+    case let .turn(pause, probability, hesitation, at): emit(id, "turn", ["pause": pause, "probability": probability, "hesitation": hesitation, "at": at])
+    case let .turnEnd(start, end, probability, hesitation, at): emit(id, "turnend", ["start": start, "end": end, "probability": probability, "hesitation": hesitation, "at": at])
+    case let .interruptStart(start): emit(id, "interruptstart", ["start": start])
+    case let .interrupt(start, at): emit(id, "interrupt", ["start": start, "at": at])
+    case let .interruptCancel(start, end): emit(id, "interruptcancel", ["start": start, "end": end])
+    case let .utterance(u): emit(id, "utterance", Self.level(["pcm": u.pcm.base64EncodedString(), "start": u.start, "end": u.end], u.level))
+    case let .voiceprintLearned(p): if let json = try? p.toJson(), let v = try? Self.parse(json) { emit(id, "voiceprint", v) }
+    case let .learn(progress): emit(id, "learn", ["progress": progress])
+    case let .mode(m, reason): emit(id, "mode", ["mode": Self.mode(m), "reason": reason?.rawValue as Any])
+    case let .status(s): emit(id, "status", Self.status(s))
+    case let .diag(d): emit(id, "diag", ["code": d.code, "level": d.level])
+    case let .mic(s): emit(id, "mic", ["state": s.rawValue])
     default: return
     }
-    if let json = try? Self.json(out.1) { send(id, out.0, json) }
+  }
+
+  // the web's AgentOptions as JSON; turn and interrupt false for off
+  private static func agentOptions(_ o: [String: Any]) throws -> AgentOptions {
+    func num(_ d: [String: Any]?, _ k: String, _ v: Double) -> Double { (d?[k] as? NSNumber)?.doubleValue ?? v }
+    let out = o["output"] as? [String: Any]
+    let speech = o["speech"] as? [String: Any]
+    var near: Double?
+    if o["near"] as? Bool == true { near = Alkove.nearGapDb } else if let n = o["near"] as? [String: Any] { near = num(n, "gapDb", Alkove.nearGapDb) }
+    var turn: TurnParams? = TurnParams()
+    if o["turn"] as? Bool == false { turn = nil } else if let t = o["turn"] as? [String: Any] { turn = TurnParams(threshold: num(t, "threshold", 0.6), minPause: num(t, "minPause", 0.3), maxPause: num(t, "maxPause", 1.5)) }
+    var interrupt: InterruptParams? = InterruptParams()
+    if o["interrupt"] as? Bool == false { interrupt = nil } else if let i = o["interrupt"] as? [String: Any] { interrupt = InterruptParams(minDuration: num(i, "minDuration", 0.7)) }
+    return AgentOptions(
+      voiceprint: voiceprint(o["voiceprint"]),
+      learn: o["learn"] as? Bool ?? false,
+      farEnd: o["farEnd"] as? Bool ?? false,
+      strength: num(o, "strength", 1),
+      normalize: o["normalize"] as? Bool ?? true,
+      speech: speech.map { SpeechParams(confidence: num($0, "confidence", 0.5), exitConfidence: num($0, "exitConfidence", 0.1), startSecs: num($0, "startSecs", 0.2), stopSecs: num($0, "stopSecs", 0.6)) },
+      output: Output(format: out?["format"] as? String == "s16" ? .s16 : .f32, rate: (out?["rate"] as? NSNumber)?.intValue ?? Alkove.rate, chunkMs: (out?["chunkMs"] as? NSNumber)?.intValue ?? 32),
+      levels: o["levels"] as? Bool ?? false,
+      near: near,
+      turn: turn,
+      interrupt: interrupt
+    )
+  }
+
+  private static func voiceprint(_ v: Any?) -> Voiceprint? {
+    guard let v, v is [String: Any], let json = try? json(v) else { return nil }
+    return try? Voiceprint.fromJson(json)
+  }
+
+  private static func level(_ o: [String: Any], _ l: PhraseLevel?) -> [String: Any] {
+    guard let l else { return o }
+    var o = o
+    o["level"] = ["voiceDb": l.voiceDb as Any, "noiseDb": l.noiseDb, "refDb": l.refDb as Any]
+    return o
   }
 
   private static func word(_ json: String) throws -> Word {
     guard let w = try Word.fromJson(json) else { throw AlkoveError(code: "word.outdated", message: "Compiled for another Spot: compile it again.") }
     return w
+  }
+
+  private static func parse(_ s: String) throws -> Any {
+    try JSONSerialization.jsonObject(with: Data(s.utf8), options: [.fragmentsAllowed])
   }
 
   private static func json(_ v: Any) throws -> String {

@@ -1,0 +1,32 @@
+# the agent input opens, Focus runs (its models fetched), then closes: twice
+appId: ${APP_ID}
+---
+- launchApp:
+    permissions:
+      microphone: allow
+- tapOn:
+    id: "screen-agent"
+- assertVisible: "off"
+- tapOn:
+    id: "talk"
+- extendedWaitUntil:
+    visible: "running"
+    timeout: 60000
+- extendedWaitUntil:
+    visible: "focus"
+    timeout: 120000
+- assertNotVisible:
+    id: "error"
+- tapOn:
+    id: "talk"
+- assertVisible: "off"
+- tapOn:
+    id: "talk"
+- extendedWaitUntil:
+    visible: "focus"
+    timeout: 30000
+- tapOn:
+    id: "talk"
+- assertVisible: "off"
+- assertNotVisible:
+    id: "error"
