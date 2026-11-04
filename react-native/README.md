@@ -20,7 +20,7 @@ const { status, input } = useAgentInput({
 // input?.farEndActive(true) while the agent speaks
 ```
 
-`on.audio` streams the continuous audio (32 ms chunks by default) only when the app gives it.
+`on.audio` streams the continuous audio (32 ms chunks by default) and `on.utterance` the phrases' PCM, each only when the app gives it.
 
 Android apps add the repository the SDK comes from:
 
@@ -29,6 +29,6 @@ Android apps add the repository the SDK comes from:
 allprojects { repositories { maven { url "https://maven.alkove.ai" } } }
 ```
 
-iOS apps need `NSMicrophoneUsageDescription` in `Info.plist`. The simulator slice is arm64 only.
+iOS apps need `NSMicrophoneUsageDescription` in `Info.plist`.
 
 The example app is in [`example`](./example): `corepack yarn install`, then `corepack yarn example android` or `ios`. Its end-to-end flows, `example/e2e/*.yaml`, run with [Maestro](https://maestro.dev).

@@ -14,12 +14,16 @@ export class AlkoveFocusProcessor implements TrackProcessor<Track.Kind.Audio, Au
   readonly name = 'alkove-focus';
   processedTrack?: AudioProcessorOptions['track'];
   #enabled = true;
+  // the latest settings, sent again with every attach: a call before it, or a rejoin, keeps them
+  #options: FocusOptions;
 
-  constructor(private readonly options: FocusOptions = {}) {}
+  constructor(options: FocusOptions = {}) {
+    this.#options = { ...options };
+  }
 
   init = async (opts: AudioProcessorOptions) => {
     this.processedTrack = opts.track;
-    await Native.attach(JSON.stringify(this.options));
+    await Native.attach(JSON.stringify(this.#options));
     Native.setEnabled(this.#enabled);
   };
 
@@ -27,6 +31,7 @@ export class AlkoveFocusProcessor implements TrackProcessor<Track.Kind.Audio, Au
     this.processedTrack = opts.track;
   };
 
+  // also drops an attach still loading: the native side counts attaches and detaches
   destroy = async () => {
     Native.detach();
   };
@@ -44,11 +49,13 @@ export class AlkoveFocusProcessor implements TrackProcessor<Track.Kind.Audio, Au
   }
 
   setStrength(strength: number) {
+    this.#options.strength = strength;
     Native.setStrength(strength);
   }
 
   // applied at the user's next silence; null goes back to the closest voice
   setVoiceprint(voiceprint: Record<string, unknown> | null) {
+    this.#options.voiceprint = voiceprint;
     Native.setVoiceprint(JSON.stringify(voiceprint));
   }
 

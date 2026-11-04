@@ -130,7 +130,8 @@
     },
     "modulePathIgnorePatterns": [
       "<rootDir>/example/node_modules",
-      "<rootDir>/lib/"
+      "<rootDir>/lib/",
+      "<rootDir>/livekit/lib/"
     ]
   },
   "create-react-native-library": {

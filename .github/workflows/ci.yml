@@ -33,6 +33,21 @@ jobs:
       - run: rustup toolchain install 1.88 --profile minimal
       - run: cargo +1.88 check --workspace --all-targets
 
+  # the React Native packages' JS: types and Jest (their native code runs in the emulator and the simulator, by Maestro)
+  react-native:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: react-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable && yarn install --immutable
+      - run: yarn tsc --noEmit -p .
+      - run: yarn jest
+
   wasm:
     runs-on: ubuntu-latest
     env:

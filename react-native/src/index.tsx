@@ -172,20 +172,10 @@ async function micAllowed(): Promise<void> {
 
 const wordJSON = (w: Word | Record<string, unknown> | string) => (typeof w === 'string' ? w : JSON.stringify(w instanceof Word ? w.toJSON() : w));
 
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-const B64_INDEX = new Uint8Array(128).map((_, i) => Math.max(0, B64.indexOf(String.fromCharCode(i))));
-
 function bytes(b64: string): ArrayBuffer {
-  const n = b64.length;
-  const pad = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
-  const out = new Uint8Array((n * 3) / 4 - pad);
-  let o = 0;
-  for (let i = 0; i < n; i += 4) {
-    const v = (B64_INDEX[b64.charCodeAt(i)]! << 18) | (B64_INDEX[b64.charCodeAt(i + 1)]! << 12) | (B64_INDEX[b64.charCodeAt(i + 2)]! << 6) | B64_INDEX[b64.charCodeAt(i + 3)]!;
-    if (o < out.length) out[o++] = v >> 16;
-    if (o < out.length) out[o++] = (v >> 8) & 255;
-    if (o < out.length) out[o++] = v & 255;
-  }
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out.buffer;
 }
 
@@ -201,8 +191,8 @@ type Live = { strength?: number; voiceprint?: VoiceprintJSON | null };
 
 function useInput(kind: 'wake' | 'agent', options: object & HookOptions, live: readonly (keyof Live)[]): InputState {
   const { enabled = true, on, ...opts } = options;
-  // the continuous audio only crosses to JS for an app that listens to it
-  const rest = { ...opts, audio: !!on?.audio } as Record<string, unknown> & Live;
+  // the continuous audio and the phrases' PCM only cross to JS for an app that listens to them
+  const rest = (kind === 'agent' ? { ...opts, audio: !!on?.audio, utterances: !!on?.utterance } : opts) as Record<string, unknown> & Live;
   const handlers = useRef(on);
   const latest = useRef(rest);
   const structural = Object.fromEntries(Object.entries(rest).filter(([k]) => !(live as readonly string[]).includes(k)));
@@ -237,6 +227,8 @@ function useInput(kind: 'wake' | 'agent', options: object & HookOptions, live: r
       const o = latest.current;
       id = ++ids;
       off = listen(id, (e) => {
+        // an input closing after the cleanup: its last events no longer belong to this render
+        if (cancelled) return;
         const v = decode(e.type, e.json);
         if (e.type === 'status') setStatus(v as Status);
         if (e.type === 'mode') setMode((v as { mode: Mode }).mode);
@@ -262,11 +254,13 @@ function useInput(kind: 'wake' | 'agent', options: object & HookOptions, live: r
     return () => {
       cancelled = true;
       current.current = 0;
-      // after its opening: a close sent before the start would leave the input open
-      void opening.finally(() => {
-        off?.();
-        if (id) Native.close(id);
-      });
+      // after its opening, failed or not: a close sent before the start would leave the input open
+      void opening
+        .catch(() => {})
+        .then(() => {
+          off?.();
+          if (id) Native.close(id);
+        });
       setInput(null);
       setStatus('off');
       setMode(null);

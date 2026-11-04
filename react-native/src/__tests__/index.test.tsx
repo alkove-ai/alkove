@@ -67,7 +67,7 @@ test('useAgentInput opens with its options as JSON, gives status and mode, forwa
   const { out, r } = mount(() => useAgentInput({ near: true, on: { utterance: (u: any) => got.push(u), audio: (a: any) => got.push(a), turnend: (t: any) => got.push(t) } }));
   await flush();
   expect(mockCalls[0]).toMatch(/^start \d+ agent /);
-  expect(JSON.parse(mockCalls[0]!.split(' agent ')[1]!)).toEqual({ near: true, audio: true });
+  expect(JSON.parse(mockCalls[0]!.split(' agent ')[1]!)).toEqual({ near: true, audio: true, utterances: true });
   expect(out.current.status).toBe('running');
   const id = Number(mockCalls[0]!.split(' ')[1]);
   for (const bytes of [[1], [1, 2], [1, 2, 3], [255, 0, 128, 7]]) {
@@ -87,10 +87,44 @@ test('useAgentInput opens with its options as JSON, gives status and mode, forwa
   expect(mockCalls).toContain(`close ${id}`);
 });
 
-test('the continuous audio crosses only for an app that listens to it', async () => {
+test("the continuous audio and the phrases' PCM cross only for an app that listens to them", async () => {
   mount(() => useAgentInput({}));
   await flush();
-  expect(JSON.parse(mockCalls[0]!.split(' agent ')[1]!)).toEqual({ audio: false });
+  expect(JSON.parse(mockCalls[0]!.split(' agent ')[1]!)).toEqual({ audio: false, utterances: false });
+});
+
+test('an event the input sends after the cleanup changes nothing: switched off while opening, it stays off', async () => {
+  let open!: () => void;
+  mockGate = new Promise((res) => (open = res));
+  let props: any = { enabled: true };
+  const { out, rerender } = mount(() => useAgentInput(props));
+  await flush();
+  const id = Number(mockCalls[0]!.split(' ')[1]);
+  props = { enabled: false };
+  rerender();
+  act(() => mockEmit({ id, type: 'status', json: JSON.stringify('running') }));
+  act(() => mockEmit({ id, type: 'mode', json: JSON.stringify({ mode: 'focus' }) }));
+  open();
+  await flush();
+  expect(out.current).toMatchObject({ status: 'off', mode: null, input: null });
+  expect(mockCalls).toContain(`close ${id}`);
+});
+
+test('unmounted after a failed opening: no unhandled rejection', async () => {
+  const rejected: unknown[] = [];
+  const onRejection = (e: unknown) => rejected.push(e);
+  process.on('unhandledRejection', onRejection);
+  const Native = require('../NativeAlkove').default;
+  Native.start.mockImplementationOnce(async () => {
+    throw Object.assign(new Error('denied'), { code: 'mic.denied' });
+  });
+  const { r } = mount(() => useAgentInput({}));
+  await flush();
+  act(() => r.unmount());
+  await flush();
+  await new Promise((res) => setTimeout(res, 10));
+  process.off('unhandledRejection', onRejection);
+  expect(rejected).toEqual([]);
 });
 
 test('strength and voiceprint go to the running input; another option opens a new one, after closing the first', async () => {

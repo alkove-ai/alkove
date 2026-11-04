@@ -11,6 +11,7 @@ import com.livekit.reactnative.LiveKitReactNative
 import com.livekit.reactnative.audio.processing.AudioProcessorInterface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,12 +20,17 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class AlkoveLiveKitModule(context: ReactApplicationContext) : NativeAlkoveLiveKitSpec(context) {
-  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> })
+  private val lock = Any()
+
+  // each attach and detach moves it: an attach that finishes after a newer one, or after a detach, is dropped
+  private var generation = 0
 
   @Volatile
   private var focus: Focus? = null
 
   override fun attach(options: String, promise: Promise) {
+    val gen = synchronized(lock) { ++generation }
     scope.launch {
       try {
         val o = JSONObject(options)
@@ -39,9 +45,13 @@ class AlkoveLiveKitModule(context: ReactApplicationContext) : NativeAlkoveLiveKi
           speech,
         )
         val next = Focus(processor)
-        val old = focus
-        focus = next
-        LiveKitReactNative.audioProcessingController.capturePostProcessor = next
+        val old = synchronized(lock) {
+          if (gen != generation) null.also { next.close() }
+          else focus.also {
+            focus = next
+            LiveKitReactNative.audioProcessingController.capturePostProcessor = next
+          }
+        }
         old?.close()
         promise.resolve(null)
       } catch (e: Throwable) {
@@ -51,23 +61,30 @@ class AlkoveLiveKitModule(context: ReactApplicationContext) : NativeAlkoveLiveKi
   }
 
   override fun detach() {
-    val old = focus ?: return
-    focus = null
-    if (LiveKitReactNative.audioProcessingController.capturePostProcessor === old) LiveKitReactNative.audioProcessingController.capturePostProcessor = null
-    old.close()
+    val old = synchronized(lock) {
+      generation++
+      focus.also {
+        focus = null
+        if (it != null && LiveKitReactNative.audioProcessingController.capturePostProcessor === it) LiveKitReactNative.audioProcessingController.capturePostProcessor = null
+      }
+    }
+    old?.close()
   }
 
   override fun setEnabled(on: Boolean) {
     focus?.enabled = on
   }
 
+  // a bad argument is ignored, as on iOS: an exception out of a void method ends the app
   override fun setStrength(strength: Double) {
-    focus?.processor?.setStrength(strength)
+    runCatching { focus?.processor?.setStrength(strength) }
   }
 
   override fun setVoiceprint(voiceprint: String) {
-    val v = JSONObject("{\"v\":$voiceprint}").optJSONObject("v")
-    focus?.processor?.setVoiceprint(v?.let { Voiceprint.fromJson(it.toString()) })
+    runCatching {
+      val v = JSONObject("{\"v\":$voiceprint}").optJSONObject("v")
+      focus?.processor?.setVoiceprint(v?.let { Voiceprint.fromJson(it.toString()) })
+    }
   }
 
   override fun processed(): Double = (focus?.frames ?: 0L).toDouble()

@@ -11,8 +11,14 @@ import AlkoveReactNative
 @objc(AlkoveLiveKitBridge) public final class AlkoveLiveKitBridge: NSObject, @unchecked Sendable {
   private let lock = NSLock()
   private var focus: Focus?
+  // each attach and detach moves it: an attach that finishes after a newer one, or after a detach, is dropped
+  private var generation = 0
 
   @objc public func attach(_ options: String, done: @escaping (String?, String?) -> Void) {
+    let gen = lock.withLock { () -> Int in
+      generation += 1
+      return generation
+    }
     Task<Void, Never> {
       do {
         let o = (try JSONSerialization.jsonObject(with: Data(options.utf8)) as? [String: Any]) ?? [:]
@@ -26,13 +32,14 @@ import AlkoveReactNative
           speech: s.map { SpeechParams(confidence: num($0, "confidence", 0.5), exitConfidence: num($0, "exitConfidence", 0.1), startSecs: num($0, "startSecs", 0.2), stopSecs: num($0, "stopSecs", 0.6)) }
         )
         let next = Focus(processor)
-        let old = self.lock.withLock { () -> Focus? in
-          defer { self.focus = next }
-          return self.focus
+        // swapped in the adapter under the lock too: two attaches never leave two processors in the path
+        self.lock.withLock {
+          guard gen == self.generation else { return }
+          let adapter = LKAudioProcessingManager.sharedInstance().capturePostProcessingAdapter
+          if let old = self.focus { adapter.removeProcessing(old) }
+          adapter.addProcessing(next)
+          self.focus = next
         }
-        let adapter = LKAudioProcessingManager.sharedInstance().capturePostProcessingAdapter
-        if let old { adapter.removeProcessing(old) }
-        adapter.addProcessing(next)
         done(nil, nil)
       } catch let e as AlkoveError where !e.code.isEmpty {
         done(e.code, e.message)
@@ -43,11 +50,11 @@ import AlkoveReactNative
   }
 
   @objc public func detach() {
-    guard let old = lock.withLock({ () -> Focus? in
-      defer { focus = nil }
-      return focus
-    }) else { return }
-    LKAudioProcessingManager.sharedInstance().capturePostProcessingAdapter.removeProcessing(old)
+    lock.withLock {
+      generation += 1
+      if let old = focus { LKAudioProcessingManager.sharedInstance().capturePostProcessingAdapter.removeProcessing(old) }
+      focus = nil
+    }
   }
 
   @objc public func setEnabled(_ on: Bool) { current?.enabled = on }
