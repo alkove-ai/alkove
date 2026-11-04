@@ -2,6 +2,13 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
+## 0.4.3 (2026-11-04)
+
+The Swift package and `alkove-livekit-swift` move to 0.4.3, for React Native; npm stays at 0.4.2, PyPI at 0.4.0, Android at 0.4.1, and the core, the engine and the models do not move (the same outputs to the bit).
+
+- iOS: the XCFramework's simulator slice holds x86_64 next to arm64, so an app builds for any simulator and on Intel Macs without `EXCLUDED_ARCHS`; its headers sit under `Headers/AlkoveFFI/`, which no longer collides with React Native's own module map.
+- React Native, a preview released apart (`react-native-v0.1.0`, `react-native-livekit-v0.1.0`): `@alkove/react-native`, the hooks of `alkove/react` (`useAgentInput`, `useWakeListener`) and `Spot.compile` on the native SDKs, CocoaPods or Swift Package Manager on iOS, an Expo config plugin; `@alkove/react-native-livekit`, `AlkoveFocus()` as LiveKit React Native's microphone processor. Tested in the Android emulator and the iOS simulator, not yet on a phone. The [React Native quick start](https://alkove.ai/docs/start/react-native/).
+
 ## 0.4.2 (2026-11-03)
 
 npm only: the React hooks. PyPI, Android, Swift and the integrations stay where they are; the core, the engine and the models do not move (the wasm the same to the bit).

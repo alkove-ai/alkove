@@ -3,8 +3,8 @@ import Foundation
 import PackageDescription
 
 // ios/release.sh sets these two for the zip on the GitHub release vVERSION
-let version = "0.4.1"
-let checksum = "99c468ce0d125f3d2b2230108f800c58a064d861f7b5310d24eae539577699f7"
+let version = "0.4.3"
+let checksum = "89d9364645ff0ff77f81868489087c38d425d6b1b8be9ace7ee926af93ae7b79"
 
 // ios/build.sh's XCFramework when it is there (a clone that built it), else the release's zip: a package fetched by SwiftPM has no ios/build
 let local = "ios/build/AlkoveFFI.xcframework"

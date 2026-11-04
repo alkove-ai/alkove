@@ -11,12 +11,12 @@ The Swift package gives the web's outputs to the bit on a Mac and in the iOS sim
 
 ```swift
 // Package.swift, or File > Add Package Dependencies in Xcode
-.package(url: "https://github.com/alkove-ai/alkove.git", from: "0.4.1")
+.package(url: "https://github.com/alkove-ai/alkove.git", from: "0.4.3")
 // the target
 .product(name: "Alkove", package: "alkove")
 ```
 
-The Swift package runs the core the web library runs in WebAssembly, natively: for the same 16 kHz audio, the output is the same to the bit. iOS 15 and macOS 12 or later, on arm64: iPhones, iPads, Apple silicon Macs and the simulator on them. There is no x86_64 slice: an app that builds for the simulator on an Intel Mac, or for "any simulator", sets `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64`. The package has no dependency; a whole app with it weighs about 2 MB on an iPhone.
+The Swift package runs the core the web library runs in WebAssembly, natively: for the same 16 kHz audio, the output is the same to the bit. iOS 15 and macOS 12 or later: iPhones, iPads, the simulator (arm64 and x86_64) and Apple silicon Macs. The package has no dependency; a whole app with it weighs about 2 MB on an iPhone.
 
 Say why the app uses the microphone in its `Info.plist`; the inputs ask for it the first time they start:
 
@@ -115,7 +115,7 @@ let part = try p.push(frame)                  // [Float] or [Int16], any length
 ## In a LiveKit room
 
 ```swift
-.package(url: "https://github.com/alkove-ai/alkove-livekit-swift.git", from: "0.4.1")
+.package(url: "https://github.com/alkove-ai/alkove-livekit-swift.git", from: "0.4.3")
 .product(name: "AlkoveLiveKit", package: "alkove-livekit-swift")
 ```
 

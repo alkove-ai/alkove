@@ -3,11 +3,11 @@
 On-device voice input for iOS and macOS: Focus keeps the user's voice, Cue finds speech, Spot hears any typed word, Timbre knows a voice. The same core as the web, Python and Android packages, natively, in Swift: for the same 16 kHz audio, the output is the same to the bit.
 
 ```swift
-.package(url: "https://github.com/alkove-ai/alkove.git", from: "0.4.1")
-.package(url: "https://github.com/alkove-ai/alkove-livekit-swift.git", from: "0.4.1") // Focus in a LiveKit room
+.package(url: "https://github.com/alkove-ai/alkove.git", from: "0.4.3")
+.package(url: "https://github.com/alkove-ai/alkove-livekit-swift.git", from: "0.4.3") // Focus in a LiveKit room
 ```
 
-iOS 15 and macOS 12 or later, arm64. A preview: not yet tried on an iPhone's microphone. Start with the [iOS quick start](https://alkove.ai/docs/start/ios/).
+iOS 15 and macOS 12 or later: iPhones, iPads, the simulator (arm64 and x86_64), Apple silicon Macs. A preview: not yet tried on an iPhone's microphone. Start with the [iOS quick start](https://alkove.ai/docs/start/ios/).
 
 ## In this folder
 

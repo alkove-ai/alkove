@@ -10,7 +10,7 @@ public enum Alkove {
     static let info: Value = (try? Native.info()) ?? .null
 
     /// This library's version: the same minor as the web, Python and Android packages means the same core and models.
-    public static let version = "0.4.1"
+    public static let version = "0.4.3"
 
     // where the inputs get a model: the cache, downloaded there when missing; the tests read the SDK's folder
     nonisolated(unsafe) static var loader: @Sendable (String, URL?) async throws -> Model = { name, base in
