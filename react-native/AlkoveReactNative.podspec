@@ -37,9 +37,6 @@ Pod::Spec.new do |s|
   s.vendored_frameworks = "ios/vendor/AlkoveFFI.xcframework"
   s.frameworks = "AVFoundation"
   s.swift_version = "5.9"
-  # the XCFramework's simulator slice is arm64 only, as the Swift package's: CocoaPods copies no slice for an x86_64 build
-  s.pod_target_xcconfig = { "EXCLUDED_ARCHS[sdk=iphonesimulator*]" => "x86_64" }
-  s.user_target_xcconfig = { "EXCLUDED_ARCHS[sdk=iphonesimulator*]" => "x86_64" }
 
   install_modules_dependencies(s)
 end

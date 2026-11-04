@@ -138,7 +138,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      - run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --profile ios -p alkove-ios -p alkove-native --all-targets -- -D warnings
       - run: cargo test -p alkove-ios -p alkove-native
