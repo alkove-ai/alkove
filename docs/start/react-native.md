@@ -85,22 +85,29 @@ input?.hold()               // hold to talk, until release()
 - `on.audio` streams the continuous output (32 ms chunks by default, `output` sets the format and rate) and `on.utterance` the phrases' PCM, each as an `ArrayBuffer` and each only when the app gives it: no audio crosses to JavaScript otherwise.
 - `strength` and `voiceprint` change on the running input; the other options reopen it.
 
-`status` is `'off'` while closed, then `'starting'`, `'running'` or `'interrupted'` (a call or Siri took the microphone). `error` is an `AlkoveError` with the [web library's codes](/docs/guides/errors/), such as `mic.denied` or `models.fetch`.
+`status` is `'off'` while closed, then `'starting'`, `'running'`, `'interrupted'` (a call or Siri took the microphone) or `'disposed'` (the input stopped on its own). `error` is what kept the input from opening: an `AlkoveError` with one of the [web library's codes](/docs/guides/errors/), such as `mic.denied` or `models.fetch`, else the platform's own error.
 
 ## A wake word
 
 ```tsx
-import { Spot, useWakeListener } from '@alkove/react-native'
+import { useEffect, useState } from 'react'
+import { Spot, useWakeListener, type Word } from '@alkove/react-native'
 
-const word = await Spot.compile('Hey Nova', { lang: 'en' })   // any typed word, no training
-await AsyncStorage.setItem('word', JSON.stringify(word))       // Word.fromJSON gives it back
-
-useWakeListener({
-  enabled: !!word,
-  words: word ? [word] : [],
-  on: { wake: ({ word, score }) => startListening() },
-})
+function Wake() {
+  const [word, setWord] = useState<Word | null>(null)
+  useEffect(() => {
+    Spot.compile('Hey Nova', { lang: 'en' }).then(setWord)   // any typed word, no training
+  }, [])
+  useWakeListener({
+    enabled: !!word,
+    words: word ? [word] : [],
+    on: { wake: ({ word, score }) => startListening() },
+  })
+  return null
+}
 ```
+
+Store a compiled word with `JSON.stringify(word)` and give it back with `Word.fromJSON`: no compile at the next launch.
 
 `context: 'anywhere'` hears the word in the middle of a sentence; by default it is heard after a pause. `word.warnings` says when the word will misfire more (`word.too-short`) or will not be read as written (`text.digits`, `text.acronym`).
 
