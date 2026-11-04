@@ -1,0 +1,43 @@
+ext.Alkove = [
+  minSdkVersion: 24,
+  compileSdkVersion: 36
+]
+
+ext.getExtOrDefault = { prop ->
+  if (rootProject.ext.has(prop)) {
+    return rootProject.ext.get(prop)
+  }
+
+  return Alkove[prop]
+}
+
+
+apply plugin: "com.android.library"
+
+if (project.extensions.findByName("kotlin") == null) {
+  apply plugin: "kotlin-android"
+}
+
+
+apply plugin: "com.facebook.react"
+
+android {
+  namespace "com.alkove.reactnative"
+
+  compileSdkVersion getExtOrDefault("compileSdkVersion")
+
+  defaultConfig {
+    minSdkVersion getExtOrDefault("minSdkVersion")
+  }
+}
+
+repositories {
+  google()
+  mavenCentral()
+  maven { url "https://maven.alkove.ai" }
+}
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+  implementation "ai.alkove:alkove:0.4.1"
+}

@@ -1,0 +1,27 @@
+# the wake listener opens and closes twice: Spot.compile, the native listener running, closed
+appId: ${APP_ID}
+---
+- launchApp:
+    permissions:
+      microphone: allow
+- assertVisible: "off"
+- tapOn:
+    id: "listen"
+- extendedWaitUntil:
+    visible: "running"
+    timeout: 120000
+- assertNotVisible:
+    id: "error"
+- tapOn:
+    id: "stop"
+- assertVisible: "off"
+- tapOn:
+    id: "listen"
+- extendedWaitUntil:
+    visible: "running"
+    timeout: 30000
+- tapOn:
+    id: "stop"
+- assertVisible: "off"
+- assertNotVisible:
+    id: "error"

@@ -1,0 +1,140 @@
+{
+  "name": "@alkove/react-native",
+  "version": "0.1.0",
+  "description": "On-device voice input for React Native: wake words, voice isolation, end of turn. No server, no key.",
+  "main": "./lib/module/index.js",
+  "types": "./lib/typescript/src/index.d.ts",
+  "exports": {
+    ".": {
+      "alkove-react-native-source": "./src/index.tsx",
+      "types": "./lib/typescript/src/index.d.ts",
+      "default": "./lib/module/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "cpp",
+    "*.podspec",
+    "react-native.config.js",
+    "!ios/build",
+    "!android/build",
+    "!android/gradle",
+    "!android/gradlew",
+    "!android/gradlew.bat",
+    "!android/local.properties",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!**/.*"
+  ],
+  "scripts": {
+    "example": "yarn workspace @alkove/react-native-example",
+    "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
+    "prepare": "bob build",
+    "typecheck": "tsc",
+    "test": "jest"
+  },
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "voice",
+    "wake-word",
+    "keyword-spotting",
+    "voice-activity-detection",
+    "voice-isolation",
+    "on-device"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alkove-ai/alkove.git",
+    "directory": "react-native"
+  },
+  "author": "Eddy Bordi <contact@alkove.ai> (https://alkove.ai)",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/alkove-ai/alkove/issues"
+  },
+  "homepage": "https://alkove.ai",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@react-native/babel-preset": "0.88.1",
+    "@react-native/jest-preset": "0.88.1",
+    "@types/react": "^19.2.0",
+    "del-cli": "^8.0.1",
+    "jest": "^29.7.0",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-builder-bob": "^0.44.1",
+    "turbo": "^2.11.10",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "workspaces": [
+    "example"
+  ],
+  "packageManager": "yarn@4.18.1",
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
+    ]
+  },
+  "codegenConfig": {
+    "name": "AlkoveSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.alkove.reactnative"
+    },
+    "ios": {
+      "modulesProvider": {
+        "Alkove": "AlkoveReactNative"
+      }
+    }
+  },
+  "jest": {
+    "preset": "@react-native/jest-preset",
+    "testEnvironmentOptions": {
+      "customExportConditions": [
+        "require",
+        "react-native",
+        "alkove-react-native-source"
+      ]
+    },
+    "modulePathIgnorePatterns": [
+      "<rootDir>/example/node_modules",
+      "<rootDir>/lib/"
+    ]
+  },
+  "create-react-native-library": {
+    "type": "turbo-module",
+    "languages": "kotlin-objc",
+    "tools": [
+      "jest"
+    ],
+    "version": "0.64.0"
+  }
+}
