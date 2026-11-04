@@ -31,4 +31,12 @@ allprojects { repositories { maven { url "https://maven.alkove.ai" } } }
 
 iOS apps need `NSMicrophoneUsageDescription` in `Info.plist`.
 
+Expo apps (development builds, not Expo Go) let the config plugin do both:
+
+```json
+{ "expo": { "plugins": [["@alkove/react-native", { "microphonePermission": "Listens for the wake word." }]] } }
+```
+
+`microphonePermission` is optional; then `npx expo prebuild`.
+
 The example app is in [`example`](./example): `corepack yarn install`, then `corepack yarn example android` or `ios`. Its end-to-end flows, `example/e2e/*.yaml`, run with [Maestro](https://maestro.dev).

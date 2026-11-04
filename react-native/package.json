@@ -10,7 +10,8 @@
       "types": "./lib/typescript/src/index.d.ts",
       "default": "./lib/module/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./app.plugin.js": "./app.plugin.js"
   },
   "files": [
     "src",
@@ -30,7 +31,8 @@
     "!**/__fixtures__",
     "!**/__mocks__",
     "!**/.*",
-    "Package.swift"
+    "Package.swift",
+    "app.plugin.js"
   ],
   "scripts": {
     "example": "yarn workspace @alkove/react-native-example",
