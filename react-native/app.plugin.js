@@ -9,7 +9,6 @@ const pkg = require('./package.json');
 const MAVEN = 'https://maven.alkove.ai';
 const MICROPHONE = 'Listens for your voice on this device.';
 
-// Android needs nothing: RECORD_AUDIO comes from the library's manifest.
 const withMicrophone = (config, { microphonePermission } = {}) =>
   withInfoPlist(config, (c) => {
     c.modResults.NSMicrophoneUsageDescription =
@@ -23,7 +22,7 @@ const withMaven = (config) =>
   withProjectBuildGradle(config, (c) => {
     if (c.modResults.language !== 'groovy') {
       throw new Error(
-        `@alkove/react-native: add maven { url '${MAVEN}' } to android/build.gradle by hand`
+        `@alkove/react-native: add the repository ${MAVEN} to android/build.gradle.kts by hand`
       );
     }
     if (!c.modResults.contents.includes(MAVEN)) {

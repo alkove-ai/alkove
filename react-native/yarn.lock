@@ -38,7 +38,7 @@ __metadata:
     "@livekit/react-native": "npm:3.1.0"
     livekit-client: "npm:2.23.0"
   peerDependencies:
-    "@alkove/react-native": "*"
+    "@alkove/react-native": ^0.1.0
     "@livekit/react-native": ">=3.0.0"
     livekit-client: ^2.15.0
     react-native: "*"
@@ -63,8 +63,12 @@ __metadata:
     turbo: "npm:^2.11.10"
     typescript: "npm:^6.0.3"
   peerDependencies:
+    expo: "*"
     react: "*"
     react-native: "*"
+  peerDependenciesMeta:
+    expo:
+      optional: true
   languageName: unknown
   linkType: soft
 
