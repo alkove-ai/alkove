@@ -10,8 +10,11 @@ if File.exist?(File.join(repo, "Package.swift")) && File.directory?(File.join(re
   FileUtils.mkdir_p(File.join(vendor, "Alkove"))
   FileUtils.rm_f(Dir[File.join(vendor, "Alkove", "*.swift")])
   FileUtils.cp(Dir[File.join(repo, "ios", "Sources", "Alkove", "*.swift")], File.join(vendor, "Alkove"))
-  built = File.join(repo, "ios", "build", "AlkoveFFI.xcframework.zip")
-  FileUtils.cp(built, vendor) if File.exist?(built)
+  built = File.join(repo, "ios", "build", "AlkoveFFI.xcframework")
+  if File.directory?(built)
+    FileUtils.rm_rf(File.join(vendor, "AlkoveFFI.xcframework"))
+    FileUtils.cp_r(built, vendor)
+  end
 end
 # the zip the npm package carries, unpacked once
 unless File.directory?(File.join(vendor, "AlkoveFFI.xcframework"))
@@ -29,8 +32,8 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => "15.0" }
   s.source       = { :git => "https://github.com/alkove-ai/alkove.git", :tag => "react-native-v#{s.version}" }
 
-  s.source_files = "ios/*.{h,mm,swift}", "ios/vendor/Alkove/*.swift"
-  s.private_header_files = "ios/*.h"
+  s.source_files = "ios/objc/*.{h,mm}", "ios/swift/*.swift", "ios/vendor/Alkove/*.swift"
+  s.private_header_files = "ios/objc/*.h"
   s.vendored_frameworks = "ios/vendor/AlkoveFFI.xcframework"
   s.frameworks = "AVFoundation"
   s.swift_version = "5.9"

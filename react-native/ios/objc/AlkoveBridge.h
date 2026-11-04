@@ -1,0 +1,18 @@
+#import <Foundation/Foundation.h>
+
+NS_ASSUME_NONNULL_BEGIN
+
+typedef void (^AlkoveDone)(NSString *_Nullable json, NSString *_Nullable code, NSString *_Nullable message);
+
+// implemented in Swift (ios/swift/AlkoveBridge.swift), declared here: no generated -Swift.h, whose place differs under CocoaPods and Swift Package Manager
+@interface AlkoveBridge : NSObject
+
+- (instancetype)initWithSend:(void (^)(double id, NSString *type, NSString *json))send;
+- (void)compile:(NSString *)text langs:(NSArray<NSString *> *)langs done:(AlkoveDone)done;
+- (void)startWake:(double)id words:(NSArray<NSString *> *)words context:(NSString *)context done:(AlkoveDone)done;
+- (void)close:(double)id;
+- (void)closeAll;
+
+@end
+
+NS_ASSUME_NONNULL_END

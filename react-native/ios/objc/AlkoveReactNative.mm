@@ -1,10 +1,6 @@
 #import "AlkoveReactNative.h"
 
-#if __has_include("AlkoveReactNative-Swift.h")
-#import "AlkoveReactNative-Swift.h"
-#else
-#import <AlkoveReactNative/AlkoveReactNative-Swift.h>
-#endif
+#import "AlkoveBridge.h"
 
 @implementation AlkoveReactNative {
   AlkoveBridge *_bridge;

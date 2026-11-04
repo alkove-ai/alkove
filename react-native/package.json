@@ -29,7 +29,8 @@
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
-    "!**/.*"
+    "!**/.*",
+    "Package.swift"
   ],
   "scripts": {
     "example": "yarn workspace @alkove/react-native-example",
@@ -136,5 +137,8 @@
       "jest"
     ],
     "version": "0.64.0"
+  },
+  "swiftpmConfig": {
+    "name": "AlkoveReactNative"
   }
 }

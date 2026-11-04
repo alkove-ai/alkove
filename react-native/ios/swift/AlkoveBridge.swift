@@ -4,7 +4,7 @@ import Alkove
 #endif
 
 // the native inputs behind the module, by the ids the JS side gives them
-@objc public final class AlkoveBridge: NSObject, @unchecked Sendable {
+@objc(AlkoveBridge) public final class AlkoveBridge: NSObject, @unchecked Sendable {
   public typealias Done = (String?, String?, String?) -> Void
   private let send: (Double, String, String) -> Void
   private let lock = NSLock()
@@ -33,9 +33,7 @@ import Alkove
         let task = Task { [weak self] in
           for await e in listener.events { self?.forward(id, e) }
         }
-        lock.lock()
-        let old = inputs.updateValue((listener, task), forKey: Int(id))
-        lock.unlock()
+        let old = lock.withLock { inputs.updateValue((listener, task), forKey: Int(id)) }
         old?.task.cancel()
         old?.input.close()
         done(try Self.json(["mode": Self.mode(listener.mode), "status": Self.status(listener.status)]), nil, nil)
@@ -46,18 +44,16 @@ import Alkove
   }
 
   @objc public func close(_ id: Double) {
-    lock.lock()
-    let entry = inputs.removeValue(forKey: Int(id))
-    lock.unlock()
+    let entry = lock.withLock { inputs.removeValue(forKey: Int(id)) }
     entry?.task.cancel()
     entry?.input.close()
   }
 
   @objc public func closeAll() {
-    lock.lock()
-    let all = inputs
-    inputs = [:]
-    lock.unlock()
+    let all = lock.withLock {
+      defer { inputs = [:] }
+      return inputs
+    }
     for e in all.values {
       e.task.cancel()
       e.input.close()
