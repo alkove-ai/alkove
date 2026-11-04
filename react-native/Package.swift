@@ -9,7 +9,7 @@ let here = URL(fileURLWithPath: Context.packageDirectory).resolvingSymlinksInPat
 let repo = here.deletingLastPathComponent()
 let alkove: Package.Dependency = FileManager.default.fileExists(atPath: repo.appendingPathComponent("ios/Sources/Alkove").path)
   ? .package(name: "alkove", path: repo.path)
-  : .package(url: "https://github.com/alkove-ai/alkove", from: "0.4.1")
+  : .package(url: "https://github.com/alkove-ai/alkove", from: "0.4.3")
 
 let reactHeaders: [Target.Dependency] = [
   .product(name: "ReactHeaders", package: "ReactNative"),

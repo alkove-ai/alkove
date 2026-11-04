@@ -25,7 +25,8 @@
   ],
   "scripts": {
     "prepare": "bob build",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "prepack": "bob build"
   },
   "keywords": [
     "react-native",
@@ -43,7 +44,7 @@
   "license": "Apache-2.0",
   "homepage": "https://alkove.ai",
   "peerDependencies": {
-    "@alkove/react-native": "*",
+    "@alkove/react-native": "^0.1.0",
     "@livekit/react-native": ">=3.0.0",
     "livekit-client": "^2.15.0",
     "react-native": "*"

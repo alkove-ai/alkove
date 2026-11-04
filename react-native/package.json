@@ -37,7 +37,8 @@
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
     "typecheck": "tsc",
-    "test": "jest"
+    "test": "jest",
+    "prepack": "bob build && node scripts/vendor.mjs"
   },
   "keywords": [
     "react-native",
