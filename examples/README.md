@@ -21,3 +21,13 @@ Plain HTML pages on the built package (`pnpm build` first), served from the repo
 | [`wake-then-voice.html`](./wake-then-voice.html) | `createAgentInput` and `agent.spot()`: only the sentence opened by the word is kept |
 
 They load the models from `../models/` (`npx alkove models models`); remove `modelBaseUrl` to load them from Hugging Face.
+
+## Python
+
+Scripts on the `alkove` package (`pip install alkove`), on the microphone through [sounddevice](https://python-sounddevice.readthedocs.io). They load the models from Hugging Face.
+
+| Script | What it shows |
+|---|---|
+| [`python/wake.py`](./python/wake.py) | `Listener`: words typed on the command line (or `/phonemes/`), each time one is heard, as text or JSON; from the script [@drzraf](https://github.com/drzraf) shared in [#4](https://github.com/alkove-ai/alkove/issues/4) |
+
+`python python/wake.py Camille --lang fr`; `--list-devices`, `--device`, `--context pause|anywhere|both`, `--json`, `--once`.
