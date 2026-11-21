@@ -1,6 +1,7 @@
 package ai.alkove
 
 import android.content.Context
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -8,12 +9,35 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 
+/** What [Alkove.preload] and [Alkove.cached] get the models of: a call ([CallProcessor], LiveKit) or an agent need Focus, Cue and Timbre, a wake listener Spot. */
+enum class Usage {
+    CALL,
+    AGENT,
+    WAKE;
+
+    internal fun names(voiceprint: Boolean, typedWords: Boolean): List<String> =
+        (if (this == WAKE) listOf("spot") + (if (voiceprint) listOf("timbre") else emptyList()) else listOf("focus", "cue", "timbre")) + if (typedWords) listOf("lex") else emptyList()
+}
+
+// where the models come from: Alkove.configure's
+internal class ModelConfig(val modelBaseUrl: String?, val dir: File?, val assets: String?, val models: Map<String, Any>)
+
 object Alkove {
     /** The models' rate, and the rate of every output, in Hz. */
     const val RATE = 16000
 
-    /** `near = NEAR_GAP_DB`'s gap: a voice this many dB under the session's main voice is far. */
-    const val NEAR_GAP_DB = 10.0
+    @Volatile
+    internal var config = ModelConfig(null, null, null, emptyMap())
+        private set
+
+    /** Where every input, [models], [preload], [cached] and `Models.load(context)` take the models: `models` a model's File or bytes, else `dir` (a folder of .alk files) or `assets` (a folder of the app's assets), else the app's cache, filled from `modelBaseUrl` or Hugging Face. Before the first input: a model loaded keeps its source. */
+    @JvmStatic
+    @JvmOverloads
+    fun configure(modelBaseUrl: String? = null, dir: File? = null, assets: String? = null, models: Map<String, Any> = emptyMap()) {
+        require(dir == null || assets == null) { "dir or assets, not both" }
+        for ((n, v) in models) require(v is ByteArray || v is File) { "models[\"$n\"]: a File or a ByteArray" }
+        config = ModelConfig(modelBaseUrl, dir, assets, models.toMap())
+    }
 
     internal val info: Map<String, Any?> by lazy {
         native()
@@ -53,15 +77,12 @@ object Alkove {
     private val shared = HashMap<String, Deferred<Model>>()
     private val loader = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /**
-     * The models the real-time inputs share in this process: loaded once, from the cache or Hugging Face (`baseUrl` for your own host).
-     * Closing what it returns frees nothing.
-     */
+    /** The models the real-time inputs share in this process, from where [configure] says: loaded once; closing what it returns frees nothing. */
     @JvmStatic
-    suspend fun models(context: Context, names: Collection<String>, baseUrl: String? = null, onProgress: ((Progress) -> Unit)? = null): Models {
-        val cache = Models.cacheDir(context.applicationContext)
+    suspend fun models(context: Context, names: Collection<String>, onProgress: ((Progress) -> Unit)? = null): Models {
+        val app = context.applicationContext
         val loading = synchronized(shared) {
-            names.associateWith { n -> shared.getOrPut(n) { loader.async { Models.load(listOf(n), cache = cache, baseUrl = baseUrl, onProgress = onProgress).model(n) } } }
+            Models.withTimbre(names).associateWith { n -> shared.getOrPut(n) { loader.async { Models.configured(app, listOf(n), onProgress).model(n) } } }
         }
         return Models(
             loading.mapValues { (n, d) ->
@@ -77,13 +98,15 @@ object Alkove {
         )
     }
 
-    /** Downloads the models of a usage ahead of time (a settings screen): `call` and `agent` need Focus and Cue, `wake` Spot, plus Lex for a typed word. */
+    /** Downloads what a usage needs ahead of time (a settings screen): `voiceprint` adds Timbre to a wake listener's, `typedWords` Lex; models from `dir`, `assets` or `models` are only checked. */
     @JvmStatic
-    suspend fun preload(context: Context, names: Collection<String>, baseUrl: String? = null, onProgress: ((Progress) -> Unit)? = null) {
-        withContext(Dispatchers.IO) { Models.fetch(names, Models.cacheDir(context.applicationContext), baseUrl = baseUrl, onProgress = onProgress) }
+    suspend fun preload(context: Context, usage: Usage, voiceprint: Boolean = false, typedWords: Boolean = false, onProgress: ((Progress) -> Unit)? = null) {
+        val app = context.applicationContext
+        withContext(Dispatchers.IO) { Models.fetchOnly(Models.remote(app, usage.names(voiceprint, typedWords)), Models.cacheDir(app), true, onProgress) }
     }
 
-    /** True when these models are in the cache: an input can start without network. */
+    /** True when what a usage needs is on the device: an input can start without network. */
     @JvmStatic
-    fun cached(context: Context, names: Collection<String>): Boolean = supported && Models.cached(names, Models.cacheDir(context.applicationContext))
+    @JvmOverloads
+    fun cached(context: Context, usage: Usage, voiceprint: Boolean = false, typedWords: Boolean = false): Boolean = supported && Models.local(context.applicationContext, usage.names(voiceprint, typedWords))
 }

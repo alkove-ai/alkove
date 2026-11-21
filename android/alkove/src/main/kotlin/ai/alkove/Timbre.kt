@@ -46,11 +46,9 @@ class Timbre(models: Models) : AutoCloseable {
     internal val ptr: Long
         get() = handle.value
 
-    /** Windows of 1.5 s, half overlapping, their mean without the 10 % least alike; `source` says the audio was `raw` or Focus's output (`focus`). */
+    /** Windows of 1.5 s, half overlapping, their mean without the 10 % least alike. */
     @Synchronized
-    @JvmOverloads
-    fun embed(pcm: FloatArray, source: String = "raw"): Voiceprint =
-        Voiceprint(Values.decode(Native.timbreEmbed(handle.value, pcm, pcm.size, Values.encode(mapOf("source" to source)))).obj())
+    fun embed(pcm: FloatArray): Voiceprint = Voiceprint(Values.decode(Native.timbreEmbed(handle.value, pcm, pcm.size, Values.encode(mapOf("source" to "raw")))).obj())
 
     @Synchronized
     override fun close() = handle.close()
@@ -80,9 +78,9 @@ class Timbre(models: Models) : AutoCloseable {
 data class Offered(val accepted: Int, val rejected: Int, val restarted: Boolean, val progress: Double, val ready: Boolean)
 
 /** A print learned from the user's speech, as the inputs of the web SDK learn it: a window joins only if it sounds like the others. */
-class VoiceprintLearner @JvmOverloads constructor(models: Models, voiceprint: Voiceprint? = null, source: String = "raw") : AutoCloseable {
+class VoiceprintLearner @JvmOverloads constructor(models: Models, voiceprint: Voiceprint? = null) : AutoCloseable {
     private val timbre = Timbre(models)
-    private val handle = Handle(Native.learnerNew(Values.encode(mapOf("source" to source, "start" to voiceprint?.value))), Native::learnerFree)
+    private val handle = Handle(Native.learnerNew(Values.encode(mapOf("source" to "raw", "start" to voiceprint?.value))), Native::learnerFree)
 
     /** Speech of any length, cut into 1.5 s windows, quiet ones skipped. */
     @Synchronized

@@ -40,13 +40,13 @@ class NearTest {
     }
 
     @Test
-    fun levelsAndNearGiveTheWebsEvents() {
-        val ends = run(Chain(models, levels = true), audio).filterIsInstance<Event.SpeechEnd>()
-        assertEquals(listOf(-19.2, -18.3, -40.2, -18.4), ends.map { it.level!!.voiceDb })
-        assertEquals(listOf(null, null, -18.7, -18.7), ends.map { it.level!!.refDb })
-        val near = run(Chain(models, near = Alkove.NEAR_GAP_DB), audio)
+    fun levelsAlwaysAndNearGiveTheWebsEvents() {
+        val ends = run(Chain(models), audio).filterIsInstance<Event.SpeechEnd>()
+        assertEquals(listOf(-18.6, -18.1, -38.9, -18.1), ends.map { it.level!!.voiceDb })
+        assertEquals(listOf(null, null, -18.6, -18.6), ends.map { it.level!!.refDb })
+        val near = run(Chain(models, near = true), audio)
         val far = near.filterIsInstance<Event.Diag>().filter { it.code == "speech.far" }.map { it.data }
-        assertEquals(listOf(Triple(16.814, -40.2, -18.7)), far.map { Triple(it["start"], it["voiceDb"], it["refDb"]) })
+        assertEquals(listOf(Triple(16.814, -38.9, -18.6)), far.map { Triple(it["start"], it["voiceDb"], it["refDb"]) })
         assertEquals(listOf(2.264, 9.524, 24.074), near.filterIsInstance<Event.SpeechStart>().map { it.start })
     }
 
@@ -56,13 +56,13 @@ class NearTest {
         val events = run(Chain(models), pcm, mapOf(10 to { c -> c.hold() }, 20 to { c -> c.release() }, 160 to { c -> c.setListen(false) }))
         val speech = events.filter { it is Event.SpeechStart || it is Event.SpeechEnd || it is Event.SpeechCancel }
         assertEquals(Event.SpeechStart(10 * 256 / 16000.0), speech[0])
-        assertEquals(Event.SpeechEnd(10 * 256 / 16000.0, 20 * 256 / 16000.0), speech[1])
+        assertEquals(Event.SpeechEnd(10 * 256 / 16000.0, 20 * 256 / 16000.0), (speech[1] as Event.SpeechEnd).copy(level = null))
         assertEquals(listOf("SpeechStart", "SpeechCancel"), speech.drop(2).map { it::class.simpleName })
     }
 
     @Test
     fun aHoldInASilenceHasNoVoiceLevel() {
-        val events = run(Chain(models, levels = true), silence(1.0), mapOf(5 to { c -> c.hold() }, 20 to { c -> c.release() }))
+        val events = run(Chain(models), silence(1.0), mapOf(5 to { c -> c.hold() }, 20 to { c -> c.release() }))
         val end = events.filterIsInstance<Event.SpeechEnd>().single()
         assertEquals(null, end.level!!.voiceDb)
         assertEquals(null, end.level!!.refDb)

@@ -39,8 +39,8 @@ unsafe fn model(h: jlong) -> Option<Arc<Model>> {
     })
 }
 
-fn models(focus: jlong, cue: jlong, spot: jlong) -> Models {
-    unsafe { Models { focus: model(focus), cue: model(cue), spot: model(spot) } }
+fn models(focus: jlong, cue: jlong, spot: jlong, timbre: jlong) -> Models {
+    unsafe { Models { focus: model(focus), cue: model(cue), spot: model(spot), timbre: model(timbre) } }
 }
 
 fn value(e: &Env, a: jbyteArray) -> Result<Value, Error> {
@@ -80,8 +80,8 @@ struct ChainH {
 }
 
 #[no_mangle]
-pub unsafe extern "system" fn Java_ai_alkove_Native_chainNew(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, options: jbyteArray) -> jlong {
-    Env::new(env).run(0, |e| Ok(handle(ChainH { s: ChainState::new(model(focus), model(cue), &value(e, options)?)?, hop: Vec::with_capacity(HOP) })))
+pub unsafe extern "system" fn Java_ai_alkove_Native_chainNew(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, timbre: jlong, options: jbyteArray) -> jlong {
+    Env::new(env).run(0, |e| Ok(handle(ChainH { s: ChainState::new(model(focus), model(cue), model(timbre), &value(e, options)?)?, hop: Vec::with_capacity(HOP) })))
 }
 
 #[no_mangle]
@@ -110,6 +110,15 @@ pub unsafe extern "system" fn Java_ai_alkove_Native_chainSetPrint(env: *mut JNIE
     Env::new(env).run((), |e| {
         let p = if print.is_null() { None } else { Some(e.floats(print, e.len(print))?) };
         at::<ChainH>(h).s.chain.set_print(p.as_deref())
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_ai_alkove_Native_chainSetSample(env: *mut JNIEnv, _: jclass, h: jlong, pcm: jfloatArray) {
+    Env::new(env).run((), |e| {
+        let p = if pcm.is_null() { None } else { Some(e.floats(pcm, e.len(pcm))?) };
+        at::<ChainH>(h).s.chain.set_sample(p.as_deref());
+        Ok(())
     })
 }
 
@@ -144,8 +153,8 @@ struct LiveH {
 }
 
 #[no_mangle]
-pub unsafe extern "system" fn Java_ai_alkove_Native_liveNew(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, rate: jdouble, options: jbyteArray) -> jlong {
-    Env::new(env).run(0, |e| Ok(handle(LiveH { s: LiveState::new(model(focus), model(cue), rate, &value(e, options)?)?, pcm: Vec::new() })))
+pub unsafe extern "system" fn Java_ai_alkove_Native_liveNew(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, timbre: jlong, rate: jdouble, options: jbyteArray) -> jlong {
+    Env::new(env).run(0, |e| Ok(handle(LiveH { s: LiveState::new(model(focus), model(cue), model(timbre), rate, &value(e, options)?)?, pcm: Vec::new() })))
 }
 
 #[no_mangle]
@@ -175,6 +184,15 @@ pub unsafe extern "system" fn Java_ai_alkove_Native_liveSetPrint(env: *mut JNIEn
     Env::new(env).run((), |e| {
         let p = if print.is_null() { None } else { Some(e.floats(print, e.len(print))?) };
         at::<LiveH>(h).s.live.chain_mut().set_print(p.as_deref())
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_ai_alkove_Native_liveSetSample(env: *mut JNIEnv, _: jclass, h: jlong, pcm: jfloatArray) {
+    Env::new(env).run((), |e| {
+        let p = if pcm.is_null() { None } else { Some(e.floats(pcm, e.len(pcm))?) };
+        at::<LiveH>(h).s.live.chain_mut().set_sample(p.as_deref());
+        Ok(())
     })
 }
 
@@ -246,8 +264,8 @@ pub unsafe extern "system" fn Java_ai_alkove_Native_trackerGet(_: *mut JNIEnv, _
 }
 
 #[no_mangle]
-pub unsafe extern "system" fn Java_ai_alkove_Native_processorNew(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, spot: jlong, options: jbyteArray) -> jlong {
-    Env::new(env).run(0, |e| Ok(handle(native::processor(&models(focus, cue, spot), &value(e, options)?)?)))
+pub unsafe extern "system" fn Java_ai_alkove_Native_processorNew(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, spot: jlong, timbre: jlong, options: jbyteArray) -> jlong {
+    Env::new(env).run(0, |e| Ok(handle(native::processor(&models(focus, cue, spot, timbre), &value(e, options)?)?)))
 }
 
 #[no_mangle]
@@ -269,10 +287,20 @@ pub unsafe extern "system" fn Java_ai_alkove_Native_processorEnd(env: *mut JNIEn
 }
 
 #[no_mangle]
-pub unsafe extern "system" fn Java_ai_alkove_Native_process(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, spot: jlong, pcm: jfloatArray, n: jint, options: jbyteArray) -> jbyteArray {
+pub unsafe extern "system" fn Java_ai_alkove_Native_process(
+    env: *mut JNIEnv,
+    _: jclass,
+    focus: jlong,
+    cue: jlong,
+    spot: jlong,
+    timbre: jlong,
+    pcm: jfloatArray,
+    n: jint,
+    options: jbyteArray,
+) -> jbyteArray {
     Env::new(env).run(null(), |e| {
         let x = e.floats(pcm, n.max(0) as usize)?;
-        Ok(out(e, &native::process(&models(focus, cue, spot), &x, &value(e, options)?)?))
+        Ok(out(e, &native::process(&models(focus, cue, spot, timbre), &x, &value(e, options)?)?))
     })
 }
 
@@ -469,8 +497,8 @@ struct PipelineH {
 }
 
 #[no_mangle]
-pub unsafe extern "system" fn Java_ai_alkove_Native_pipelineNew(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, spot: jlong, options: jbyteArray) -> jlong {
-    Env::new(env).run(0, |e| Ok(handle(PipelineH { p: native::pipeline(model(focus), model(cue), model(spot), &value(e, options)?)?, hop: Vec::with_capacity(HOP) })))
+pub unsafe extern "system" fn Java_ai_alkove_Native_pipelineNew(env: *mut JNIEnv, _: jclass, focus: jlong, cue: jlong, spot: jlong, timbre: jlong, options: jbyteArray) -> jlong {
+    Env::new(env).run(0, |e| Ok(handle(PipelineH { p: native::pipeline(model(focus), model(cue), model(spot), model(timbre), &value(e, options)?)?, hop: Vec::with_capacity(HOP) })))
 }
 
 #[no_mangle]

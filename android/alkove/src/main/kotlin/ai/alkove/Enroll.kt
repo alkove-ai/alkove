@@ -19,13 +19,7 @@ data class Enrolled(val word: Word, val voiceprint: Voiceprint?)
  * The user says the word a few times: its thresholds come from these takes and from what is heard between them; the takes' voice
  * comes back apart, never in the word. Each take and warning comes on [events]; [await] gives the word.
  */
-class WordEnrollment internal constructor(
-    context: Context,
-    private val text: String,
-    private val lang: List<String>,
-    private val takes: Int,
-    private val baseUrl: String?,
-) : AutoCloseable {
+class WordEnrollment internal constructor(context: Context, private val text: String, private val lang: List<String>) : AutoCloseable {
     private val app = context.applicationContext
     private val channel = Channel<Event>(256, BufferOverflow.DROP_OLDEST)
     private val result = CompletableDeferred<Enrolled>()
@@ -55,10 +49,10 @@ class WordEnrollment internal constructor(
     private suspend fun run(): Enrolled {
         val typed = withContext(Dispatchers.IO) {
             if (text.trim().startsWith("/")) compile(text, lang)
-            else Lex(Alkove.models(app, listOf("lex"), baseUrl)).use { compile(text, lang, it) }
+            else Lex(Alkove.models(app, listOf("lex"))).use { compile(text, lang, it) }
         }
         typed.warnings.forEach(::warn)
-        val i = EnrollInput(app, typed, takes, baseUrl)
+        val i = EnrollInput(app, typed)
         input = i
         i.start()
         var done: Event.Enrolled? = null
@@ -76,7 +70,7 @@ class WordEnrollment internal constructor(
         if (r.error != null || r.word == null) throw AlkoveException("engine.failed", r.error ?: "enrollment failed")
         r.warnings.forEach(::warn)
         val audio = r.audio
-        val voiceprint = if (audio != null && audio.size >= 4000) withContext(Dispatchers.IO) { Timbre(Alkove.models(app, listOf("timbre"), baseUrl)).use { it.embed(audio, "raw") } } else null
+        val voiceprint = if (audio != null && audio.size >= 4000) withContext(Dispatchers.IO) { Timbre(Alkove.models(app, listOf("timbre"))).use { it.embed(audio) } } else null
         return Enrolled(Word(r.word.value, typed.warnings + r.warnings), voiceprint)
     }
 
@@ -91,9 +85,8 @@ class WordEnrollment internal constructor(
 }
 
 object Spot {
-    /** An enrollment on the raw microphone, as a wake listener hears it: the word typed in `lang` (phonemes between slashes need none), said `takes` times. */
+    /** An enrollment on the raw microphone, as a wake listener hears it: the word typed in `lang` (phonemes between slashes need none), said three times. */
     @JvmStatic
     @JvmOverloads
-    fun enroll(context: Context, text: String, lang: List<String> = emptyList(), takes: Int = 3, baseUrl: String? = null): WordEnrollment =
-        WordEnrollment(context, text, lang, takes, baseUrl)
+    fun enroll(context: Context, text: String, lang: List<String> = emptyList()): WordEnrollment = WordEnrollment(context, text, lang)
 }

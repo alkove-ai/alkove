@@ -10,21 +10,23 @@ internal object Native {
     @JvmStatic external fun modelLoad(bytes: ByteArray): Long
     @JvmStatic external fun modelFree(m: Long)
 
-    @JvmStatic external fun chainNew(focus: Long, cue: Long, options: ByteArray): Long
+    @JvmStatic external fun chainNew(focus: Long, cue: Long, timbre: Long, options: ByteArray): Long
     @JvmStatic external fun chainFree(h: Long)
     @JvmStatic external fun chainStep(h: Long, hop: FloatArray, out: FloatArray, events: DoubleArray, focus: FloatArray?): Int
     @JvmStatic external fun chainSetPrint(h: Long, print: FloatArray?)
+    @JvmStatic external fun chainSetSample(h: Long, pcm: FloatArray?)
     @JvmStatic external fun chainSetStrength(h: Long, s: Double)
     @JvmStatic external fun chainSetEnabled(h: Long, on: Boolean)
     @JvmStatic external fun chainGet(h: Long, what: Int): Double
     @JvmStatic external fun chainListen(h: Long, on: Boolean)
     @JvmStatic external fun chainHold(h: Long, on: Boolean)
 
-    @JvmStatic external fun liveNew(focus: Long, cue: Long, rate: Double, options: ByteArray): Long
+    @JvmStatic external fun liveNew(focus: Long, cue: Long, timbre: Long, rate: Double, options: ByteArray): Long
     @JvmStatic external fun liveFree(h: Long)
     @JvmStatic external fun livePush(h: Long, pcm: FloatArray, n: Int, out: FloatArray): Long
     @JvmStatic external fun liveEvents(h: Long): DoubleArray
     @JvmStatic external fun liveSetPrint(h: Long, print: FloatArray?)
+    @JvmStatic external fun liveSetSample(h: Long, pcm: FloatArray?)
     @JvmStatic external fun liveSetStrength(h: Long, s: Double)
     @JvmStatic external fun liveSetEnabled(h: Long, on: Boolean)
     @JvmStatic external fun liveGet(h: Long, what: Int): Double
@@ -37,11 +39,11 @@ internal object Native {
     @JvmStatic external fun trackerReset(h: Long)
     @JvmStatic external fun trackerGet(h: Long, what: Int): Boolean
 
-    @JvmStatic external fun processorNew(focus: Long, cue: Long, spot: Long, options: ByteArray): Long
+    @JvmStatic external fun processorNew(focus: Long, cue: Long, spot: Long, timbre: Long, options: ByteArray): Long
     @JvmStatic external fun processorFree(h: Long)
     @JvmStatic external fun processorPush(h: Long, pcm: FloatArray, n: Int): ByteArray
     @JvmStatic external fun processorEnd(h: Long): ByteArray
-    @JvmStatic external fun process(focus: Long, cue: Long, spot: Long, pcm: FloatArray, n: Int, options: ByteArray): ByteArray
+    @JvmStatic external fun process(focus: Long, cue: Long, spot: Long, timbre: Long, pcm: FloatArray, n: Int, options: ByteArray): ByteArray
 
     @JvmStatic external fun resample(pcm: FloatArray, n: Int, inRate: Double, outRate: Double): FloatArray
     @JvmStatic external fun resamplerNew(inRate: Double, outRate: Double, aligned: Boolean): Long
@@ -79,7 +81,7 @@ internal object Native {
     @JvmStatic external fun learnerState(h: Long): ByteArray
     @JvmStatic external fun learnerForget(h: Long)
 
-    @JvmStatic external fun pipelineNew(focus: Long, cue: Long, spot: Long, options: ByteArray): Long
+    @JvmStatic external fun pipelineNew(focus: Long, cue: Long, spot: Long, timbre: Long, options: ByteArray): Long
     @JvmStatic external fun pipelineFree(h: Long)
     @JvmStatic external fun pipelineStep(h: Long, hop: FloatArray, farQuietMs: Double, out: FloatArray): Int
     @JvmStatic external fun pipelineRaw(h: Long, hop: FloatArray): Int

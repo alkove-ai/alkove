@@ -19,7 +19,7 @@ data class PhraseLevel(val voiceDb: Double?, val noiseDb: Double, val refDb: Dou
 sealed interface Event {
     data class SpeechStart(val start: Double) : Event
 
-    /** [level] with `levels` or `near`. */
+    /** [level] on an input's, a [Chain]'s or a [Live]'s. */
     data class SpeechEnd(val start: Double, val end: Double, val level: PhraseLevel? = null) : Event
 
     /** The phrase sent out from [start] will have no end: listening went off. */
@@ -34,7 +34,7 @@ sealed interface Event {
     /** Speech started while the far end spoke: lower its volume. */
     data class InterruptStart(val start: Double) : Event
 
-    /** That speech spans `minDuration`: stop the far end. */
+    /** That speech spans 0.7 s, short gaps included: stop the far end. */
     data class Interrupt(val start: Double, val at: Double) : Event
 
     /** That speech stopped before: a backchannel, the far end's volume back. */
@@ -61,7 +61,7 @@ sealed interface Event {
     /** Every step of every model, with `trace`. */
     data class Trace(val rows: List<Map<String, Any?>>) : Event
 
-    /** The user's words from speech start to speech end, with their pre-roll, in the output's format and rate; [level] with `levels` or `near`. */
+    /** The user's words from speech start to speech end, with their pre-roll, in the output's format and rate, and their [level]. */
     class Utterance(val pcm: ByteArray, val start: Double, val end: Double, val level: PhraseLevel? = null) : Event
 
     /** An enrollment's end: the word set on the takes, or the error that stopped it. */

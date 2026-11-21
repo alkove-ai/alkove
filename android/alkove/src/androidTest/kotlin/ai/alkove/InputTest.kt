@@ -32,7 +32,7 @@ class InputTest {
     @Test
     fun agentRunsFocusOnTheMicrophone() = runBlocking {
         val bytes = AtomicLong()
-        val input = AgentInput.start(context, AgentOptions(output = Output(Format.S16, 24000), stats = true)) { bytes.addAndGet(it.size.toLong()) }
+        val input = AgentInput.start(context, AgentOptions(output = Output(Format.S16, 24000))) { bytes.addAndGet(it.size.toLong()) }
         val events = ArrayList<Event>()
         val job = launch { input.events.collect { events.add(it) } }
         val t0 = System.nanoTime()
@@ -54,7 +54,7 @@ class InputTest {
 
     @Test
     fun listenAndHoldAskedBeforeTheModelsHoldOnceTheyRun() = runBlocking {
-        val input = AgentInput.start(context, AgentOptions(levels = true))
+        val input = AgentInput.start(context, AgentOptions())
         input.listen(false)
         input.hold()
         val events = ArrayList<Event>()

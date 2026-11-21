@@ -4,15 +4,19 @@ import ai.alkove.Fixtures.golden
 import ai.alkove.Fixtures.rng
 import ai.alkove.Fixtures.stream
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CoreTest {
     private val models by lazy { Fixtures.load("focus", "cue") }
     private val print = Fixtures.f32("enroll.timbre.f32", 192)
+    private val voiceprint = Voiceprint(mapOf("source" to "raw", "centers" to listOf(mapOf("embedding" to print, "id" to print, "seconds" to 3.0))))
 
     private fun chain(name: String, seed: Long, seconds: Int, dense: Boolean, rate: Double, opts: Map<String, Any?>) {
         val o = mapOf("gate" to false, "normalize" to true, "strength" to 1.0, "sleep" to true, "speech" to SpeechParams().value(), "print" to null) + opts
-        val c = Native.chainNew(models.ptr("focus"), models.ptr("cue"), Values.encode(o))
+        // no Timbre, as the web's and Python's chains that made these digests
+        val c = Native.chainNew(models.ptr("focus"), models.ptr("cue"), 0, Values.encode(o))
         try {
             val pcm = stream(seed, seconds, dense)
             val r = rng(seed * 31)
@@ -122,7 +126,7 @@ class CoreTest {
     @Test
     fun processWithPrint() =
         process("focus with a print, normalize, trace, other speech settings", 6, 16000) {
-            Processor(models, focus = true, voiceprint = print, strength = 0.7, cue = true, speech = SpeechParams(confidence = 0.4, startSecs = 0.1), normalize = true, trace = true, rate = it)
+            Processor(models, focus = true, voiceprint = voiceprint, strength = 0.7, cue = true, speech = SpeechParams(confidence = 0.4, startSecs = 0.1), normalize = true, trace = true, rate = it)
         }
 
     @Test
@@ -136,4 +140,133 @@ class CoreTest {
 
     @Test
     fun processAt44k() = process("focus and cue, blocks at 44.1 kHz", 10, 44100) { Processor(models, focus = true, cue = true, trace = true, rate = it) }
+
+    // a sample apart from the print, as the lab's benches give it
+    private fun sampled(pcm: FloatArray, print: Voiceprint, sample: FloatArray?, cue: Boolean? = null) =
+        processWith(models, pcm, 16000, processOptions(false, print, 1.0, cue, null, false, false, 16000, null, "anywhere", sample))
+
+    @Test
+    fun aSampleGoesToFocus() {
+        val sample = Fixtures.wav("enroll.wav").copyOfRange(0, 4 * 16000)
+        val focus = { s: FloatArray? -> processOptions(true, voiceprint, 1.0, true, null, false, false, 16000, null, "anywhere", s).getValue("focus").obj() }
+        assertEquals(sample.map(Float::toDouble), focus(sample)["sample"])
+        assertFalse("sample" in focus(null))
+        val pcm = stream(18, 12)
+        val told = sampled(pcm, voiceprint, sample)
+        assertEquals(pcm.size, told.audio.size)
+        assertFalse(ai.alkove.process(models, pcm, focus = true, voiceprint = voiceprint).audio.contentEquals(told.audio))
+        Processor(models, voiceprint = sample).use { p -> assertEquals(pcm.size, p.push(pcm).audio.size + p.end().audio.size) }
+    }
+
+    @Test
+    fun aVoiceprintRunsFocus() {
+        val pcm = stream(21, 6)
+        val asked = ai.alkove.process(models, pcm, focus = true, voiceprint = voiceprint)
+        assertTrue(asked.audio.contentEquals(ai.alkove.process(models, pcm, voiceprint = voiceprint).audio))
+        assertFalse(asked.audio.contentEquals(ai.alkove.process(models, pcm).audio))
+        assertTrue(runCatching { ai.alkove.process(models, pcm, voiceprint = print.toList()) }.exceptionOrNull() is IllegalArgumentException)
+    }
+
+    private fun onlyMyVoice(mine: Voiceprint, reference: Voiceprint, timbre: Timbre): List<Event> {
+        val opts = agentPipelineOptions(AgentOptions(voiceprint = mine, onlyMyVoice = true), mine, mapOf("format" to "f32", "rate" to 16000, "chunkMs" to 32, "audio" to false, "utterance" to false))
+        assertEquals(true, opts["onlyMyVoice"])
+        val p = Native.pipelineNew(models.ptr("focus"), models.ptr("cue"), 0, models.ptr("timbre"), Values.encode(opts))
+        val coach = Native.coachNew(Values.encode(mapOf("reference" to reference.value)))
+        try {
+            val quiet = FloatArray(32000)
+            val enroll = Fixtures.wav("enroll.wav")
+            val pcm = quiet + enroll + quiet + enroll + quiet
+            val hop = FloatArray(256)
+            val out = FloatArray(256)
+            val events = ArrayList<Event>()
+            for (i in 0 until pcm.size / 256) {
+                pcm.copyInto(hop, 0, 256 * i, 256 * i + 256)
+                if (Native.pipelineStep(p, hop, Double.POSITIVE_INFINITY, out) == 0) continue
+                for (o in Values.decode(Native.pipelineOuts(p)).arr()) {
+                    val a = o.arr()
+                    if (a[0] == "event") eventOf(a[1].obj())?.let(events::add)
+                    if (a[0] == "verify") {
+                        val v = a[2] as FloatArray
+                        val r = Values.decode(Native.coachVerify(coach, timbre.ptr, v, v.size)).obj()
+                        Native.pipelineVerified(p, (a[1] as Number).toInt(), r["same"] as Boolean, (r["score"] as Number).toDouble())
+                    }
+                }
+            }
+            return events
+        } finally {
+            Native.coachFree(coach)
+            Native.pipelineFree(p)
+        }
+    }
+
+    @Test
+    fun aRecordingIsItsPrintAndItsSample() {
+        val recording = Fixtures.wav("enroll.wav").copyOfRange(0, 4 * 16000)
+        val pcm = stream(19, 12)
+        val given = ai.alkove.process(models, pcm, focus = true, cue = true, voiceprint = recording)
+        val made = Timbre(models).use { t -> sampled(pcm, t.embed(recording), recording, cue = true) }
+        assertTrue(given.audio.contentEquals(made.audio))
+        assertEquals(made.speech, given.speech)
+        assertEquals(made.diag, given.diag)
+        assertFalse(ai.alkove.process(models, pcm, focus = true, cue = true, voiceprint = Timbre(models).use { it.embed(recording) }).audio.contentEquals(given.audio))
+    }
+
+    @Test
+    fun aRecordingAtTheStartOrSetBeforeTheFirstHop() {
+        val recording = Fixtures.wav("enroll.wav").copyOfRange(0, 4 * 16000)
+        val pcm = stream(20, 15)
+        val outs = { c: Chain ->
+            val out = FloatArray(256)
+            FloatArray(pcm.size / 256 * 256).also { all -> for (i in 0 until pcm.size / 256) c.step(pcm.copyOfRange(256 * i, 256 * i + 256), out).also { out.copyInto(all, 256 * i) } }
+        }
+        val first = Chain(models, voiceprint = recording).use(outs)
+        assertTrue(first.contentEquals(Chain(models).use { it.setVoiceprint(recording); outs(it) }))
+        val live = { l: Live -> l.push(pcm).first }
+        assertTrue(Live(models, 16000, voiceprint = recording).use(live).contentEquals(Live(models, 16000).use { it.setVoiceprint(recording); live(it) }))
+    }
+
+    // an agent learns from its first farEndActive() on: the pipeline already running takes `learn`, its windows go to the coach's learner
+    @Test
+    fun anAgentLearnsOnceTold() =
+        Timbre(models).use { t ->
+            val opts = agentPipelineOptions(AgentOptions(), null, mapOf("format" to "f32", "rate" to 16000, "chunkMs" to 32, "audio" to false, "utterance" to false))
+            assertEquals(false, opts["learn"])
+            val p = Native.pipelineNew(models.ptr("focus"), models.ptr("cue"), 0, models.ptr("timbre"), Values.encode(opts))
+            val coach = Native.coachNew(Values.encode(mapOf("reference" to null)))
+            try {
+                val pcm = FloatArray(16000) + Fixtures.wav("enroll.wav")
+                val hop = FloatArray(256)
+                val out = FloatArray(256)
+                val windows = {
+                    val ws = ArrayList<List<Any?>>()
+                    for (i in 0 until pcm.size / 256) {
+                        pcm.copyInto(hop, 0, 256 * i, 256 * i + 256)
+                        if (Native.pipelineStep(p, hop, Double.POSITIVE_INFINITY, out) > 0) ws.addAll(Values.decode(Native.pipelineOuts(p)).arr().map { it.arr() }.filter { it[0] == "window" })
+                    }
+                    ws
+                }
+                assertTrue(windows().isEmpty())
+                Native.pipelineSet(p, Values.encode(mapOf("learn" to true)))
+                val ws = windows()
+                assertTrue(ws.isNotEmpty())
+                Native.coachLearner(coach, Values.encode(mapOf("start" to null)))
+                val coached = ws.flatMap { w -> (w[1] as FloatArray).let { Values.decode(Native.coachWindow(coach, t.ptr, it, it.size, (w[2] as Number).toDouble(), (w[3] as Number).toDouble())).arr() } }
+                assertTrue(coached.toString(), coached.any { (it.arr()[1] as? Map<*, *>)?.get("code") == "print.learn" })
+            } finally {
+                Native.coachFree(coach)
+                Native.pipelineFree(p)
+            }
+        }
+
+    @Test
+    fun onlyMyVoiceTellsMinePassesOthersNot() =
+        Timbre(models).use { t ->
+            val mine = t.embed(Fixtures.wav("enroll.wav"))
+            val heard = onlyMyVoice(mine, mine, t)
+            assertTrue(heard.any { it is Event.SpeechStart } && heard.any { it is Event.SpeechEnd } && heard.any { it is Event.TurnEnd })
+            assertFalse(heard.any { it is Event.Diag && it.code == "speech.other-voice" })
+            val refused = onlyMyVoice(mine, t.embed(Fixtures.noise(48000, 11, 0.1)), t)
+            assertFalse(refused.any { it is Event.SpeechStart || it is Event.TurnEnd })
+            assertTrue(refused.any { it is Event.Diag && it.code == "speech.other-voice" && "voice" in it.data })
+        }
 }

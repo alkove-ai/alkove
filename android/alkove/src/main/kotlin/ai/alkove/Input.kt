@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -20,13 +21,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** The agent's audio: float32 or int16, little-endian, at `rate`, in chunks of `chunkMs` (a multiple of 16 ms). */
 data class Output(val format: Format = Format.F32, val rate: Int = Alkove.RATE, val chunkMs: Int = 32)
 
 enum class Format { F32, S16 }
 
-/** Speech heard, audio processed and noise removed since the input started (`stats = true`). */
+/** Speech heard, audio processed and noise removed since the input started. */
 data class Stats(val speechSeconds: Double, val seconds: Double, val noiseRemovedDb: Double?)
 
 private const val HOP = 256
@@ -46,12 +49,7 @@ private const val HELD_AUDIO = 16L shl 20
  * A real-time input on the microphone: the SDK opens it at 16 kHz, runs the models on its own thread at audio priority, and reports
  * on [events]. Collect them once; they wait for you, up to a thousand (utterances up to 16 MB of audio). Close it when done.
  */
-abstract class AlkoveInput internal constructor(
-    context: Context,
-    private val echoCancellation: Boolean,
-    private val device: AudioDeviceInfo?,
-    private val baseUrl: String?,
-) : AutoCloseable {
+abstract class AlkoveInput internal constructor(context: Context, private val echoCancellation: Boolean, private val device: AudioDeviceInfo?) : AutoCloseable {
     protected val app: Context = context.applicationContext
     private val heldAudio = AtomicLong()
     private val channel = Channel<Event>(1024, BufferOverflow.DROP_OLDEST) { if (it is Event.Utterance) heldAudio.addAndGet(-it.pcm.size.toLong()) }
@@ -70,12 +68,24 @@ abstract class AlkoveInput internal constructor(
     @Volatile
     internal var print: Voiceprint? = null
 
+    // the recording given as the voiceprint, Focus's sample
+    @Volatile
+    internal var sample: FloatArray? = null
+
     /** The print in use, or the one learned so far. */
     val voiceprint: Voiceprint?
         get() = print
 
+    // the print learns while the models run: an agent's from its first farEndActive() on
     @Volatile
-    internal var strength = 1.0
+    internal var learning = false
+    private val learnStarted = AtomicBoolean(false)
+
+    @Volatile
+    internal var farCalled = false
+
+    @Volatile
+    private var modelsRan = false
 
     // the app's listen() and hold(), sent again to every new pipeline: they hold across loads and crashes
     @Volatile
@@ -137,6 +147,7 @@ abstract class AlkoveInput internal constructor(
 
     // the background thread's own: Timbre for the print or the voice of a wake
     private var bg: ExecutorService? = null
+    private val bgMade = Mutex()
     private var coach = 0L
     private var timbre: Timbre? = null
     // the words asked for and Spot's model, applied once both and the pipeline are there
@@ -154,9 +165,17 @@ abstract class AlkoveInput internal constructor(
 
     internal open fun reference(): Voiceprint? = null
 
-    internal open fun learning(): Boolean = false
+    internal open fun learns(): Boolean = false
 
     internal open fun spots(): Boolean = false
+
+    // the words it listens for from its start, compiled off the capture thread before the models load
+    internal open suspend fun startWords(): Map<String, Any?>? = null
+
+    // a recording given as a print, made into one before the models load
+    internal open suspend fun resolveVoice() {}
+
+    internal suspend fun embedRecording(recording: FloatArray): Voiceprint = Timbre(Alkove.models(app, listOf("timbre"))).use { it.embed(recording) }
 
     // the agent's audio still goes out raw while the models load or the device is too slow
     internal open fun rawOutput(): Map<String, Any?>? = null
@@ -186,7 +205,7 @@ abstract class AlkoveInput internal constructor(
 
     // the agent's audio while no model runs: loading, failed, crashed
     private fun makeRawPipe() {
-        if (rawPipe == 0L) rawOutput()?.let { rawPipe = Native.pipelineNew(0, 0, 0, Values.encode(mapOf("chain" to null, "output" to it))) }
+        if (rawPipe == 0L) rawOutput()?.let { rawPipe = Native.pipelineNew(0, 0, 0, 0, Values.encode(mapOf("chain" to null, "output" to it))) }
     }
 
     private fun startUnsupported() {
@@ -258,40 +277,28 @@ abstract class AlkoveInput internal constructor(
     private suspend fun startModels(wait: Long) {
         if (closed) return
         try {
-            val m = Alkove.models(app, models() + if (spotWords != null) listOf("spot") else emptyList(), baseUrl)
+            resolveVoice()
+            if (spotWords == null) spotWords = startWords()
+            val m = Alkove.models(app, models() + if (spotWords != null) listOf("spot") else emptyList())
             if ("spot" in m) spotModel = m.ptr("spot")
-            if (wantsBackground() && bg == null) {
-                val t = Timbre(Alkove.models(app, listOf("timbre"), baseUrl))
-                val reference = reference()?.value
-                val start = voiceprint?.value
-                val learn = learning()
-                val ex = Executors.newSingleThreadExecutor { Thread(it, "alkove-background") }
-                ex.execute {
-                    timbre = t
-                    coach = Native.coachNew(Values.encode(mapOf("reference" to reference)))
-                    if (learn) Native.coachLearner(coach, Values.encode(mapOf("start" to start)))
-                }
-                synchronized(life) {
-                    if (bgClosed) {
-                        ex.execute(::freeBackground)
-                        ex.shutdown()
-                        return
-                    }
-                    bg = ex
-                }
-            }
+            startLearning()
+            if (wantsBackground()) makeBackground()
             val version = settings
-            val h = Native.pipelineNew(m.ptr("focus"), m.ptr("cue"), m.ptr("spot"), Values.encode(pipelineOptions()))
+            val withPrint = print != null
+            val h = Native.pipelineNew(m.ptr("focus"), m.ptr("cue"), m.ptr("spot"), m.ptr("timbre"), Values.encode(pipelineOptions()))
             command({ Native.pipelineFree(h) }) {
                 if (closed) Native.pipelineFree(h)
                 else {
                     pipe = h
                     built = version
+                    printed = withPrint
                     applySettings()
                     if (!listening || holding) Native.pipelineSet(h, Values.encode(buildMap { if (!listening) put("listen", false); if (holding) put("hold", true) }))
                     applyWords()
                     if (rawPipe != 0L) Native.pipelineFree(rawPipe).also { rawPipe = 0 }
                     activate()
+                    modelsRan = true
+                    if (learns() && !learnStarted.get()) scope.launch { startLearning() }
                 }
             }
         } catch (e: Exception) {
@@ -302,6 +309,46 @@ abstract class AlkoveInput internal constructor(
             delay(wait)
             startModels(minOf(2 * wait, MODELS_RETRY_MAX_MS))
         }
+    }
+
+    // Timbre on its own thread, once per input: the learning windows and the voice checks
+    private suspend fun makeBackground() {
+        bgMade.withLock {
+            if (synchronized(life) { bg != null }) return
+            val t = Timbre(Alkove.models(app, listOf("timbre")))
+            val reference = reference()?.value
+            val ex = Executors.newSingleThreadExecutor { Thread(it, "alkove-background") }
+            ex.execute {
+                timbre = t
+                coach = Native.coachNew(Values.encode(mapOf("reference" to reference)))
+            }
+            synchronized(life) {
+                if (bgClosed) {
+                    ex.execute(::freeBackground)
+                    ex.shutdown()
+                } else {
+                    bg = ex
+                }
+            }
+        }
+    }
+
+    // once the SDK knows when the agent speaks, for the input's life: the learner from the print in use, then the pipeline's windows
+    private suspend fun startLearning() {
+        if (!learns() || !learnStarted.compareAndSet(false, true)) return
+        learning = true
+        try {
+            makeBackground()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            learning = false
+            learnStarted.set(false)
+            diag("models.failed", "warn", mapOf("message" to "Timbre not loaded: the print does not learn.", "error" to (e.message ?: e.toString())))
+            return
+        }
+        val start = print?.value
+        background("learner") { Native.coachLearner(coach, Values.encode(mapOf("start" to start))) }
+        changed(mapOf("learn" to true))
     }
 
     // the input's clock goes on while the hops pause: events are dated on it, from the hop about to be stepped
@@ -457,6 +504,8 @@ abstract class AlkoveInput internal constructor(
         if (shift == 0.0) return v
         val m = LinkedHashMap(v)
         for (k in arrayOf("start", "end", "at")) (m[k] as? Number)?.let { m[k] = it.toDouble() + shift }
+        val d = m["data"] as? Map<*, *>
+        if (m["type"] == "diag" && d != null) m["data"] = LinkedHashMap(d.obj()).also { x -> for (k in arrayOf("start", "end")) (x[k] as? Number)?.let { x[k] = it.toDouble() + shift } }
         return m
     }
 
@@ -478,8 +527,8 @@ abstract class AlkoveInput internal constructor(
                 "verify" -> {
                     val key = a[1].num().toInt()
                     val pcm = a[2] as FloatArray
-                    // a voice that cannot be checked does not wake
-                    background("verify", { command { if (pipe != 0L) Native.pipelineVerified(pipe, key, false, 0.0) } }) {
+                    // unanswered, as on the web: a held wake does not wake, a held phrase is the user's after a second
+                    background("verify") {
                         val r = Values.decode(Native.coachVerify(coach, timbre!!.ptr, pcm, pcm.size)).obj()
                         command { if (pipe != 0L) Native.pipelineVerified(pipe, key, r["same"] as Boolean, r["score"].num()) }
                     }
@@ -586,7 +635,7 @@ abstract class AlkoveInput internal constructor(
     private fun applySettings() {
         if (built == settings) return
         built = settings
-        Native.pipelineSet(pipe, Values.encode(mapOf("strength" to strength, "enabled" to enabled, "print" to print?.embedding)))
+        Native.pipelineSet(pipe, Values.encode(mapOf("enabled" to enabled, "print" to print?.embedding) + (sample?.let { mapOf("sample" to it) } ?: emptyMap()) + (if (learning) mapOf("learn" to true) else emptyMap())))
     }
 
     private fun changed(change: Map<String, Any?>) {
@@ -629,33 +678,46 @@ abstract class AlkoveInput internal constructor(
         }
     }
 
-    /** How much of Focus goes out, 0 to 1, the rest being the raw microphone. */
-    fun setStrength(s: Double) {
-        strength = s
-        changed(mapOf("strength" to s))
+    /** Focus keeps this voice from the next silence on; null goes back to the closest voice. While the print learns, learning starts again from it. */
+    fun setVoiceprint(p: Voiceprint?) = applyPrint(p, null)
+
+    /** A few seconds of the user alone at 16 kHz: its print, made by Timbre in the background, and the recording as Focus's sample. */
+    fun setVoiceprint(recording: FloatArray) {
+        scope.launch {
+            try {
+                applyPrint(embedRecording(recording), recording)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                diag("voiceprint.reset", "warn", mapOf("message" to "A recording as the voiceprint: ${e.message ?: e}"))
+            }
+        }
     }
 
-    /** Focus keeps this voice from the next silence on; null goes back to the closest voice. With `learn`, learning starts again from it. */
-    fun setVoiceprint(p: Voiceprint?) {
+    private fun applyPrint(p: Voiceprint?, s: FloatArray?) {
         print = p
-        changed(mapOf("print" to p?.embedding))
-        if (learning()) background("learner") { Native.coachLearner(coach, Values.encode(mapOf("start" to p?.value))) }
+        sample = s
+        changed(mapOf("print" to p?.embedding) + (if (s != null) mapOf("sample" to s) else emptyMap()))
+        if (learning) background("learner") { Native.coachLearner(coach, Values.encode(mapOf("start" to p?.value))) }
     }
 
     /** Drops the print and what was learned of it. */
     fun forgetVoiceprint() {
         print = null
+        sample = null
         changed(mapOf("print" to null))
         background("forget") { Native.coachForget(coach) }
     }
 
-    /** The app's own playback starts or stops (an agent's voice): learning skips what the far end may have put in the microphone. */
+    /** The app's own playback starts or stops (an agent's voice): the interruptions come while it plays; the first call starts learning the print, which skips what the far end may have put in the microphone. */
     fun farEndActive(on: Boolean) {
         farActive = on
         if (on) farStarted = true
+        if (farCalled) return
+        farCalled = true
+        if (modelsRan) scope.launch { startLearning() }
     }
 
-    /** Speech heard and noise removed so far (`stats = true`), null before the models run or once closed. */
+    /** Speech heard and noise removed so far, null before the models run or once closed. */
     suspend fun stats(): Stats? {
         val d = CompletableDeferred<Stats?>()
         command({ d.complete(null) }) {
@@ -734,7 +796,7 @@ abstract class AlkoveInput internal constructor(
         spotWords = mapOf("words" to words.map { it.value }, "context" to context)
         scope.launch {
             try {
-                spotModel = Alkove.models(app, listOf("spot"), baseUrl).ptr("spot")
+                spotModel = Alkove.models(app, listOf("spot")).ptr("spot")
                 command(c = ::applyWords)
             } catch (e: Exception) {
                 diag("models.failed", "warn", mapOf("message" to "Spot not loaded: no words.", "error" to (e.message ?: e.toString())))
@@ -768,40 +830,70 @@ abstract class AlkoveInput internal constructor(
     }
 }
 
-/** What an agent input does with the user's voice. `farEnd`: the app calls [AlkoveInput.farEndActive] around its own playback, which `learn` needs. */
+/** An agent's wake words on the raw microphone: [Word]s, their JSON, or texts typed in `lang`; each [Wake] decides whether the user is far for what follows (diag `wake.far`), its voice the print unless the app gave one (diag `wake.print`). */
+data class WakeWords @JvmOverloads constructor(val words: List<Any>, val lang: List<String> = emptyList(), val context: String = "pause") {
+    @JvmOverloads
+    constructor(words: List<Any>, lang: String, context: String = "pause") : this(words, listOf(lang), context)
+
+    init {
+        require(words.isNotEmpty()) { "wake.words is empty" }
+        require(lang.isNotEmpty() || words.none(::typed)) { "wake.lang is needed for a typed word" }
+    }
+
+    // at the start: a language Lex lacks, a word compiled for another Spot
+    internal fun check() {
+        checkLangs(lang)
+        words.filterNot(::typed).forEach { Word.of(it) }
+    }
+
+    internal fun compiled(lex: Lex?): List<Word> = words.map { if (typed(it)) compile(it as String, lang, lex) else Word.of(it) }
+}
+
+private fun typed(w: Any) = w is String && !w.trimStart().startsWith("{")
+
+/** What an agent input does with the user's voice; it learns the print from the first [AlkoveInput.farEndActive] call on. */
 data class AgentOptions @JvmOverloads constructor(
-    val voiceprint: Voiceprint? = null,
-    val learn: Boolean = false,
-    val farEnd: Boolean = false,
-    val strength: Double = 1.0,
-    val normalize: Boolean = true,
-    val speech: SpeechParams? = null,
+    /** A [Voiceprint], or a few seconds of the user alone at 16 kHz (FloatArray): its print made by Timbre before the models run, and the recording as Focus's sample. */
+    val voiceprint: Any? = null,
     val output: Output = Output(),
     val keepRecent: Double = 0.0,
     val trace: Boolean = false,
-    val stats: Boolean = false,
-    val echoCancellation: Boolean = true,
     val device: AudioDeviceInfo? = null,
-    val baseUrl: String? = null,
-    /** Speech ends and utterances carry their [PhraseLevel]. */
-    val levels: Boolean = false,
-    /** A voice this many dB under the session's main voice ([Alkove.NEAR_GAP_DB]) opens no phrase, but a diag `speech.far`; null: off. */
-    val near: Double? = null,
-    /** [Event.Turn] and [Event.TurnEnd]; null: off. */
-    val turn: TurnParams? = TurnParams(),
-    /** [Event.InterruptStart], [Event.Interrupt], [Event.InterruptCancel] while `farEnd` speaks; null: off. */
-    val interrupt: InterruptParams? = InterruptParams(),
-)
+    /** A voice 10 dB under the session's main voice opens no phrase, but a diag `speech.far`. */
+    val near: Boolean = false,
+    /** When [Event.Turn] and [Event.TurnEnd] come. */
+    val turn: TurnParams = TurnParams(),
+    /** [Wake]s on the raw microphone, each one deciding whether the user is far; null: off. */
+    val wake: WakeWords? = null,
+    /** Phrases, turns and interruptions only in the print's voice (`voiceprint`, or the one learned): Timbre hears 0.6 s of each first, another voice gives a diag `speech.other-voice`. */
+    val onlyMyVoice: Boolean = false,
+) {
+    init {
+        checkVoice(voiceprint)
+    }
+}
+
+internal fun agentPipelineOptions(opts: AgentOptions, print: Voiceprint?, output: Map<String, Any?>, sample: FloatArray? = null, learn: Boolean = false) =
+    mapOf(
+        "chain" to mapOf("gate" to false, "normalize" to true, "strength" to 1.0, "print" to print?.embedding, "sample" to sample, "levels" to true, "near" to opts.near),
+        "learn" to learn,
+        "keepRecent" to opts.keepRecent,
+        "trace" to opts.trace,
+        "stats" to true,
+        "output" to output,
+        "turn" to opts.turn.value(),
+        "interrupt" to true,
+        "wake" to (opts.wake != null),
+        "onlyMyVoice" to opts.onlyMyVoice,
+    )
 
 /**
  * The user's voice for a voice agent: Focus and Cue on the microphone, the audio at the rate and format the agent's API takes,
  * speech start and end, and each utterance with its pre-roll. `onAudio` runs on the audio thread: hand the chunk over, do not block.
  */
-class AgentInput private constructor(context: Context, private val opts: AgentOptions, private val onAudio: ((ByteArray) -> Unit)?) :
-    AlkoveInput(context, opts.echoCancellation, opts.device, opts.baseUrl) {
+class AgentInput private constructor(context: Context, private val opts: AgentOptions, private val onAudio: ((ByteArray) -> Unit)?) : AlkoveInput(context, true, opts.device) {
     init {
-        print = opts.voiceprint
-        strength = opts.strength
+        print = opts.voiceprint as? Voiceprint
     }
 
     private val output = opts.output.let { it.copy(chunkMs = maxOf(16, Math.round(it.chunkMs / 16.0).toInt() * 16)) }
@@ -811,9 +903,27 @@ class AgentInput private constructor(context: Context, private val opts: AgentOp
 
     override fun models() = listOf("focus", "cue")
 
-    override fun wantsBackground() = opts.learn
+    override fun wantsBackground() = learning || opts.onlyMyVoice
 
-    override fun learning() = opts.learn
+    override fun learns() = farCalled
+
+    @Volatile
+    private var recorded: Voiceprint? = null
+
+    // a setVoiceprint() that came first wins
+    override suspend fun resolveVoice() {
+        val r = opts.voiceprint as? FloatArray ?: return
+        if (recorded != null) return
+        val p = embedRecording(r)
+        recorded = p
+        if (print == null && sample == null) {
+            print = p
+            sample = r
+        }
+    }
+
+    // the print Timbre checks the phrases against; while it learns, the one being learned
+    override fun reference() = if (opts.onlyMyVoice && !learning) opts.voiceprint as? Voiceprint ?: recorded else null
 
     override fun rawOutput() = outputValue(false)
 
@@ -840,19 +950,14 @@ class AgentInput private constructor(context: Context, private val opts: AgentOp
         }
     }
 
-    override fun pipelineOptions() =
-        mapOf(
-            "chain" to
-                mapOf("gate" to false, "normalize" to opts.normalize, "strength" to strength, "print" to print?.embedding, "speech" to (opts.speech ?: SpeechParams()).value(), "levels" to opts.levels) +
-                (if (opts.near != null) mapOf("near" to mapOf("gapDb" to opts.near)) else emptyMap()),
-            "learn" to opts.learn,
-            "keepRecent" to opts.keepRecent,
-            "trace" to opts.trace,
-            "stats" to opts.stats,
-            "output" to outputValue(true),
-            "turn" to (opts.turn?.value() ?: false),
-            "interrupt" to (opts.interrupt?.value() ?: false),
-        )
+    override fun pipelineOptions() = agentPipelineOptions(opts, print, outputValue(true), sample, learning)
+
+    // Lex only for a typed word: loaded once for the process
+    override suspend fun startWords() =
+        opts.wake?.let { w ->
+            val lex = if (w.words.any(::typed)) Lex(Alkove.models(app, listOf("lex"))) else null
+            lex.use { mapOf("words" to w.compiled(it).map(Word::value), "context" to w.context) }
+        }
 
     /** Words read in Focus's output, as a wake listener would on the raw microphone; their wakes come on [events]. Close the handle to stop. */
     @JvmOverloads
@@ -866,24 +971,27 @@ class AgentInput private constructor(context: Context, private val opts: AgentOp
         @JvmStatic
         @JvmOverloads
         fun start(context: Context, options: AgentOptions = AgentOptions(), onAudio: ((ByteArray) -> Unit)? = null): AgentInput {
-            require(!options.learn || options.farEnd) { "learn needs farEnd: the agent's voice would teach the print (call farEndActive around your playback)" }
+            if (Alkove.supported) options.wake?.check()
             return AgentInput(context, options, onAudio).also { it.start() }
         }
     }
 }
 
-/** What a wake listener listens for. `onlyMyVoice`: only this voice wakes it, checked by Timbre on the word and the 0.5 s after it. */
+/** What a wake listener listens for. `voiceprint`: only this voice wakes it, checked by Timbre on the word and the 0.5 s after it; a [Voiceprint], or a few seconds of the user alone at 16 kHz (FloatArray), made a print before the models run. */
 data class WakeOptions @JvmOverloads constructor(
     val words: List<Any>,
     val context: String = "pause",
-    val onlyMyVoice: Voiceprint? = null,
+    val voiceprint: Any? = null,
     val trace: Boolean = false,
     val device: AudioDeviceInfo? = null,
-    val baseUrl: String? = null,
-)
+) {
+    init {
+        checkVoice(voiceprint)
+    }
+}
 
 /** Spot alone on the raw microphone: wakes on [events], each with the word's raw audio. */
-class WakeListener private constructor(context: Context, private val opts: WakeOptions) : AlkoveInput(context, false, opts.device, opts.baseUrl) {
+class WakeListener private constructor(context: Context, private val opts: WakeOptions) : AlkoveInput(context, false, opts.device) {
     private val words = if (Alkove.supported) opts.words.map(Word::of) else emptyList()
 
     init {
@@ -895,12 +1003,20 @@ class WakeListener private constructor(context: Context, private val opts: WakeO
 
     override fun spots() = true
 
-    override fun wantsBackground() = opts.onlyMyVoice != null
+    override fun wantsBackground() = opts.voiceprint != null
 
-    override fun reference() = opts.onlyMyVoice
+    @Volatile
+    private var recorded: Voiceprint? = null
+
+    override suspend fun resolveVoice() {
+        val r = opts.voiceprint as? FloatArray ?: return
+        if (recorded == null) recorded = embedRecording(r)
+    }
+
+    override fun reference() = opts.voiceprint as? Voiceprint ?: recorded
 
     override fun pipelineOptions() =
-        mapOf("chain" to null, "words" to words.map { it.value }, "context" to opts.context, "trace" to opts.trace, "verify" to (opts.onlyMyVoice != null))
+        mapOf("chain" to null, "words" to words.map { it.value }, "context" to opts.context, "trace" to opts.trace, "verify" to wantsBackground())
 
     /** Listen for other words from now on. */
     @JvmOverloads
@@ -912,11 +1028,11 @@ class WakeListener private constructor(context: Context, private val opts: WakeO
     }
 }
 
-// Spot on the raw microphone, the takes counted in the pipeline
-internal class EnrollInput(context: Context, private val word: Word, private val takes: Int, baseUrl: String?) : AlkoveInput(context, false, null, baseUrl) {
+// Spot on the raw microphone, the three takes counted in the pipeline
+internal class EnrollInput(context: Context, private val word: Word) : AlkoveInput(context, false, null) {
     override fun models() = listOf("spot")
 
     override fun spots() = true
 
-    override fun pipelineOptions() = mapOf("chain" to null, "enroll" to mapOf("word" to word.value, "takes" to takes))
+    override fun pipelineOptions() = mapOf("chain" to null, "enroll" to mapOf("word" to word.value))
 }

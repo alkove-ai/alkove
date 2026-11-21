@@ -114,7 +114,7 @@ class MainActivity : Activity() {
             return
         }
         try {
-            val a = AgentInput.start(this, AgentOptions(keepRecent = 30.0, stats = true))
+            val a = AgentInput.start(this, AgentOptions(keepRecent = 30.0))
             agent = a
             b.text = "Agent: stop"
             collecting = scope.launch { a.events.collect(::show) }

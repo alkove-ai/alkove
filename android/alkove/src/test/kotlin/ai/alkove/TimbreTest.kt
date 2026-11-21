@@ -34,7 +34,7 @@ class TimbreTest {
         for (c in clips()) {
             for (k in 0 until 6) {
                 val start = Math.floor(r() * c.size * 0.5).toInt()
-                val n = listOf(280, 4000, 24000, 24001, 36000, c.size - start)[k]
+                val n = listOf(1400, 4000, 24000, 24001, 36000, c.size - start)[k]
                 val pcm = c.copyOfRange(start, minOf(c.size, start + n))
                 out.add(windows(pcm))
                 for (source in listOf("raw", "focus")) out.add(embed(pcm, source))

@@ -59,7 +59,7 @@ class Word internal constructor(internal val value: Map<String, Any?>, warnings:
     }
 }
 
-private fun checkLangs(langs: List<String>) {
+internal fun checkLangs(langs: List<String>) {
     for (l in langs) if (l !in Lex.langs) throw AlkoveException("lang.unsupported", "No $l: ${Lex.langs.joinToString()} only.")
 }
 
@@ -87,8 +87,7 @@ class Lex(models: Models) : AutoCloseable {
     }
 
     /** [compile] with this Lex: a typed word in one or more of its languages. */
-    @JvmOverloads
-    fun compile(text: String, lang: List<String>, chain: String? = null): Word = compile(text, lang, this, chain)
+    fun compile(text: String, lang: List<String>): Word = compile(text, lang, this)
 
     fun compile(text: String, lang: String): Word = compile(text, listOf(lang))
 
@@ -114,15 +113,15 @@ class Lex(models: Models) : AutoCloseable {
 
 /** A typed word in one or more languages (needs `lex`), or phonemes between slashes like "/kamij/" (does not). */
 @JvmOverloads
-fun compile(text: String, lang: List<String> = emptyList(), lex: Lex? = null, chain: String? = null): Word {
+fun compile(text: String, lang: List<String> = emptyList(), lex: Lex? = null): Word {
     checkLangs(lang)
-    val r = if (lex == null) Native.compile(0, Values.encode(mapOf("text" to text, "lang" to lang, "chain" to chain)))
-    else synchronized(lex) { Native.compile(lex.ptr, Values.encode(mapOf("text" to text, "lang" to lang, "chain" to chain))) }
+    val args = Values.encode(mapOf("text" to text, "lang" to lang))
+    val r = if (lex == null) Native.compile(0, args) else synchronized(lex) { Native.compile(lex.ptr, args) }
     val v = Values.decode(r).obj()
     return Word(v["word"].obj(), v["warnings"].arr().map(Warning::of))
 }
 
-/** A word heard: its score against its threshold, in seconds from the stream's start; a wake listener's carries the word's raw audio (16 kHz), and with onlyMyVoice the likeness to the print. */
+/** A word heard: its score against its threshold, in seconds from the stream's start; a wake listener's carries the word's raw audio (16 kHz), and with a `voiceprint` the likeness to the print. */
 data class Wake(
     val word: String,
     val score: Double,

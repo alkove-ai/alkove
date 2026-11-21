@@ -72,7 +72,7 @@ class SpotTest {
 
     private fun spot(name: String, seed: Long, context: String, opts: Map<String, Any?>) {
         val o = processOptions(opts["focus"] == true, null, 1.0, opts["cue"] as Boolean?, null, opts["normalize"] == true, opts["trace"] == true, 16000, words(), context)
-        val p = Native.processorNew(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), Values.encode(o))
+        val p = Native.processorNew(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), models.ptr("timbre"), Values.encode(o))
         try {
             val pcm = stream(seed, 40)
             val r = rng(seed * 7)
@@ -176,6 +176,43 @@ class SpotTest {
         Listener(models, listOf(w), context = "anywhere").use { listener ->
             val heard = listener.push(wav("speech.wav"))
             assertTrue(heard[0].speech == null && heard[1].speech != null && heard[5].scores[0].first == "Camille")
+        }
+    }
+
+    @Test
+    fun anAgentsWakeWords() {
+        assertEquals("wake.words is empty", runCatching { WakeWords(emptyList()) }.exceptionOrNull()?.message)
+        assertEquals("wake.lang is needed for a typed word", runCatching { WakeWords(listOf("amendement")) }.exceptionOrNull()?.message)
+        val other = lex.compile("composition", "fr")
+        assertEquals("lang.unsupported", (runCatching { WakeWords(listOf("x"), "de").check() }.exceptionOrNull() as AlkoveException).code)
+        assertEquals("word.outdated", (runCatching { WakeWords(listOf(Json.stringify(other.value + ("spot" to "old")))).check() }.exceptionOrNull() as AlkoveException).code)
+        val w = WakeWords(listOf("amendement", other.toJson()), "fr", "anywhere")
+        val words = w.compiled(lex)
+        assertEquals(listOf(lex.compile("amendement", "fr").toJson(), other.toJson()), words.map { it.toJson() })
+        val opts = agentPipelineOptions(AgentOptions(wake = w), null, mapOf("format" to "f32", "rate" to 16000, "chunkMs" to 32, "audio" to false, "utterance" to false))
+        assertEquals(true, opts["wake"])
+        assertEquals(false, agentPipelineOptions(AgentOptions(), null, emptyMap())["wake"])
+        val p = Native.pipelineNew(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), models.ptr("timbre"), Values.encode(opts))
+        try {
+            Native.pipelineSpot(p, models.ptr("spot"))
+            Native.pipelineSet(p, Values.encode(mapOf("words" to words.map { it.value }, "context" to w.context)))
+            val pcm = FloatArray(16000) + wav("speech.wav") + wav("enroll.wav")
+            val hop = FloatArray(256)
+            val out = FloatArray(256)
+            val events = ArrayList<Event>()
+            for (i in 0 until pcm.size / 256) {
+                pcm.copyInto(hop, 0, 256 * i, 256 * i + 256)
+                if (Native.pipelineStep(p, hop, Double.POSITIVE_INFINITY, out) > 0) {
+                    for (o in Values.decode(Native.pipelineOuts(p)).arr()) if (o.arr()[0] == "event") eventOf(o.arr()[1].obj())?.let(events::add)
+                }
+            }
+            val wake = events.filterIsInstance<Wake>().first()
+            assertTrue(wake.word == "amendement" && wake.audio!!.isNotEmpty())
+            val diags = events.filterIsInstance<Event.Diag>()
+            assertTrue(diags.first { it.code == "wake.far" }.data["far"] is Boolean)
+            assertTrue(diags.any { it.code == "wake.print" })
+        } finally {
+            Native.pipelineFree(p)
         }
     }
 }

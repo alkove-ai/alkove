@@ -63,6 +63,9 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
         @JvmStatic
         val NAMES: List<String> by lazy { MANIFEST["models"].obj().keys.toList() }
 
+        // Focus takes its user's voice through Timbre: loaded with it
+        internal fun withTimbre(names: Collection<String>): List<String> = names.distinct().let { if ("focus" in it && "timbre" !in it) it + "timbre" else it }
+
         private fun spec(name: String): Map<String, Any?> =
             MANIFEST["models"].obj()[name]?.obj() ?: throw IllegalArgumentException("no model named \"$name\": ${NAMES.joinToString()}")
 
@@ -80,7 +83,7 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
         private fun url(name: String, base: String?): String {
             val m = spec(name)
             if (base != null) return base.trimEnd('/') + "/" + m.str("file")
-            val revision = m["revision"] as String? ?: throw AlkoveException("models.fetch", "${m.str("name")}: not on Hugging Face in this version, pass baseUrl or dir")
+            val revision = m["revision"] as String? ?: throw AlkoveException("models.fetch", "${m.str("name")}: not on Hugging Face in this version, set modelBaseUrl, dir or assets (Alkove.configure)")
             return "https://huggingface.co/${MANIFEST.str("org")}/${m.str("name")}/resolve/$revision/${m.str("file")}"
         }
 
@@ -111,14 +114,14 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
             }
         }
 
-        /**
-         * Downloads the models into `cache` once, checked by their sha256, and gives their files. Nothing goes on the network afterwards;
-         * `download = false` only reads the cache. `baseUrl` is your own host for the .alk files (self-hosting), else Hugging Face.
-         */
+        /** Downloads the models into `cache` once, from `modelBaseUrl` ([Alkove.configure]) or Hugging Face, checked by their sha256, and gives their files; `download = false` only reads the cache. */
         @JvmStatic
         @JvmOverloads
-        fun fetch(names: Collection<String>, cache: File, download: Boolean = true, baseUrl: String? = null, onProgress: ((Progress) -> Unit)? = null): Map<String, File> {
-            val names = names.distinct()
+        fun fetch(names: Collection<String>, cache: File, download: Boolean = true, onProgress: ((Progress) -> Unit)? = null): Map<String, File> = fetchOnly(withTimbre(names), cache, download, onProgress)
+
+        // these models and no other
+        internal fun fetchOnly(names: Collection<String>, cache: File, download: Boolean, onProgress: ((Progress) -> Unit)?): Map<String, File> {
+            val baseUrl = Alkove.config.modelBaseUrl
             val missing = names.filter { !path(cache, it).exists() }
             val total = missing.sumOf { spec(it).num("bytes") }
             var before = 0L
@@ -150,12 +153,9 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
 
         /** True when every model is in the cache: an input can start without network. */
         @JvmStatic
-        fun cached(names: Collection<String>, cache: File): Boolean = names.all { path(cache, it).exists() }
+        fun cached(names: Collection<String>, cache: File): Boolean = withTimbre(names).all { path(cache, it).exists() }
 
-        /**
-         * Blocking: `files` gives a model's File or bytes, `dir` a folder of .alk files, else they come from `cache`, downloaded there when missing.
-         * Each file is checked against the sha256 this version pins (`models.hash`).
-         */
+        /** Blocking: `files` gives a model's File or bytes, `dir` a folder of .alk files, else they come from `cache`, downloaded there when missing; each file checked against the sha256 this version pins (`models.hash`). */
         @JvmStatic
         @JvmOverloads
         fun load(
@@ -164,9 +164,11 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
             dir: File? = null,
             files: Map<String, Any> = emptyMap(),
             download: Boolean = true,
-            baseUrl: String? = null,
             onProgress: ((Progress) -> Unit)? = null,
-        ): Models {
+        ): Models = loadOnly(withTimbre(names), cache, dir, files, download, onProgress)
+
+        // these models and no other: Alkove.models loads and shares each one apart
+        internal fun loadOnly(names: Collection<String>, cache: File?, dir: File?, files: Map<String, Any>, download: Boolean, onProgress: ((Progress) -> Unit)?): Models {
             val loaded = LinkedHashMap<String, Model>()
             try {
                 for (name in names.distinct()) {
@@ -175,7 +177,7 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
                         is File -> src.readBytes()
                         null -> when {
                             dir != null -> File(dir, spec(name).str("file")).readBytes()
-                            cache != null -> fromCache(name, cache, download, baseUrl, onProgress)
+                            cache != null -> fromCache(name, cache, download, onProgress)
                             else -> throw IllegalArgumentException("$name: no file, folder or cache given")
                         }
                         else -> throw IllegalArgumentException("$name: a File or a ByteArray")
@@ -190,27 +192,70 @@ class Models internal constructor(private val loaded: Map<String, Model>, privat
         }
 
         // a cached file that no longer matches (a disk error, a file left short) is fetched once more
-        private fun fromCache(name: String, cache: File, download: Boolean, baseUrl: String?, onProgress: ((Progress) -> Unit)?): ByteArray {
-            val f = fetch(listOf(name), cache, download, baseUrl, onProgress).getValue(name)
+        private fun fromCache(name: String, cache: File, download: Boolean, onProgress: ((Progress) -> Unit)?): ByteArray {
+            val f = fetchOnly(listOf(name), cache, download, onProgress).getValue(name)
             return try {
                 checked(name, f.readBytes())
             } catch (e: AlkoveException) {
                 if (!download) throw e
                 f.delete()
-                checked(name, fetch(listOf(name), cache, true, baseUrl, onProgress).getValue(name).readBytes())
+                checked(name, fetchOnly(listOf(name), cache, true, onProgress).getValue(name).readBytes())
             }
         }
 
-        /** The models from Hugging Face at this version's revision (or `baseUrl`), then from the app's cache. Call it ahead on a settings screen, on Wi-Fi if you can. */
+        /** The models from where [Alkove.configure] says, by default from the app's cache, filled from Hugging Face at this version's revision. Call it ahead on a settings screen, on Wi-Fi if you can. */
         @JvmStatic
-        suspend fun load(context: Context, names: Collection<String> = listOf("focus", "cue"), baseUrl: String? = null, onProgress: ((Progress) -> Unit)? = null): Models =
-            withContext(Dispatchers.IO) { load(names, cache = cacheDir(context), baseUrl = baseUrl, onProgress = onProgress) }
+        suspend fun load(context: Context, names: Collection<String> = listOf("focus", "cue"), onProgress: ((Progress) -> Unit)? = null): Models =
+            withContext(Dispatchers.IO) { configured(context.applicationContext, withTimbre(names), onProgress) }
 
-        /** The .alk files the app ships in its assets, under `path`. */
-        @JvmStatic
-        @JvmOverloads
-        fun fromAssets(context: Context, names: Collection<String>, path: String = "alkove"): Models =
-            load(names, files = names.associateWith { n -> context.assets.open("$path/${spec(n).str("file")}").use { it.readBytes() } })
+        // a model given, or the folder or the assets configured: nothing on the network
+        private fun given(name: String): Boolean = Alkove.config.let { name in it.models || it.dir != null || it.assets != null }
+
+        private fun missing(name: String, where: String) = AlkoveException("models.fetch", "${spec(name).str("name")}: no ${spec(name).str("file")} in $where")
+
+        private fun <T> asset(context: Context, folder: String, name: String, read: (java.io.InputStream) -> T): T =
+            try {
+                context.assets.open("$folder/${spec(name).str("file")}").use(read)
+            } catch (_: IOException) {
+                throw missing(name, "the assets' $folder")
+            }
+
+        private fun inDir(dir: File, name: String): File = File(dir, spec(name).str("file")).takeIf { it.exists() } ?: throw missing(name, dir.path)
+
+        // these models from where Alkove.configure says
+        internal fun configured(context: Context, names: Collection<String>, onProgress: ((Progress) -> Unit)?): Models {
+            val c = Alkove.config
+            val files = names.filter { it !in c.models }.mapNotNull { n ->
+                when {
+                    c.assets != null -> n to asset(context, c.assets, n) { it.readBytes() }
+                    c.dir != null -> n to inDir(c.dir, n)
+                    else -> null
+                }
+            }
+            return loadOnly(names, cacheDir(context), null, c.models + files, true, onProgress)
+        }
+
+        // the ones to download; a model configured off the network must be there
+        internal fun remote(context: Context, names: Collection<String>): List<String> {
+            val c = Alkove.config
+            for (n in names.filter { it !in c.models }) {
+                if (c.assets != null) asset(context, c.assets, n) {} else if (c.dir != null) inDir(c.dir, n)
+            }
+            return names.filterNot(::given)
+        }
+
+        // every model on the device, given or in the cache
+        internal fun local(context: Context, names: Collection<String>): Boolean {
+            val c = Alkove.config
+            return names.all { n ->
+                when {
+                    n in c.models -> true
+                    c.assets != null -> runCatching { asset(context, c.assets, n) {} }.isSuccess
+                    c.dir != null -> File(c.dir, spec(n).str("file")).exists()
+                    else -> path(cacheDir(context), n).exists()
+                }
+            }
+        }
     }
 }
 
