@@ -34,7 +34,7 @@
 <br>
 
 <a href="https://alkove.ai/#demo">
-  <img alt="A living room: the assistant takes a typed name, ignores the TV and a guest, hears its user four metres away, waits through a pause, stops only when its user interrupts, all on the device" src=".github/assets/alkove.webp" width="800">
+  <img alt="A living room: the assistant takes a typed name, ignores the TV and a guest, hears its user four metres away, waits through a pause, stops only when its user interrupts, all on the device" src=".github/assets/alkove.avif" width="800">
 </a>
 
 <p align="center"><sub>The five models on one scene: a typed wake word, your voice only, your turns only. <a href="https://alkove.ai/#demo">Try it on your voice</a>.</sub></p>
