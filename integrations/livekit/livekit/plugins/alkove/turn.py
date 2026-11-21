@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 import numpy as np
 
@@ -107,7 +108,8 @@ class TurnDetectorStream:
     async def supports_language(self, language: LanguageCode | None) -> bool:
         return True
 
-    def predict(self) -> asyncio.Future[TurnDetectionEvent]:
+    # chat_ctx since livekit-agents 1.8.13: Cue reads the audio only
+    def predict(self, chat_ctx: Any = None) -> asyncio.Future[TurnDetectionEvent]:
         fut, self._fut = self._fut, None
         if fut is not None and not fut.done():
             fut.set_result(_event(0.0, time.time()))
@@ -115,6 +117,10 @@ class TurnDetectorStream:
         if self._closed or self._ended is not None:
             self._fut.set_result(self._ended or _event(1.0, time.time()))
         return self._fut
+
+    # livekit-agents 1.8.13 tells when the user's turn started: Cue finds its turns in the audio
+    def on_start_of_turn(self, started_at: float) -> None:
+        pass
 
     def cancel_inference(self, *, timed_out: bool = False) -> None:
         # the session cancels when speech comes back: the last pause's answer no longer holds
