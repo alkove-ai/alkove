@@ -1,6 +1,6 @@
 {
   "name": "@alkove/react-native-livekit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Focus in LiveKit React Native's microphone path: keeps the user's voice, removes the other voices and the noise. On the device.",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",
@@ -44,7 +44,7 @@
   "license": "Apache-2.0",
   "homepage": "https://alkove.ai",
   "peerDependencies": {
-    "@alkove/react-native": "^0.1.0",
+    "@alkove/react-native": "^0.2.0",
     "@livekit/react-native": ">=3.0.0",
     "livekit-client": "^2.15.0",
     "react-native": "*"

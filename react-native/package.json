@@ -1,6 +1,6 @@
 {
   "name": "@alkove/react-native",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "On-device voice models and SDK for React Native: wake words, voice isolation, end of turn. No server, no key.",
   "main": "./lib/module/index.js",
   "types": "./lib/typescript/src/index.d.ts",

@@ -16,6 +16,12 @@ import Alkove
     self.send = send
   }
 
+  @objc public func configure(_ config: String) {
+    let o = (try? Self.parse(config)) as? [String: String] ?? [:]
+    let bundled = o["bundled"].flatMap { Bundle.main.resourceURL?.appendingPathComponent($0, isDirectory: true) }
+    Alkove.configure(modelBaseURL: o["url"].flatMap { URL(string: $0) }, directory: o["dir"].map { URL(fileURLWithPath: $0, isDirectory: true) } ?? bundled)
+  }
+
   @objc public func compile(_ text: String, langs: [String], done: @escaping Done) {
     Task {
       do {
@@ -26,6 +32,25 @@ import Alkove
         Self.fail(error, done)
       }
     }
+  }
+
+  @objc public func preload(_ id: Double, usage: String, voiceprint: Bool, typedWords: Bool, done: @escaping Done) {
+    let sent = Sent()
+    Task {
+      do {
+        try await Alkove.preload(try Self.usage(usage), voiceprint: voiceprint, typedWords: typedWords) { [weak self] p in
+          if sent.next(p) { self?.emit(id, "progress", ["loaded": p.loaded, "total": p.total]) }
+        }
+        done("null", nil, nil)
+      } catch {
+        Self.fail(error, done)
+      }
+    }
+  }
+
+  @objc public func cached(_ usage: String, voiceprint: Bool, typedWords: Bool) -> Bool {
+    guard let u = try? Self.usage(usage) else { return false }
+    return Alkove.cached(u, voiceprint: voiceprint, typedWords: typedWords)
   }
 
   @objc public func start(_ id: Double, kind: String, options: String, done: @escaping Done) {
@@ -59,7 +84,7 @@ import Alkove
     switch kind {
     case "wake":
       let words = try (o["words"] as? [String] ?? []).map { try Self.word($0) }
-      return try await WakeListener.start(WakeOptions(words: words, context: o["context"] as? String ?? "pause"))
+      return try await WakeListener.start(WakeOptions(words: words, context: o["context"] as? String ?? "pause", voiceprint: Self.voice(o["voiceprint"]), trace: o["trace"] as? Bool ?? false))
     case "agent":
       if o["utterances"] as? Bool ?? true { _ = lock.withLock { utterances.insert(Int(id)) } }
       var audio: (@Sendable (Data) -> Void)?
@@ -80,9 +105,32 @@ import Alkove
     case "hold": input.hold()
     case "release": input.release()
     case "farEndActive": input.farEndActive(v as? Bool ?? false)
-    case "setStrength": input.setStrength((v as? NSNumber)?.doubleValue ?? 1)
-    case "setVoiceprint": input.setVoiceprint(Self.voiceprint(v))
+    case "setVoiceprint": if let r = Self.recording(v) { input.setVoiceprint(r) } else { input.setVoiceprint(Self.voiceprint(v)) }
     default: break
+    }
+  }
+
+  @objc public func recent(_ id: Double, done: @escaping Done) {
+    guard let input = lock.withLock({ inputs[Int(id)]?.input }) else { return done("", nil, nil) }
+    Task { done(await input.recent()?.base64EncodedString() ?? "", nil, nil) }
+  }
+
+  @objc public func record(_ id: Double, seconds: Double, done: @escaping Done) {
+    guard let input = lock.withLock({ inputs[Int(id)]?.input }) else { return done(nil, "engine.failed", "The input is closed.") }
+    Task {
+      do {
+        done(try await input.record(seconds: seconds).base64EncodedString(), nil, nil)
+      } catch {
+        Self.fail(error, done)
+      }
+    }
+  }
+
+  @objc public func stats(_ id: Double, done: @escaping Done) {
+    guard let input = lock.withLock({ inputs[Int(id)]?.input }) else { return done("null", nil, nil) }
+    Task {
+      guard let s = await input.stats() else { return done("null", nil, nil) }
+      done((try? Self.json(Self.finite(["speechSeconds": s.speechSeconds, "seconds": s.seconds, "noiseRemovedDb": Self.orNull(s.noiseRemovedDb)]))) ?? "null", nil, nil)
     }
   }
 
@@ -124,6 +172,9 @@ import Alkove
     }
   }
 
+  // little-endian float32, as a Float32Array reads it
+  private static func f32(_ x: [Float]) -> String { x.withUnsafeBufferPointer { Data(buffer: $0) }.base64EncodedString() }
+
   // an Optional inside Any is no JSON value either: JSONSerialization raises on it as on NaN
   private static func orNull<T>(_ v: T?) -> Any { v.map { $0 as Any } ?? NSNull() }
 
@@ -142,7 +193,11 @@ import Alkove
 
   private func forward(_ id: Double, _ e: Event) {
     switch e {
-    case let .wake(w): emit(id, "wake", ["word": w.word, "score": w.score, "threshold": w.threshold, "context": w.context, "start": w.start, "end": w.end])
+    case let .wake(w):
+      var o: [String: Any] = ["word": w.word, "score": w.score, "threshold": w.threshold, "context": w.context, "start": w.start, "end": w.end]
+      o["audio"] = w.audio.map(Self.f32)
+      o["voice"] = w.voice
+      emit(id, "wake", o)
     case let .speechStart(start): emit(id, "speechstart", ["start": start])
     case let .speechEnd(start, end, level): emit(id, "speechend", Self.level(["start": start, "end": end], level))
     case let .speechCancel(start): emit(id, "speechcancel", ["start": start])
@@ -157,6 +212,8 @@ import Alkove
       emit(id, "utterance", Self.level(["pcm": u.pcm.base64EncodedString(), "start": u.start, "end": u.end], u.level))
     case let .voiceprintLearned(p): if let json = try? p.toJson(), let v = try? Self.parse(json) { emit(id, "voiceprint", v) }
     case let .learn(progress): emit(id, "learn", ["progress": progress])
+    case let .heard(speech, scores): emit(id, "heard", ["speech": speech, "scores": scores.map { ["word": $0.word, "score": $0.score] }])
+    case let .trace(rows): emit(id, "trace", rows.map(Self.any))
     case let .mode(m, reason): emit(id, "mode", ["mode": Self.mode(m), "reason": Self.orNull(reason?.rawValue)])
     case let .status(s): emit(id, "status", Self.status(s))
     case let .diag(d):
@@ -169,31 +226,40 @@ import Alkove
     }
   }
 
-  // the web's AgentOptions as JSON; turn and interrupt false for off
+  // the web's AgentOptions as JSON
   private static func agentOptions(_ o: [String: Any]) throws -> AgentOptions {
     func num(_ d: [String: Any]?, _ k: String, _ v: Double) -> Double { (d?[k] as? NSNumber)?.doubleValue ?? v }
     let out = o["output"] as? [String: Any]
-    let speech = o["speech"] as? [String: Any]
-    var near: Double?
-    if o["near"] as? Bool == true { near = Alkove.nearGapDb } else if let n = o["near"] as? [String: Any] { near = num(n, "gapDb", Alkove.nearGapDb) }
-    var turn: TurnParams? = TurnParams()
-    if o["turn"] as? Bool == false { turn = nil } else if let t = o["turn"] as? [String: Any] { turn = TurnParams(threshold: num(t, "threshold", 0.6), minPause: num(t, "minPause", 0.3), maxPause: num(t, "maxPause", 1.5)) }
-    var interrupt: InterruptParams? = InterruptParams()
-    if o["interrupt"] as? Bool == false { interrupt = nil } else if let i = o["interrupt"] as? [String: Any] { interrupt = InterruptParams(minDuration: num(i, "minDuration", 0.7)) }
+    let turn = (o["turn"] as? [String: Any]).map { TurnParams(threshold: num($0, "threshold", 0.6), minPause: num($0, "minPause", 0.3), maxPause: num($0, "maxPause", 1.5)) }
+    let wake = (o["wake"] as? [String: Any]).map { w in
+      WakeWords(words: w["words"] as? [String] ?? [], lang: w["lang"] as? [String] ?? (w["lang"] as? String).map { [$0] } ?? [], context: w["context"] as? String ?? "pause")
+    }
     return AgentOptions(
-      voiceprint: voiceprint(o["voiceprint"]),
-      learn: o["learn"] as? Bool ?? false,
-      farEnd: o["farEnd"] as? Bool ?? false,
-      strength: num(o, "strength", 1),
-      normalize: o["normalize"] as? Bool ?? true,
-      speech: speech.map { SpeechParams(confidence: num($0, "confidence", 0.5), exitConfidence: num($0, "exitConfidence", 0.1), startSecs: num($0, "startSecs", 0.2), stopSecs: num($0, "stopSecs", 0.6)) },
+      voiceprint: voice(o["voiceprint"]),
+      onlyMyVoice: o["onlyMyVoice"] as? Bool ?? false,
       output: Output(format: out?["format"] as? String == "s16" ? .s16 : .f32, rate: (out?["rate"] as? NSNumber)?.intValue ?? Alkove.rate, chunkMs: (out?["chunkMs"] as? NSNumber)?.intValue ?? 32),
-      levels: o["levels"] as? Bool ?? false,
-      near: near,
-      turn: turn,
-      interrupt: interrupt
+      keepRecent: (o["keepRecent"] as? NSNumber)?.doubleValue ?? 0,
+      trace: o["trace"] as? Bool ?? false,
+      near: o["near"] as? Bool ?? false,
+      turn: turn ?? TurnParams(),
+      wake: wake
     )
   }
+
+  // a print's JSON, or a recording of the user as numbers
+  private static func voice(_ v: Any?) -> VoiceprintSource? { recording(v) ?? voiceprint(v).map { $0 } }
+
+  private static func usage(_ s: String) throws -> Usage {
+    switch s {
+    case "call": .call
+    case "agent": .agent
+    case "wake": .wake
+    default: throw AlkoveError(code: "engine.failed", message: "no usage \(s)")
+    }
+  }
+
+  // a recording of the user given as the voiceprint: its samples as numbers
+  private static func recording(_ v: Any?) -> [Float]? { (v as? [NSNumber]).map { $0.map(\.floatValue) } }
 
   private static func voiceprint(_ v: Any?) -> Voiceprint? {
     guard let v, v is [String: Any], let json = try? json(v) else { return nil }
@@ -236,4 +302,15 @@ import Alkove
   }
 
   private static func status(_ s: Status) -> String { s == .closed ? "disposed" : s.rawValue }
+}
+
+// a hundred progress crossings at most; URLSession calls its delegate on one queue
+private final class Sent: @unchecked Sendable {
+  private var loaded = -1
+
+  func next(_ p: DownloadProgress) -> Bool {
+    guard loaded < 0 || p.loaded >= p.total || p.loaded - loaded >= p.total / 100 else { return false }
+    loaded = p.loaded
+    return true
+  }
 }

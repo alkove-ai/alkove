@@ -14,13 +14,16 @@ import { useAgentInput } from '@alkove/react-native'
 
 const { status, input } = useAgentInput({
   enabled: talking,
-  farEnd: true,
   on: { utterance: ({ pcm }) => transcribe(pcm), turnend: () => agent.reply(), interrupt: () => player.stop() },
 })
-// input?.farEndActive(true) while the agent speaks
+// input?.farEndActive(true) while the agent speaks: from the first call, the input learns the user's print
 ```
 
-`on.audio` streams the continuous audio (32 ms chunks by default) and `on.utterance` the phrases' PCM, each only when the app gives it.
+`Alkove.configure({ modelBaseUrl })`, before the first input, says where the models come from: an `https:` URL, a folder on the device, or a relative path for a folder shipped in the app (Android's assets, the iOS bundle). Hugging Face by default. `Alkove.preload('agent', { onProgress })` downloads what a usage (`'call'`, `'agent'`, `'wake'`) needs ahead, on a settings screen; `Alkove.cached('agent')` resolves to `true` once an input can start without network.
+
+`on.audio` streams the continuous audio (32 ms chunks by default) and `on.utterance` the phrases' PCM, each only when the app gives it. `keepRecent: 20` keeps the last 20 seconds for `input.recent()`, a WAV; `input.record(10)` gives the next ten seconds, the same WAV, and `input.stats()` the speech heard and the noise removed so far; `trace: true` sends `on.trace` and `on.heard`.
+
+`useWakeListener` takes `context` (`'pause'`, `'anywhere'` or `'both'`) and `voiceprint`, a print or a recording of the user: only that voice wakes it. Each wake carries the word's `audio`, a `Float32Array` at 16 kHz. An agent's `wake.lang` takes several languages.
 
 Android apps add the repository the SDK comes from:
 

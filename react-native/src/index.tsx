@@ -7,7 +7,8 @@ import { same } from './same';
 export type Lang = 'fr' | 'en' | 'es' | 'pt' | 'it' | 'ca' | 'ro';
 export type Mode = 'raw' | 'focus' | 'focus+print' | 'spot' | 'spot+print';
 export type Status = 'starting' | 'running' | 'interrupted' | 'disposed';
-export type Context = 'pause' | 'anywhere';
+export type Context = 'pause' | 'anywhere' | 'both';
+export type Usage = 'call' | 'agent' | 'wake';
 
 export interface Warning {
   code: string;
@@ -18,9 +19,13 @@ export interface WakeEvent {
   word: string;
   score: number;
   threshold: number;
-  context: Context;
+  context: 'pause' | 'anywhere';
   start: number;
   end: number;
+  // the word's raw audio at 16 kHz
+  audio?: Float32Array;
+  // with a voiceprint: the voice's likeness to it
+  voice?: number;
 }
 
 export interface Diag {
@@ -52,6 +57,8 @@ export interface InputEvents {
   voiceprint: VoiceprintJSON;
   learn: { progress: number };
   wake: WakeEvent;
+  heard: { speech: number; scores: { word: string; score: number }[] };
+  trace: Record<string, unknown>[];
   mode: { mode: Mode; reason?: string };
   status: Status;
   diag: Diag;
@@ -94,12 +101,91 @@ const errorOf = (e: unknown): Error => {
   return n && typeof n.code === 'string' && n.code.includes('.') ? new AlkoveError(n.code, n.message ?? n.code) : e instanceof Error ? e : new Error(String(e));
 };
 
+export interface Config {
+  // a relative path is a folder shipped in the app (Android's assets, the iOS bundle); an absolute path or a file: URL, a folder on the device
+  modelBaseUrl?: string;
+}
+
+let config: Config = {};
+
+export interface UsageOptions {
+  voiceprint?: boolean;
+  typedWords?: boolean;
+}
+
+export interface Progress {
+  loaded: number;
+  total: number;
+}
+
+let ids = 0;
+const listeners = new Map<number, (e: NativeEvent) => void>();
+let subscribed = false;
+
+function listen(id: number, fn: (e: NativeEvent) => void): () => void {
+  if (!subscribed) {
+    subscribed = true;
+    Native.onEvent((e) => listeners.get(e.id)?.(e));
+  }
+  listeners.set(id, fn);
+  return () => void listeners.delete(id);
+}
+
+const langsOf = (lang: Lang | readonly Lang[] | undefined): Lang[] => (lang === undefined ? [] : typeof lang === 'string' ? [lang] : [...lang]);
+
+function usageOf(usage: Usage): Usage {
+  if (usage !== 'call' && usage !== 'agent' && usage !== 'wake') throw new TypeError(`usage: 'call', 'agent' or 'wake', not ${String(usage)}`);
+  return usage;
+}
+
+function where(base: string | undefined): { url?: string; dir?: string; bundled?: string } {
+  if (!base) return {};
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(base)?.[1]?.toLowerCase();
+  if (scheme === 'http' || scheme === 'https') return { url: base };
+  if (scheme === 'file') return { dir: decodeURIComponent(base.replace(/^file:(\/\/[^/]*)?/i, '')) };
+  if (scheme) throw new TypeError(`modelBaseUrl: an http(s) URL, a path or a file: URL, not ${scheme}:`);
+  if (base.startsWith('/')) return { dir: base };
+  return { bundled: base.replace(/^(\.\/)+/, '').replace(/\/+$/, '') };
+}
+
+export const Alkove = {
+  // before the first input: a model already loaded keeps its source
+  configure(c: Config): void {
+    const next = { ...config, ...c };
+    const json = JSON.stringify(where(next.modelBaseUrl));
+    config = next;
+    Native.configure(json);
+  },
+
+  // a settings or onboarding screen: everything a usage needs, downloaded ahead
+  async preload(usage: Usage, opts: UsageOptions & { onProgress?: (p: Progress) => void } = {}): Promise<void> {
+    const id = ++ids;
+    const onProgress = opts.onProgress;
+    const off = onProgress ? listen(id, (e) => e.type === 'progress' && onProgress(JSON.parse(e.json))) : null;
+    try {
+      await Native.preload(id, usageOf(usage), !!opts.voiceprint, !!opts.typedWords);
+    } catch (e) {
+      throw errorOf(e);
+    } finally {
+      off?.();
+    }
+  },
+
+  // true when everything is already on the device: an input can start without network
+  async cached(usage: Usage, opts: UsageOptions = {}): Promise<boolean> {
+    try {
+      return await Native.cached(usageOf(usage), !!opts.voiceprint, !!opts.typedWords);
+    } catch (e) {
+      throw errorOf(e);
+    }
+  },
+};
+
 export const Spot = {
   // any typed word, no training: Lex turns it into phonemes for Spot
   async compile(text: string, opts: { lang?: Lang | Lang[] } = {}): Promise<Word> {
-    const langs = opts.lang === undefined ? [] : Array.isArray(opts.lang) ? opts.lang : [opts.lang];
     try {
-      const r = JSON.parse(await Native.compile(text, langs));
+      const r = JSON.parse(await Native.compile(text, langsOf(opts.lang)));
       return new Word(r.word, r.warnings);
     } catch (e) {
       throw errorOf(e);
@@ -117,20 +203,20 @@ export interface HookOptions {
 export interface WakeOptions {
   words: readonly (Word | Record<string, unknown> | string)[];
   context?: Context;
+  // only this voice wakes it: a print's JSON, or a few seconds of the user alone at 16 kHz
+  voiceprint?: VoiceprintJSON | number[] | null;
+  trace?: boolean;
 }
 
 export interface AgentOptions {
-  voiceprint?: VoiceprintJSON | null;
-  learn?: boolean;
-  farEnd?: boolean;
-  strength?: number;
-  normalize?: boolean;
-  speech?: Partial<{ confidence: number; exitConfidence: number; startSecs: number; stopSecs: number }>;
+  voiceprint?: VoiceprintJSON | number[] | null;
   output?: Partial<{ format: 'f32' | 's16'; rate: number; chunkMs: number }>;
-  levels?: boolean;
-  near?: boolean | { gapDb?: number };
-  turn?: boolean | Partial<{ threshold: number; minPause: number; maxPause: number }>;
-  interrupt?: boolean | Partial<{ minDuration: number }>;
+  near?: boolean;
+  turn?: Partial<{ threshold: number; minPause: number; maxPause: number }>;
+  wake?: { words: readonly (Word | Record<string, unknown> | string)[]; lang?: Lang | Lang[]; context?: Context };
+  onlyMyVoice?: boolean;
+  keepRecent?: number;
+  trace?: boolean;
 }
 
 // what a running input takes from the app, as the web input's methods
@@ -139,6 +225,12 @@ export interface InputHandle {
   hold(): void;
   release(): void;
   farEndActive(on: boolean): void;
+  // the last keepRecent seconds as a stereo WAV, null without keepRecent
+  recent(): Promise<ArrayBuffer | null>;
+  // the next seconds (up to 600) as recent() gives them; engine.failed before the models run
+  record(seconds: number): Promise<ArrayBuffer>;
+  // since the models started, null before
+  stats(): Promise<{ speechSeconds: number; seconds: number; noiseRemovedDb: number | null } | null>;
 }
 
 export interface InputState {
@@ -146,19 +238,6 @@ export interface InputState {
   mode: Mode | null;
   error: Error | null;
   input: InputHandle | null;
-}
-
-let ids = 0;
-const listeners = new Map<number, (e: NativeEvent) => void>();
-let subscribed = false;
-
-function listen(id: number, fn: (e: NativeEvent) => void): () => void {
-  if (!subscribed) {
-    subscribed = true;
-    Native.onEvent((e) => listeners.get(e.id)?.(e));
-  }
-  listeners.set(id, fn);
-  return () => void listeners.delete(id);
 }
 
 // every hook's inputs open one after the other: a remount opening while the previous input still loads would hold the mic twice
@@ -183,11 +262,12 @@ function decode(type: string, json: string): unknown {
   const v = JSON.parse(json);
   if (type === 'audio') return bytes(v);
   if (type === 'utterance') return { ...v, pcm: bytes(v.pcm) };
+  if (type === 'wake' && typeof v.audio === 'string') return { ...v, audio: new Float32Array(bytes(v.audio)) };
   return v;
 }
 
-const LIVE = ['strength', 'voiceprint'] as const;
-type Live = { strength?: number; voiceprint?: VoiceprintJSON | null };
+const LIVE = ['voiceprint'] as const;
+type Live = { voiceprint?: VoiceprintJSON | number[] | null };
 
 function useInput(kind: 'wake' | 'agent', options: object & HookOptions, live: readonly (keyof Live)[]): InputState {
   const { enabled = true, on, ...opts } = options;
@@ -234,13 +314,31 @@ function useInput(kind: 'wake' | 'agent', options: object & HookOptions, live: r
         if (e.type === 'mode') setMode((v as { mode: Mode }).mode);
         (handlers.current?.[e.type as keyof InputEvents] as ((v: unknown) => void) | undefined)?.(v);
       });
-      const payload = kind === 'wake' ? { words: (o.words as WakeOptions['words']).map(wordJSON), context: o.context ?? 'pause' } : o;
-      applied.current = { strength: o.strength ?? 1, voiceprint: o.voiceprint ?? null };
+      const wake = o.wake as AgentOptions['wake'];
+      const payload =
+        kind === 'wake'
+          ? { ...o, words: (o.words as WakeOptions['words']).map(wordJSON), context: o.context ?? 'pause' }
+          : wake
+            ? { ...o, wake: { words: wake.words.map(wordJSON), lang: langsOf(wake.lang), context: wake.context ?? 'pause' } }
+            : o;
+      applied.current = { voiceprint: o.voiceprint ?? null };
       const r = JSON.parse(await Native.start(id, kind, JSON.stringify(payload)));
       if (cancelled) return;
       current.current = id;
       const call = (method: string, arg: unknown = null) => Native.call(id, method, JSON.stringify(arg));
-      setInput({ listen: (on) => call('listen', on), hold: () => call('hold'), release: () => call('release'), farEndActive: (on) => call('farEndActive', on) });
+      const recent = async () => {
+        const wav = await Native.recent(id);
+        return wav ? bytes(wav) : null;
+      };
+      const record = async (seconds: number) => {
+        try {
+          return bytes(await Native.record(id, seconds));
+        } catch (e) {
+          throw errorOf(e);
+        }
+      };
+      const stats = async () => JSON.parse(await Native.stats(id));
+      setInput({ listen: (on) => call('listen', on), hold: () => call('hold'), release: () => call('release'), farEndActive: (on) => call('farEndActive', on), recent, record, stats });
       setStatus(r.status);
       setMode(r.mode);
     });
@@ -268,20 +366,15 @@ function useInput(kind: 'wake' | 'agent', options: object & HookOptions, live: r
     };
   }, [enabled, version, kind]);
 
-  const strength = live.includes('strength') ? rest.strength : undefined;
   const voiceprint = live.includes('voiceprint') ? rest.voiceprint : undefined;
   useEffect(() => {
     const id = current.current;
     if (!id) return;
-    if (live.includes('strength') && (strength ?? 1) !== applied.current.strength) {
-      applied.current.strength = strength ?? 1;
-      Native.call(id, 'setStrength', JSON.stringify(applied.current.strength));
-    }
     if (live.includes('voiceprint') && !same(voiceprint ?? null, applied.current.voiceprint ?? null)) {
       applied.current.voiceprint = voiceprint ?? null;
       Native.call(id, 'setVoiceprint', JSON.stringify(applied.current.voiceprint));
     }
-  }, [input, strength, voiceprint, live]);
+  }, [input, voiceprint, live]);
 
   return { status, mode, error, input };
 }
