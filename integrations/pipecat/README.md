@@ -10,7 +10,7 @@ Maintained by Alkove, not by the Pipecat team. Listed in Pipecat's docs as a com
 pip install pipecat-alkove
 ```
 
-The models (Focus 1.1 MB, Cue 1.2 MB) are downloaded once into the cache and checked by their sha256: the analyzer loads them when it is created, as Silero's does, the filter when the transport starts. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder.
+The models (Focus 2.3 MB with Timbre 0.97 MB, which Focus loads with it, and Cue 1.2 MB) are downloaded once into the cache and checked by their sha256: the analyzer loads them when it is created, as Silero's does, the filter when the transport starts. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder, which then holds `alkove-timbre-1.alk` too.
 
 ## Use
 
