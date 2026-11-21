@@ -35,7 +35,7 @@ final class TimbreTests: XCTestCase {
         for c in clips() {
             for k in 0 ..< 6 {
                 let start = Int((r() * Double(c.count) * 0.5).rounded(.down))
-                let n = [280, 4000, 24000, 24001, 36000, c.count - start][k]
+                let n = [1400, 4000, 24000, 24001, 36000, c.count - start][k]
                 let pcm = Array(c[start ..< min(c.count, start + n)])
                 out.append(try t.windowsValue(pcm))
                 for source in ["raw", "focus"] { out.append(try t.embedValue(pcm, source: source)) }

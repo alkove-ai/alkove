@@ -15,7 +15,7 @@ public final class WordEnrollment: @unchecked Sendable {
     private let lock = Lock()
     private var input: EnrollInput?
 
-    init(text: String, lang: [String], takes: Int, baseURL: URL?, source: @escaping () -> AudioSource) {
+    init(text: String, lang: [String], source: @escaping () -> AudioSource) {
         var c: AsyncStream<Event>.Continuation!
         events = AsyncStream(bufferingPolicy: .bufferingNewest(256)) { c = $0 }
         continuation = c
@@ -24,7 +24,7 @@ public final class WordEnrollment: @unchecked Sendable {
                 lock { input }?.close()
                 continuation.finish()
             }
-            return try await run(text, lang, takes, baseURL, source)
+            return try await run(text, lang, source)
         }
     }
 
@@ -32,15 +32,15 @@ public final class WordEnrollment: @unchecked Sendable {
         continuation.yield(.diag(Diag(code: w.code, level: "warn", data: w.data.with([("message", .str(w.message))]))))
     }
 
-    private func run(_ text: String, _ lang: [String], _ takes: Int, _ baseURL: URL?, _ source: () -> AudioSource) async throws -> Enrolled {
+    private func run(_ text: String, _ lang: [String], _ source: () -> AudioSource) async throws -> Enrolled {
         let typed: Word
         if text.trimmingCharacters(in: .whitespaces).hasPrefix("/") {
             typed = try compile(text, lang: lang)
         } else {
-            typed = try compile(text, lang: lang, lex: try Lex(models: try await Alkove.models(["lex"], baseURL: baseURL)))
+            typed = try compile(text, lang: lang, lex: try Lex(models: try await Alkove.models(["lex"])))
         }
         typed.warnings.forEach(warn)
-        let i = EnrollInput(word: typed, takes: takes, source: source(), baseURL: baseURL)
+        let i = EnrollInput(word: typed, source: source())
         lock { input = i }
         try Task.checkCancellation()
         try i.start()
@@ -60,7 +60,7 @@ public final class WordEnrollment: @unchecked Sendable {
         r.warnings.forEach(warn)
         var voiceprint: Voiceprint?
         if let audio = r.audio, audio.count >= 4000 {
-            voiceprint = try Timbre(models: try await Alkove.models(["timbre"], baseURL: baseURL)).embed(audio, source: "raw")
+            voiceprint = try Timbre(models: try await Alkove.models(["timbre"])).embed(audio)
         }
         return Enrolled(word: Word(word.value, warnings: typed.warnings + r.warnings), voiceprint: voiceprint)
     }
@@ -76,9 +76,9 @@ public final class WordEnrollment: @unchecked Sendable {
 }
 
 public enum Spot {
-    /// An enrollment on the raw microphone, as a wake listener hears it: the word typed in `lang` (phonemes between slashes need none), said `takes` times.
-    public static func enroll(_ text: String, lang: [String] = [], takes: Int = 3, baseURL: URL? = nil) async throws -> WordEnrollment {
+    /// An enrollment on the raw microphone, as a wake listener hears it: the word typed in `lang` (phonemes between slashes need none), said three times.
+    public static func enroll(_ text: String, lang: [String] = []) async throws -> WordEnrollment {
         guard await Mic.permission() else { throw AlkoveError(code: "mic.denied", message: "The microphone is not allowed: NSMicrophoneUsageDescription, and the user's yes.") }
-        return WordEnrollment(text: text, lang: lang, takes: takes, baseURL: baseURL) { Mic(echoCancellation: false) }
+        return WordEnrollment(text: text, lang: lang) { Mic(echoCancellation: false) }
     }
 }

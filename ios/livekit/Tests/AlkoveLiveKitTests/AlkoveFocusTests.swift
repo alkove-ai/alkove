@@ -8,7 +8,7 @@ private let modelDir = repo.appendingPathComponent("packages/alkove/.cache/model
 
 private func models() throws -> Models {
     if ProcessInfo.processInfo.environment["ALKOVE_MODELS_REQUIRED"] == nil {
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: modelDir.appendingPathComponent("alkove-focus-1-preview.alk").path), "no models in packages/alkove/.cache/models")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: modelDir.appendingPathComponent("alkove-focus-1.alk").path), "no models in packages/alkove/.cache/models")
     }
     return try Models.load(["focus", "cue"], directory: modelDir)
 }

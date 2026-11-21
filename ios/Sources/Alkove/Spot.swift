@@ -113,7 +113,7 @@ public final class Lex: @unchecked Sendable {
     }
 
     /// `compile` with this Lex: a typed word in one or more of its languages.
-    public func compile(_ text: String, lang: [String], chain: String? = nil) throws -> Word { try compileWord(text, lang: lang, lex: self, chain: chain) }
+    public func compile(_ text: String, lang: [String]) throws -> Word { try compileWord(text, lang: lang, lex: self) }
 
     public func compile(_ text: String, lang: String) throws -> Word { try compile(text, lang: [lang]) }
 
@@ -130,13 +130,13 @@ public final class Lex: @unchecked Sendable {
 }
 
 /// A typed word in one or more languages (needs `lex`), or phonemes between slashes like "/kamij/" (does not).
-public func compile(_ text: String, lang: [String] = [], lex: Lex? = nil, chain: String? = nil) throws -> Word {
-    try compileWord(text, lang: lang, lex: lex, chain: chain)
+public func compile(_ text: String, lang: [String] = [], lex: Lex? = nil) throws -> Word {
+    try compileWord(text, lang: lang, lex: lex)
 }
 
-func compileWord(_ text: String, lang: [String], lex: Lex?, chain: String?) throws -> Word {
+func compileWord(_ text: String, lang: [String], lex: Lex?) throws -> Word {
     try checkLangs(lang)
-    let args = Value.obj([("text", .str(text)), ("lang", .arr(lang.map(Value.str))), ("chain", .of(chain))])
+    let args = Value.obj([("text", .str(text)), ("lang", .arr(lang.map(Value.str)))])
     let v: Value?
     if let lex {
         v = try lex.lock { try Native.value(args) { p, n, e in alk_compile(lex.handle.ptr, p, n, e) } }
@@ -146,7 +146,7 @@ func compileWord(_ text: String, lang: [String], lex: Lex?, chain: String?) thro
     return Word(v?["word"] ?? .null, warnings: v?["warnings"]?.arr.map(Warning.init) ?? [])
 }
 
-/// A word heard: its score against its threshold, in seconds from the stream's start; a wake listener's carries the word's raw audio (16 kHz), and with onlyMyVoice the likeness to the print.
+/// A word heard: its score against its threshold, in seconds from the stream's start; a wake listener's carries the word's raw audio (16 kHz), and with a `voiceprint` the likeness to the print.
 public struct Wake: Equatable, Sendable {
     public let word: String
     public let score: Double

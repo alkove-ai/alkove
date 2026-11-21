@@ -9,7 +9,7 @@
         override func setUp() async throws {
             try XCTSkipIf(ProcessInfo.processInfo.environment["ALKOVE_MIC"] == nil, "ALKOVE_MIC=1 to use the Mac's microphone and speakers")
             let dir = Fixtures.modelDir
-            Alkove.loader = { name, _ in try Models.load([name], directory: dir).model(name)! }
+            Alkove.loader = { name in try Models.load([name], directory: dir).model(name)! }
         }
 
         private func play(_ name: String) -> Process {
@@ -66,7 +66,9 @@
 
         private func agent(echoCancellation: Bool) async throws -> (events: [Event], sent: Int, seconds: Double, wav: Data) {
             let bytes = Box(0)
-            let input = try await AgentInput.start(AgentOptions(stats: true, echoCancellation: echoCancellation, levels: true)) { c in bytes.update { $0 += c.count } }
+            // the inputs always cancel the echo: the microphone without it is the tests' own
+            guard await Mic.permission() else { throw AlkoveError(code: "mic.denied", message: "the microphone is not allowed") }
+            let input = try AgentInput.start(AgentOptions(), source: Mic(echoCancellation: echoCancellation)) { c in bytes.update { $0 += c.count } }
             let (events, task) = collect(input)
             wait("the models") { input.mode == .focus }
             try await Task.sleep(nanoseconds: 500_000_000)

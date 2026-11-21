@@ -52,7 +52,7 @@ final class Demo: ObservableObject {
         agentStarting = true
         Task {
             do {
-                let a = try await AgentInput.start(AgentOptions(keepRecent: 30, stats: true))
+                let a = try await AgentInput.start(AgentOptions(keepRecent: 30))
                 if !focusOn { a.setEnabled(false) }
                 agent = a
                 agentOn = true

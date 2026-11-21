@@ -126,8 +126,8 @@ unsafe fn model(m: *const Model) -> Option<Arc<Model>> {
     })
 }
 
-unsafe fn models(focus: *const Model, cue: *const Model, spot: *const Model) -> Models {
-    Models { focus: model(focus), cue: model(cue), spot: model(spot) }
+unsafe fn models(focus: *const Model, cue: *const Model, spot: *const Model, timbre: *const Model) -> Models {
+    Models { focus: model(focus), cue: model(cue), spot: model(spot), timbre: model(timbre) }
 }
 
 unsafe fn slice<'a, T>(p: *const T, n: usize) -> &'a [T] {
@@ -183,8 +183,8 @@ pub unsafe extern "C" fn alk_model_free(m: *const AlkModel) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alk_chain_new(focus: *const AlkModel, cue: *const AlkModel, options: *const u8, options_len: usize, err: *mut AlkError) -> *mut AlkChain {
-    run(err, std::ptr::null_mut(), || Ok(handle(ChainState::new(model(focus), model(cue), &value(options, options_len)?)?)))
+pub unsafe extern "C" fn alk_chain_new(focus: *const AlkModel, cue: *const AlkModel, timbre: *const AlkModel, options: *const u8, options_len: usize, err: *mut AlkError) -> *mut AlkChain {
+    run(err, std::ptr::null_mut(), || Ok(handle(ChainState::new(model(focus), model(cue), model(timbre), &value(options, options_len)?)?)))
 }
 
 #[no_mangle]
@@ -225,6 +225,11 @@ pub unsafe extern "C" fn alk_chain_set_print(h: *mut AlkChain, print: *const f32
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn alk_chain_set_sample(h: *mut AlkChain, pcm: *const f32, n: usize, err: *mut AlkError) -> bool {
+    run(err, false, || Ok(at(h)?.chain.set_sample((!pcm.is_null()).then(|| slice(pcm, n)))))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn alk_chain_set_strength(h: *mut AlkChain, s: f64, err: *mut AlkError) {
     run(err, (), || {
         at(h)?.chain.set_strength(s);
@@ -262,8 +267,8 @@ pub unsafe extern "C" fn alk_chain_get(h: *mut AlkChain, what: i32, err: *mut Al
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alk_live_new(focus: *const AlkModel, cue: *const AlkModel, rate: f64, options: *const u8, options_len: usize, err: *mut AlkError) -> *mut AlkLive {
-    run(err, std::ptr::null_mut(), || Ok(handle(LiveState::new(model(focus), model(cue), rate, &value(options, options_len)?)?)))
+pub unsafe extern "C" fn alk_live_new(focus: *const AlkModel, cue: *const AlkModel, timbre: *const AlkModel, rate: f64, options: *const u8, options_len: usize, err: *mut AlkError) -> *mut AlkLive {
+    run(err, std::ptr::null_mut(), || Ok(handle(LiveState::new(model(focus), model(cue), model(timbre), rate, &value(options, options_len)?)?)))
 }
 
 #[no_mangle]
@@ -296,6 +301,11 @@ pub unsafe extern "C" fn alk_live_events(h: *mut AlkLive, len: *mut usize, err: 
 #[no_mangle]
 pub unsafe extern "C" fn alk_live_set_print(h: *mut AlkLive, print: *const f32, n: usize, err: *mut AlkError) {
     run(err, (), || at(h)?.live.chain_mut().set_print((!print.is_null()).then(|| slice(print, n))))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alk_live_set_sample(h: *mut AlkLive, pcm: *const f32, n: usize, err: *mut AlkError) -> bool {
+    run(err, false, || Ok(at(h)?.live.chain_mut().set_sample((!pcm.is_null()).then(|| slice(pcm, n)))))
 }
 
 #[no_mangle]
@@ -375,8 +385,16 @@ pub unsafe extern "C" fn alk_tracker_get(h: *mut AlkTracker, what: i32, err: *mu
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alk_processor_new(focus: *const AlkModel, cue: *const AlkModel, spot: *const AlkModel, options: *const u8, options_len: usize, err: *mut AlkError) -> *mut AlkProcessor {
-    run(err, std::ptr::null_mut(), || Ok(handle(native::processor(&models(focus, cue, spot), &value(options, options_len)?)?)))
+pub unsafe extern "C" fn alk_processor_new(
+    focus: *const AlkModel,
+    cue: *const AlkModel,
+    spot: *const AlkModel,
+    timbre: *const AlkModel,
+    options: *const u8,
+    options_len: usize,
+    err: *mut AlkError,
+) -> *mut AlkProcessor {
+    run(err, std::ptr::null_mut(), || Ok(handle(native::processor(&models(focus, cue, spot, timbre), &value(options, options_len)?)?)))
 }
 
 #[no_mangle]
@@ -399,13 +417,14 @@ pub unsafe extern "C" fn alk_process(
     focus: *const AlkModel,
     cue: *const AlkModel,
     spot: *const AlkModel,
+    timbre: *const AlkModel,
     pcm: *const f32,
     n: usize,
     options: *const u8,
     options_len: usize,
     err: *mut AlkError,
 ) -> AlkBytes {
-    run(err, NONE, || Ok(out(&native::process(&models(focus, cue, spot), slice(pcm, n), &value(options, options_len)?)?)))
+    run(err, NONE, || Ok(out(&native::process(&models(focus, cue, spot, timbre), slice(pcm, n), &value(options, options_len)?)?)))
 }
 
 #[no_mangle]
@@ -568,8 +587,16 @@ pub unsafe extern "C" fn alk_learner_forget(h: *mut AlkLearner, err: *mut AlkErr
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn alk_pipeline_new(focus: *const AlkModel, cue: *const AlkModel, spot: *const AlkModel, options: *const u8, options_len: usize, err: *mut AlkError) -> *mut AlkPipeline {
-    run(err, std::ptr::null_mut(), || Ok(handle(native::pipeline(model(focus), model(cue), model(spot), &value(options, options_len)?)?)))
+pub unsafe extern "C" fn alk_pipeline_new(
+    focus: *const AlkModel,
+    cue: *const AlkModel,
+    spot: *const AlkModel,
+    timbre: *const AlkModel,
+    options: *const u8,
+    options_len: usize,
+    err: *mut AlkError,
+) -> *mut AlkPipeline {
+    run(err, std::ptr::null_mut(), || Ok(handle(native::pipeline(model(focus), model(cue), model(spot), model(timbre), &value(options, options_len)?)?)))
 }
 
 #[no_mangle]
@@ -706,7 +733,7 @@ mod tests {
             assert!(alk_json_parse(b.as_ptr(), b.len(), &mut e).ptr.is_null());
             assert_eq!(message(&mut e), (2, "JSON: unexpected end".into()));
             let opts = out(&Value::Obj(Vec::new()));
-            assert!(alk_chain_new(std::ptr::null(), std::ptr::null(), opts.ptr, opts.len, &mut e).is_null());
+            assert!(alk_chain_new(std::ptr::null(), std::ptr::null(), std::ptr::null(), opts.ptr, opts.len, &mut e).is_null());
             assert_eq!(message(&mut e), (2, "model focus not given".into()));
             alk_bytes_free(opts);
             assert!(alk_chain_get(std::ptr::null_mut(), 0, &mut e).is_nan());

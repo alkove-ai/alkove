@@ -68,8 +68,8 @@ public final class Timbre: @unchecked Sendable {
         }
     }
 
-    /// Windows of 1.5 s, half overlapping, their mean without the 10 % least alike; `source` says the audio was `raw` or Focus's output (`focus`).
-    public func embed(_ pcm: [Float], source: String = "raw") throws -> Voiceprint { Voiceprint(try embedValue(pcm, source: source)) }
+    /// Windows of 1.5 s, half overlapping, their mean without the 10 % least alike.
+    public func embed(_ pcm: [Float]) throws -> Voiceprint { Voiceprint(try embedValue(pcm, source: "raw")) }
 
     /// `a`: the known print, `b`: the voice heard; thresholds set for how much voice each holds. Whether they match, and the score.
     public static func verify(_ a: Voiceprint, _ b: Voiceprint, level: Level = .balanced) throws -> (same: Bool, score: Double) {
@@ -99,9 +99,9 @@ public final class VoiceprintLearner: @unchecked Sendable {
     let handle: Handle
     private let lock = Lock()
 
-    public init(models: Models, voiceprint: Voiceprint? = nil, source: String = "raw") throws {
+    public init(models: Models, voiceprint: Voiceprint? = nil) throws {
         timbre = try Timbre(models: models)
-        handle = try VoiceprintLearner.native(source: source, start: voiceprint?.value ?? .null)
+        handle = try VoiceprintLearner.native(source: "raw", start: voiceprint?.value ?? .null)
     }
 
     static func native(source: String, start: Value) throws -> Handle {

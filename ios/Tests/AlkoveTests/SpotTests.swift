@@ -72,8 +72,8 @@ final class SpotTests: XCTestCase {
 
     private func spot(_ name: String, _ seed: Int, _ context: String, focus: Bool = false, cue: Bool? = nil, normalize: Bool = false, trace: Bool = false) throws {
         let (models, lex) = try models()
-        let o = try processOptions(focus: focus, voiceprint: nil, strength: 1, cue: cue, speech: nil, normalize: normalize, trace: trace, rate: 16000, words: try compiled(lex), context: context)
-        let p = try Native.bytes(o.encoded()) { a, an in try Native.call { alk_processor_new(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), a, an, $0) } }
+        let o = try processOptions(focus: focus, print: nil, strength: 1, cue: cue, speech: nil, normalize: normalize, trace: trace, rate: 16000, words: try compiled(lex), context: context)
+        let p = try Native.bytes(o.encoded()) { a, an in try Native.call { alk_processor_new(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), models.ptr("timbre"), a, an, $0) } }
         defer { alk_processor_free(p) }
         let pcm = stream(seed, 40)
         let r = Fixtures.rng(seed * 7)

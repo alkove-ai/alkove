@@ -3,6 +3,12 @@ import AlkoveFFI
 import Foundation
 import XCTest
 
+// the print the digests were made with, as a Voiceprint: an array of floats is a recording
+func fixturePrint() -> Voiceprint {
+    let e = Fixtures.f32("enroll.timbre.f32", 192)
+    return Voiceprint(.obj([("source", "raw"), ("centers", .arr([.obj([("embedding", .floats(e)), ("id", .floats(e)), ("seconds", 3)])]))]))
+}
+
 final class CoreTests: XCTestCase {
     private static var shared: Models?
     private let print = Fixtures.f32("enroll.timbre.f32", 192)
@@ -17,7 +23,7 @@ final class CoreTests: XCTestCase {
     private func chain(_ name: String, _ seed: Int, _ seconds: Int, _ dense: Bool, _ rate: Double, _ opts: [(String, Value)]) throws {
         let models = try models()
         let o = Value.obj([("gate", false), ("normalize", true), ("strength", 1.0), ("sleep", true), ("speech", SpeechParams().value), ("print", nil)]).with(opts)
-        let c = try Native.bytes(o.encoded()) { p, n in try Native.call { alk_chain_new(models.ptr("focus"), models.ptr("cue"), p, n, $0) } }
+        let c = try Native.bytes(o.encoded()) { p, n in try Native.call { alk_chain_new(models.ptr("focus"), models.ptr("cue"), nil, p, n, $0) } }
         defer { alk_chain_free(c) }
         let pcm = Fixtures.stream(seed, seconds, dense: dense)
         let r = Fixtures.rng(seed * 31)
@@ -131,7 +137,7 @@ final class CoreTests: XCTestCase {
 
     func testProcessWithPrint() throws {
         try process("focus with a print, normalize, trace, other speech settings", 6, 16000) {
-            try Processor(models: $0, focus: true, voiceprint: print, strength: 0.7, cue: true, speech: SpeechParams(confidence: 0.4, startSecs: 0.1), normalize: true, trace: true, rate: $1)
+            try Processor(models: $0, focus: true, voiceprint: fixturePrint(), strength: 0.7, cue: true, speech: SpeechParams(confidence: 0.4, startSecs: 0.1), normalize: true, trace: true, rate: $1)
         }
     }
 
@@ -142,4 +148,58 @@ final class CoreTests: XCTestCase {
     func testProcessNothing() throws { try process("nothing chosen", 9, 16000) { try Processor(models: $0, rate: $1) } }
 
     func testProcessAt44k() throws { try process("focus and cue, blocks at 44.1 kHz", 10, 44100) { try Processor(models: $0, focus: true, cue: true, trace: true, rate: $1) } }
+}
+
+// the global process(), which CoreTests' own hides
+final class SampleTests: XCTestCase {
+    private struct NoVoice: VoiceprintSource {}
+
+    // a sample apart from the print, as the lab's benches give it
+    private func options(_ print: Voiceprint, _ sample: [Float]?) throws -> Value {
+        try processOptions(focus: false, print: print, strength: 1, cue: nil, speech: nil, normalize: false, trace: false, rate: 16000, words: nil, context: "anywhere", sample: sample)
+    }
+
+    func testASampleGoesToFocusWithThePrint() throws {
+        let print = fixturePrint()
+        XCTAssertEqual(try options(print, [0.5, -0.25])["focus"]?["sample"], .arr([.num(0.5), .num(-0.25)]))
+        XCTAssertNil(try options(print, nil)["focus"]?["sample"])
+        let models = try Fixtures.load("focus", "cue")
+        let pcm = Fixtures.stream(5, 8)
+        let told = try processWith(models, pcm, 16000, try options(print, Fixtures.wav("enroll.wav")))
+        XCTAssertEqual(told.audio.count, pcm.count)
+        XCTAssertNotEqual(told.audio, try process(models: models, pcm: pcm, voiceprint: print).audio, "Focus reads the sample")
+    }
+
+    func testAVoiceprintRunsFocus() throws {
+        let models = try Fixtures.load("focus", "cue")
+        let pcm = Fixtures.stream(21, 6)
+        let asked = try process(models: models, pcm: pcm, focus: true, voiceprint: fixturePrint())
+        XCTAssertEqual(asked.audio, try process(models: models, pcm: pcm, voiceprint: fixturePrint()).audio)
+        XCTAssertNotEqual(asked.audio, try process(models: models, pcm: pcm).audio)
+        XCTAssertThrowsError(try process(models: models, pcm: pcm, voiceprint: NoVoice())) { XCTAssertEqual(($0 as? AlkoveError)?.kind, .argument) }
+    }
+
+    func testARecordingAsTheVoiceprintIsItsPrintAndItsSample() throws {
+        let models = try Fixtures.load("focus", "cue")
+        let pcm = Fixtures.stream(5, 8)
+        let recording = Fixtures.wav("enroll.wav")
+        let print = try Timbre(models: models).embed(recording)
+        let given = try process(models: models, pcm: pcm, voiceprint: recording)
+        XCTAssertEqual(given.audio, try processWith(models, pcm, 16000, try options(print, recording)).audio, "to the bit")
+        let p = try Processor(models: models, voiceprint: recording)
+        XCTAssertEqual(try p.push(Array(pcm[..<40000])).audio + p.push(Array(pcm[40000...])).audio + p.end().audio, given.audio)
+        let atInit = try Chain(models: models, voiceprint: recording)
+        let set = try Chain(models: models)
+        try set.setVoiceprint(recording)
+        for k in 0 ..< pcm.count / Chain.hop {
+            let hop = Array(pcm[Chain.hop * k ..< Chain.hop * (k + 1)])
+            let (a, ea) = try atInit.step(hop)
+            var (b, eb) = try set.step(hop)
+            // the print set is told at the first hop; given at init, it is no event
+            if k == 0, case let .diag(d)? = eb.first, d.code == "focus.print" { eb.removeFirst() }
+            XCTAssertEqual(a, b, "hop \(k)")
+            XCTAssertEqual(ea.map { "\($0)" }, eb.map { "\($0)" }, "hop \(k)")
+            if a != b { break }
+        }
+    }
 }

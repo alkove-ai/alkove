@@ -43,12 +43,12 @@ final class NearTests: XCTestCase {
 
     func testLevelsAndNearGiveTheWebsEvents() throws {
         let m = try models()
-        let levels = ends(try run(try Chain(models: m, levels: true), audio))
-        XCTAssertEqual(levels.map { $0?.voiceDb }, [-19.2, -18.3, -40.2, -18.4])
-        XCTAssertEqual(levels.map { $0?.refDb }, [nil, nil, -18.7, -18.7])
-        let near = try run(try Chain(models: m, near: Alkove.nearGapDb), audio)
+        let levels = ends(try run(try Chain(models: m), audio))
+        XCTAssertEqual(levels.map { $0?.voiceDb }, [-18.6, -18.1, -38.9, -18.1])
+        XCTAssertEqual(levels.map { $0?.refDb }, [nil, nil, -18.6, -18.6])
+        let near = try run(try Chain(models: m, near: true), audio)
         let far = near.compactMap { if case let .diag(d) = $0, d.code == "speech.far" { return d.data } else { return nil } }
-        XCTAssertEqual(far.map { [$0["start"]?.num, $0["voiceDb"]?.num, $0["refDb"]?.num] }, [[16.814, -40.2, -18.7]])
+        XCTAssertEqual(far.map { [$0["start"]?.num, $0["voiceDb"]?.num, $0["refDb"]?.num] }, [[16.814, -38.9, -18.6]])
         XCTAssertEqual(starts(near), [2.264, 9.524, 24.074])
     }
 
@@ -69,7 +69,7 @@ final class NearTests: XCTestCase {
     }
 
     func testAHoldInASilenceHasNoVoiceLevel() throws {
-        let levels = ends(try run(try Chain(models: try models(), levels: true), silence(1), at: [5: { try $0.hold() }, 20: { try $0.release() }]))
+        let levels = ends(try run(try Chain(models: try models()), silence(1), at: [5: { try $0.hold() }, 20: { try $0.release() }]))
         XCTAssertEqual(levels.count, 1)
         XCTAssertNil(levels[0]?.voiceDb)
         XCTAssertNil(levels[0]?.refDb)

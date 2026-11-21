@@ -32,7 +32,7 @@ public struct Diag: Equatable, Sendable {
     }
 }
 
-/// The user's words from speech start to speech end, with their pre-roll, in the output's format and rate.
+/// The user's words from speech start to speech end, with their pre-roll, in the output's format and rate, and their `level`.
 public struct Utterance: Equatable, Sendable {
     public let pcm: Data
     public let start: Double
@@ -43,7 +43,7 @@ public struct Utterance: Equatable, Sendable {
 /// Everything the primitives and the inputs report, with the names and fields of the web SDK's events.
 public enum Event: Sendable {
     case speechStart(start: Double)
-    /// `level` with `levels` or `near`.
+    /// `level` on an input's, a `Chain`'s or a `Live`'s.
     case speechEnd(start: Double, end: Double, level: PhraseLevel?)
     /// The phrase sent out from `start` will have no end: listening went off.
     case speechCancel(start: Double)
@@ -53,7 +53,7 @@ public enum Event: Sendable {
     case turnEnd(start: Double, end: Double, probability: Double, hesitation: Double, at: Double)
     /// Speech started while the far end spoke: lower its volume.
     case interruptStart(start: Double)
-    /// That speech spans `minDuration`: stop the far end.
+    /// That speech spans 0.7 s, short gaps included: stop the far end.
     case interrupt(start: Double, at: Double)
     /// That speech stopped before: a backchannel, the far end's volume back.
     case interruptCancel(start: Double, end: Double)

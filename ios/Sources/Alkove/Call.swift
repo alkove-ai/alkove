@@ -7,6 +7,8 @@ public final class CallProcessor: @unchecked Sendable {
 
     private let models: Models
     private var print: Voiceprint?
+    // a recording given as the voiceprint, for each Live made
+    private var sample: [Float]?
     private var strength: Double
     private let normalize: Bool
     private let speech: SpeechParams?
@@ -19,11 +21,14 @@ public final class CallProcessor: @unchecked Sendable {
     private var closed = false
     private let lock = Lock()
 
-    public init(models: Models, voiceprint: Voiceprint? = nil, strength: Double = 1, normalize: Bool = false, speech: SpeechParams? = nil) throws {
+    /// `voiceprint`: a print, or a recording of the user at 16 kHz (Timbre makes its print, Focus takes it as its sample).
+    public init(models: Models, voiceprint: VoiceprintSource? = nil, strength: Double = 1, normalize: Bool = false, speech: SpeechParams? = nil) throws {
         try models.need("focus", "cue")
-        if let v = voiceprint, v.embedding.count != 192 { throw AlkoveError(.argument, "", "a print of \(v.embedding.count) values: Focus takes 192") }
+        let (v, s) = try voiceOf(models, voiceprint)
+        if let v, v.embedding.count != 192 { throw AlkoveError(.argument, "", "a print of \(v.embedding.count) values: Focus takes 192") }
         self.models = models
-        print = voiceprint
+        print = v
+        sample = s
         self.strength = strength
         self.normalize = normalize
         self.speech = speech
@@ -84,17 +89,21 @@ public final class CallProcessor: @unchecked Sendable {
         rate = r
         let l = try Live(models: models, rate: r, normalize: normalize, strength: strength, voiceprint: print, speech: speech)
         if !enabled { try l.setEnabled(false) }
+        if let s = sample { try l.setSample(s) }
         live = l
         count = Int((Double(r) * CallProcessor.lead).rounded(.up))
         held = [Float](repeating: 0, count: 2 * count)
         return l
     }
 
-    /// Applied at the user's next silence; nil goes back to the closest voice.
-    public func setVoiceprint(_ p: Voiceprint?) throws {
+    /// Applied at the user's next silence; nil goes back to the closest voice; a recording gives the print and Focus's sample.
+    public func setVoiceprint(_ p: VoiceprintSource?) throws {
+        let (v, s) = try voiceOf(models, p)
         try lock {
-            print = p
-            try live?.setVoiceprint(p)
+            print = v
+            sample = s
+            try live?.setVoiceprint(v)
+            if let s { try live?.setSample(s) }
         }
     }
 

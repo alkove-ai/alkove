@@ -19,6 +19,6 @@ final class NativeTests: XCTestCase {
     }
 
     func testEachNameOnceInItsFirstPlace() {
-        XCTAssertEqual(Models.unique(["focus", "cue", "focus", "spot", "cue"]), ["focus", "cue", "spot"])
+        XCTAssertEqual(Models.unique(["focus", "cue", "focus", "spot", "cue"]), ["focus", "cue", "spot", "timbre"])
     }
 }

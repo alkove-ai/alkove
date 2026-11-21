@@ -78,9 +78,11 @@ public final class Models: @unchecked Sendable {
         return data
     }
 
+    // Focus takes its user's voice through Timbre: loaded with it
     static func unique(_ names: [String]) -> [String] {
         var seen = Set<String>()
-        return names.filter { seen.insert($0).inserted }
+        let out = names.filter { seen.insert($0).inserted }
+        return out.contains("focus") && !out.contains("timbre") ? out + ["timbre"] : out
     }
 
     static func file(_ name: String) throws -> String { try spec(name)["file"]?.str ?? "" }
@@ -89,11 +91,11 @@ public final class Models: @unchecked Sendable {
         cache.appendingPathComponent(try spec(name)["sha256"]?.str ?? "", isDirectory: true).appendingPathComponent(try file(name))
     }
 
-    static func url(_ name: String, _ base: URL?) throws -> URL {
+    static func url(_ name: String) throws -> URL {
         let m = try spec(name)
-        if let base { return base.appendingPathComponent(try file(name)) }
+        if let base = Alkove.config.baseURL { return base.appendingPathComponent(try file(name)) }
         guard let revision = m["revision"]?.str else {
-            throw AlkoveError(code: "models.fetch", message: "\(m["name"]?.str ?? name): not on Hugging Face in this version, pass baseURL or a folder")
+            throw AlkoveError(code: "models.fetch", message: "\(m["name"]?.str ?? name): not on Hugging Face in this version, set modelBaseURL, directory or models (Alkove.configure)")
         }
         let org = spec["org"]?.str ?? ""
         return URL(string: "https://huggingface.co/\(org)/\(m["name"]?.str ?? "")/resolve/\(revision)/\(try file(name))")!
@@ -101,7 +103,7 @@ public final class Models: @unchecked Sendable {
 
     /// True when these models are in the cache: an input can start without network.
     public static func cached(_ names: [String], cache: URL = cacheDirectory) -> Bool {
-        names.allSatisfy { (try? path(cache, $0)).map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
+        unique(names).allSatisfy { (try? path(cache, $0)).map { FileManager.default.fileExists(atPath: $0.path) } ?? false }
     }
 
     /// The models from files or bytes the app holds, checked against the sha256 this version pins (`models.hash`).
@@ -121,29 +123,37 @@ public final class Models: @unchecked Sendable {
         return try load(names, files: files)
     }
 
-    /// The models from the cache, downloaded there first from Hugging Face at this version's revision (or `baseURL`) when missing.
-    public static func load(_ names: [String] = ["focus", "cue"], cache: URL = cacheDirectory, download: Bool = true, baseURL: URL? = nil, progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> Models {
-        let names = unique(names)
-        let paths = try await fetch(names, cache: cache, download: download, baseURL: baseURL, progress: progress)
+    /// The models from where `Alkove.configure` says, by default from the cache, filled from Hugging Face at this version's revision. Call it ahead on a settings screen, on Wi-Fi if you can.
+    public static func load(_ names: [String] = ["focus", "cue"], progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> Models {
+        try await configured(unique(names), progress: progress)
+    }
+
+    /// The models from `cache`, downloaded there first from `modelBaseURL` (`Alkove.configure`) or Hugging Face when missing; `download: false` only reads it.
+    public static func load(_ names: [String], cache: URL, download: Bool = true, progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> Models {
         var loaded = [String: Model]()
-        for n in names {
-            var data = try Data(contentsOf: paths[n]!)
-            if (try? checked(n, data)) == nil {
-                // a cached file that no longer matches (a disk error, a file left short) is fetched once more
-                guard download else { _ = try checked(n, data); continue }
-                try? FileManager.default.removeItem(at: paths[n]!)
-                data = try Data(contentsOf: try await fetch([n], cache: cache, baseURL: baseURL, progress: progress)[n]!)
-                _ = try checked(n, data)
-            }
-            loaded[n] = try Model(name: n, bytes: data)
-        }
+        for n in unique(names) { loaded[n] = try Model(name: n, bytes: try await fromCache(n, cache, download, progress)) }
         return Models(loaded)
     }
 
-    /// Downloads the models into `cache` once, checked by their sha256, and gives their files; `download: false` only reads the cache.
+    // a cached file that no longer matches (a disk error, a file left short) is fetched once more
+    private static func fromCache(_ n: String, _ cache: URL, _ download: Bool, _ progress: (@Sendable (DownloadProgress) -> Void)?) async throws -> Data {
+        let p = try await fetchOnly([n], cache: cache, download: download, progress: progress)[n]!
+        let data = try Data(contentsOf: p)
+        if (try? checked(n, data)) != nil { return data }
+        guard download else { return try checked(n, data) }
+        try? FileManager.default.removeItem(at: p)
+        return try checked(n, try Data(contentsOf: try await fetchOnly([n], cache: cache, download: true, progress: progress)[n]!))
+    }
+
+    /// Downloads the models into `cache` once, from `modelBaseURL` (`Alkove.configure`) or Hugging Face, checked by their sha256, and gives their files; `download: false` only reads the cache.
     @discardableResult
-    public static func fetch(_ names: [String], cache: URL = cacheDirectory, download: Bool = true, baseURL: URL? = nil, progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> [String: URL] {
-        let names = unique(names)
+    public static func fetch(_ names: [String], cache: URL = cacheDirectory, download: Bool = true, progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> [String: URL] {
+        try await fetchOnly(unique(names), cache: cache, download: download, progress: progress)
+    }
+
+    // these models and no other
+    @discardableResult
+    static func fetchOnly(_ names: [String], cache: URL, download: Bool, progress: (@Sendable (DownloadProgress) -> Void)?) async throws -> [String: URL] {
         let fm = FileManager.default
         let missing = try names.filter { !fm.fileExists(atPath: try path(cache, $0).path) }
         let total = try missing.reduce(0) { $0 + Int(try spec($1)["bytes"]?.num ?? 0) }
@@ -153,7 +163,7 @@ public final class Models: @unchecked Sendable {
             let p = try path(cache, n)
             if !fm.fileExists(atPath: p.path) {
                 guard download else { throw AlkoveError(code: "models.fetch", message: "\(n): not in the cache \(cache.path), fetch it first") }
-                let data = try checked(n, try await get(try url(n, baseURL), name: n, before: before, total: total, progress: progress))
+                let data = try checked(n, try await get(try url(n), name: n, before: before, total: total, progress: progress))
                 before += data.count
                 try fm.createDirectory(at: p.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try data.write(to: p, options: .atomic)
@@ -165,6 +175,54 @@ public final class Models: @unchecked Sendable {
             out[n] = p
         }
         return out
+    }
+
+    private static func missing(_ name: String, _ place: String) -> AlkoveError {
+        AlkoveError(code: "models.fetch", message: "\((try? spec(name))?["name"]?.str ?? name): no \((try? file(name)) ?? name) in \(place)")
+    }
+
+    private static func inDirectory(_ dir: URL, _ name: String) throws -> URL {
+        let f = dir.appendingPathComponent(try file(name))
+        guard FileManager.default.fileExists(atPath: f.path) else { throw missing(name, dir.path) }
+        return f
+    }
+
+    // these models from where Alkove.configure says
+    static func configured(_ names: [String], progress: (@Sendable (DownloadProgress) -> Void)? = nil) async throws -> Models {
+        let c = Alkove.config
+        var loaded = [String: Model]()
+        for n in names {
+            let data: Data
+            if let d = c.models[n] {
+                data = try checked(n, d)
+            } else if let dir = c.directory {
+                data = try checked(n, try Data(contentsOf: try inDirectory(dir, n)))
+            } else {
+                data = try await fromCache(n, cacheDirectory, true, progress)
+            }
+            loaded[n] = try Model(name: n, bytes: data)
+        }
+        return Models(loaded)
+    }
+
+    // the ones to download; a model configured off the network must be there
+    static func remote(_ names: [String]) throws -> [String] {
+        let c = Alkove.config
+        if let dir = c.directory {
+            for n in names where c.models[n] == nil { _ = try inDirectory(dir, n) }
+            return []
+        }
+        return names.filter { c.models[$0] == nil }
+    }
+
+    // every model on the device, given or in the cache
+    static func local(_ names: [String]) -> Bool {
+        let c = Alkove.config
+        return names.allSatisfy { n in
+            if c.models[n] != nil { return true }
+            if let dir = c.directory { return (try? inDirectory(dir, n)) != nil }
+            return (try? path(cacheDirectory, n)).map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        }
     }
 
     private static func get(_ url: URL, name: String, before: Int, total: Int, progress: (@Sendable (DownloadProgress) -> Void)?) async throws -> Data {

@@ -43,21 +43,23 @@ AlkBytes alk_info(AlkError *err);
 const AlkModel *alk_model_load(const uint8_t *p, size_t n, AlkError *err);
 void alk_model_free(const AlkModel *m);
 
-AlkChain *alk_chain_new(const AlkModel *focus, const AlkModel *cue, const uint8_t *options, size_t options_len, AlkError *err);
+AlkChain *alk_chain_new(const AlkModel *focus, const AlkModel *cue, const AlkModel *timbre, const uint8_t *options, size_t options_len, AlkError *err);
 void alk_chain_free(AlkChain *h);
 int32_t alk_chain_step(AlkChain *h, const float *pcm, size_t n, float *output, size_t output_cap, double *events, size_t events_cap, float *focus, size_t focus_cap, AlkError *err);
 void alk_chain_set_print(AlkChain *h, const float *print, size_t n, AlkError *err);
+bool alk_chain_set_sample(AlkChain *h, const float *pcm, size_t n, AlkError *err);
 void alk_chain_set_strength(AlkChain *h, double s, AlkError *err);
 void alk_chain_set_enabled(AlkChain *h, bool on, AlkError *err);
 void alk_chain_listen(AlkChain *h, bool on, AlkError *err);
 void alk_chain_hold(AlkChain *h, bool on, AlkError *err);
 double alk_chain_get(AlkChain *h, int32_t what, AlkError *err);
 
-AlkLive *alk_live_new(const AlkModel *focus, const AlkModel *cue, double rate, const uint8_t *options, size_t options_len, AlkError *err);
+AlkLive *alk_live_new(const AlkModel *focus, const AlkModel *cue, const AlkModel *timbre, double rate, const uint8_t *options, size_t options_len, AlkError *err);
 void alk_live_free(AlkLive *h);
 size_t alk_live_push(AlkLive *h, const float *pcm, size_t n, float *output, size_t output_cap, size_t *events, AlkError *err);
 const double *alk_live_events(AlkLive *h, size_t *len, AlkError *err);
 void alk_live_set_print(AlkLive *h, const float *print, size_t n, AlkError *err);
+bool alk_live_set_sample(AlkLive *h, const float *pcm, size_t n, AlkError *err);
 void alk_live_set_strength(AlkLive *h, double s, AlkError *err);
 void alk_live_set_enabled(AlkLive *h, bool on, AlkError *err);
 void alk_live_listen(AlkLive *h, bool on, AlkError *err);
@@ -70,11 +72,11 @@ int32_t alk_tracker_push(AlkTracker *h, double p, int64_t k, double *output, Alk
 void alk_tracker_reset(AlkTracker *h, AlkError *err);
 bool alk_tracker_get(AlkTracker *h, int32_t what, AlkError *err);
 
-AlkProcessor *alk_processor_new(const AlkModel *focus, const AlkModel *cue, const AlkModel *spot, const uint8_t *options, size_t options_len, AlkError *err);
+AlkProcessor *alk_processor_new(const AlkModel *focus, const AlkModel *cue, const AlkModel *spot, const AlkModel *timbre, const uint8_t *options, size_t options_len, AlkError *err);
 void alk_processor_free(AlkProcessor *h);
 AlkBytes alk_processor_push(AlkProcessor *h, const float *pcm, size_t n, AlkError *err);
 AlkBytes alk_processor_end(AlkProcessor *h, AlkError *err);
-AlkBytes alk_process(const AlkModel *focus, const AlkModel *cue, const AlkModel *spot, const float *pcm, size_t n, const uint8_t *options, size_t options_len, AlkError *err);
+AlkBytes alk_process(const AlkModel *focus, const AlkModel *cue, const AlkModel *spot, const AlkModel *timbre, const float *pcm, size_t n, const uint8_t *options, size_t options_len, AlkError *err);
 
 AlkFloats alk_resample(const float *pcm, size_t n, double in_rate, double out_rate, AlkError *err);
 AlkResampler *alk_resampler_new(double in_rate, double out_rate, bool aligned, AlkError *err);
@@ -112,7 +114,7 @@ AlkBytes alk_learner_voiceprint(AlkLearner *h, bool raw, AlkError *err);
 AlkBytes alk_learner_state(AlkLearner *h, AlkError *err);
 void alk_learner_forget(AlkLearner *h, AlkError *err);
 
-AlkPipeline *alk_pipeline_new(const AlkModel *focus, const AlkModel *cue, const AlkModel *spot, const uint8_t *options, size_t options_len, AlkError *err);
+AlkPipeline *alk_pipeline_new(const AlkModel *focus, const AlkModel *cue, const AlkModel *spot, const AlkModel *timbre, const uint8_t *options, size_t options_len, AlkError *err);
 void alk_pipeline_free(AlkPipeline *h);
 int32_t alk_pipeline_step(AlkPipeline *h, const float *pcm, size_t n, double far_quiet_ms, float *output, size_t output_cap, AlkError *err);
 int32_t alk_pipeline_raw(AlkPipeline *h, const float *pcm, size_t n, AlkError *err);

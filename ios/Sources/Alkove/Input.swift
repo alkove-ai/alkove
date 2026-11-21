@@ -16,7 +16,7 @@ public struct Output: Equatable, Sendable {
 
 public enum Format: String, Sendable { case f32, s16 }
 
-/// Speech heard, audio processed and noise removed since the input started (`stats: true`).
+/// Speech heard, audio processed and noise removed since the input started.
 public struct Stats: Equatable, Sendable {
     public let speechSeconds: Double
     public let seconds: Double
@@ -36,17 +36,6 @@ public struct TurnParams: Equatable, Sendable {
     }
 
     var value: Value { .obj([("threshold", .num(threshold)), ("minPause", .num(minPause)), ("maxPause", .num(maxPause))]) }
-}
-
-/// Speech that starts while the far end speaks (`farEndActive`): `interruptStart`, then `interrupt` once it spans `minDuration` seconds, short gaps included, or `interruptCancel`.
-public struct InterruptParams: Equatable, Sendable {
-    public var minDuration = 0.7
-
-    public init(minDuration: Double = 0.7) {
-        self.minDuration = minDuration
-    }
-
-    var value: Value { .obj([("minDuration", .num(minDuration))]) }
 }
 
 /// An input's events, for one consumer: they wait for it, up to a thousand (utterances up to 16 MB of audio).
@@ -102,6 +91,9 @@ public class AlkoveInput: @unchecked Sendable {
     private var _status = Status.starting
     private var reason: RawReason? = .loading
     private var _print: Voiceprint?
+    // a recording given as the voiceprint: Focus's sample, and the recording Timbre has yet to make a print of
+    private var _sample: [Float]?
+    private var recording: [Float]?
 
     public var mode: Mode { lock { _mode } }
     public var status: Status { lock { _status } }
@@ -113,14 +105,28 @@ public class AlkoveInput: @unchecked Sendable {
         set { lock { _print = newValue } }
     }
 
-    private var _strength = 1.0
-    var strength: Double {
-        get { lock { _strength } }
-        set { lock { _strength = newValue } }
+    var sample: [Float]? { lock { _sample } }
+
+    // its print is made before the models start
+    func voiceFrom(_ recording: [Float]) { lock { self.recording = recording } }
+
+    // the recording's print: the input's, the recording Focus's sample
+    func voiced(_ p: Voiceprint, _ recording: [Float]) {
+        lock {
+            _print = p
+            _sample = recording
+        }
     }
 
     let source: AudioSource
-    let baseURL: URL?
+
+    // the print learns while the models run: an agent's from its first farEndActive() on
+    private var _learning = false
+    private var learnStarted = false
+    private var _farCalled = false
+    private var modelsRan = false
+    var learning: Bool { lock { _learning } }
+    var farCalled: Bool { lock { _farCalled } }
 
     // the app's listen() and hold(), sent again to every new pipeline: they hold across loads and crashes
     private var listening = true
@@ -171,9 +177,8 @@ public class AlkoveInput: @unchecked Sendable {
     private var spotWords: Value?
     private var spotModel: Model?
 
-    init(source: AudioSource, baseURL: URL?) {
+    init(source: AudioSource) {
         self.source = source
-        self.baseURL = baseURL
         var c: AsyncStream<Event>.Continuation!
         let stream = AsyncStream<Event>(bufferingPolicy: .bufferingNewest(1024)) { c = $0 }
         continuation = c
@@ -184,7 +189,7 @@ public class AlkoveInput: @unchecked Sendable {
     func pipelineOptions() -> Value { .null }
     func wantsBackground() -> Bool { false }
     func reference() -> Voiceprint? { nil }
-    func learning() -> Bool { false }
+    func learns() -> Bool { false }
     func spots() -> Bool { false }
     // the agent's audio still goes out raw while the models load or the device is too slow
     func rawOutput() -> Value? { nil }
@@ -213,7 +218,7 @@ public class AlkoveInput: @unchecked Sendable {
     // the agent's audio while no model runs: loading, failed, crashed
     private func makeRawPipe() throws {
         guard rawPipe == nil, let o = rawOutput() else { return }
-        rawPipe = try Native.bytes(Value.obj([("chain", nil), ("output", o)]).encoded()) { p, n in try Native.call { alk_pipeline_new(nil, nil, nil, p, n, $0) } }
+        rawPipe = try Native.bytes(Value.obj([("chain", nil), ("output", o)]).encoded()) { p, n in try Native.call { alk_pipeline_new(nil, nil, nil, nil, p, n, $0) } }
     }
 
     func emit(_ e: Event) {
@@ -268,33 +273,22 @@ public class AlkoveInput: @unchecked Sendable {
     private func startModels(_ wait: Double) async {
         if lock({ closed }) || Task.isCancelled { return }
         do {
+            if let r = lock({ recording }) {
+                voiced(try Timbre(models: try await Alkove.models(["timbre"])).embed(r), r)
+                lock { recording = nil }
+            }
             let wantSpot = lock { spotWords } != nil
-            let m = try await Alkove.models(models() + (wantSpot ? ["spot"] : []), baseURL: baseURL)
+            let m = try await Alkove.models(models() + (wantSpot ? ["spot"] : []))
             if let s = m.model("spot") { lock { spotModel = s } }
-            if wantsBackground(), !lock({ bgReady || bgClosed }) {
-                let t = try Timbre(models: try await Alkove.models(["timbre"], baseURL: baseURL))
-                let refValue = reference()?.value ?? .null
-                let start = voiceprint?.value ?? .null
-                let learn = learning()
-                // queued under the lock close() takes to queue the free: the coach is made before it, or never
-                let made = lock { () -> Bool in
-                    if bgClosed || bgReady { return false }
-                    bgReady = true
-                    bg.async { [self] in
-                        timbre = t
-                        coach = try? Native.bytes(Value.obj([("reference", refValue)]).encoded()) { p, n in try Native.call { alk_coach_new(p, n, $0) } }
-                        if learn, let c = coach {
-                            _ = try? Native.bytes(Value.obj([("start", start)]).encoded()) { p, n in try Native.call { alk_coach_learner(c, p, n, $0) } }
-                        }
-                    }
-                    return true
-                }
-                if !made, lock({ bgClosed }) { return }
+            await startLearning()
+            if wantsBackground() {
+                try await makeBackground()
+                if lock({ bgClosed }) { return }
             }
             let version = lock { settings }
             let opts = pipelineOptions()
             let h = try m.pinned {
-                try Native.bytes(opts.encoded()) { p, n in try Native.call { alk_pipeline_new(m.ptr("focus"), m.ptr("cue"), m.ptr("spot"), p, n, $0) } }
+                try Native.bytes(opts.encoded()) { p, n in try Native.call { alk_pipeline_new(m.ptr("focus"), m.ptr("cue"), m.ptr("spot"), m.ptr("timbre"), p, n, $0) } }
             }
             guard let h else { throw AlkoveError(.state, "", "no pipeline") }
             command(orElse: { alk_pipeline_free(h) }) { [self] in
@@ -304,6 +298,8 @@ public class AlkoveInput: @unchecked Sendable {
                 }
                 pipe = h
                 built = version
+                // the print the pipeline was built with, as the web sets it
+                printed = print != nil
                 applySettings()
                 let (l, hd) = lock { (listening, holding) }
                 if !l || hd {
@@ -318,6 +314,11 @@ public class AlkoveInput: @unchecked Sendable {
                     rawPipe = nil
                 }
                 activate()
+                let late = lock { () -> Bool in
+                    modelsRan = true
+                    return !learnStarted
+                }
+                if late, learns() { Task { [weak self] in await self?.startLearning() } }
             }
         } catch {
             if lock({ closed }) { return }
@@ -327,6 +328,45 @@ public class AlkoveInput: @unchecked Sendable {
             if Task.isCancelled { return }
             await startModels(min(2 * wait, modelsRetryMaxMs))
         }
+    }
+
+    // Timbre on its own thread, once per input: the learning windows and the voice checks
+    private func makeBackground() async throws {
+        if lock({ bgReady || bgClosed }) { return }
+        let t = try Timbre(models: try await Alkove.models(["timbre"]))
+        let refValue = reference()?.value ?? .null
+        // queued under the lock close() takes to queue the free: the coach is made before it, or never
+        lock {
+            if bgClosed || bgReady { return }
+            bgReady = true
+            bg.async { [self] in
+                timbre = t
+                coach = try? Native.bytes(Value.obj([("reference", refValue)]).encoded()) { p, n in try Native.call { alk_coach_new(p, n, $0) } }
+            }
+        }
+    }
+
+    // once the SDK knows when the agent speaks, for the input's life: the learner from the print in use, then the pipeline's windows
+    private func startLearning() async {
+        guard learns(), lock({ () -> Bool in
+            if learnStarted { return false }
+            learnStarted = true
+            _learning = true
+            return true
+        }) else { return }
+        do {
+            try await makeBackground()
+        } catch {
+            lock {
+                _learning = false
+                learnStarted = false
+            }
+            diag("models.failed", "warn", [("message", "Timbre not loaded: the print does not learn."), ("error", .str("\(error)"))])
+            return
+        }
+        let start = print?.value ?? .null
+        background("learner") { c, _ in _ = try Native.bytes(Value.obj([("start", start)]).encoded()) { b, n in try Native.call { alk_coach_learner(c, b, n, $0) } } }
+        changed(.obj([("learn", true)]))
     }
 
     private func set(_ change: Value) {
@@ -484,10 +524,13 @@ public class AlkoveInput: @unchecked Sendable {
         timing = [0, 0, 0, 0]
     }
 
-    private func shifted(_ v: Value) -> Value {
+    // a diag's own start and end too, each when it is there (speech.other-voice has a start only), as the web's worker does
+    private func shifted(_ v: Value, _ keys: [String] = ["start", "end", "at"]) -> Value {
         if shift == 0 { return v }
+        let diag = v["type"]?.str == "diag"
         return .obj(v.fields.map { k, x in
-            if ["start", "end", "at"].contains(k), let n = x.num { return (k, .num(n + shift)) }
+            if keys.contains(k), let n = x.num { return (k, .num(n + shift)) }
+            if diag, k == "data", case .obj = x { return (k, shifted(x, ["start", "end"])) }
             return (k, x)
         })
     }
@@ -510,8 +553,8 @@ public class AlkoveInput: @unchecked Sendable {
             case "verify":
                 let key = UInt32(a[1].num ?? 0)
                 let pcm = a[2].floats ?? []
-                // a voice that cannot be checked does not wake
-                let refuse = { [self] in command { [self] in verified(key, false, 0) } }
+                // a voice that cannot be checked does not wake; a phrase unanswered is the user's after a second (mine.rs LATE), as on the web
+                let refuse = { [self] in if spots() { command { [self] in verified(key, false, 0) } } }
                 background("verify", orElse: refuse) { [self] c, timbre in
                     let r = try Native.floats(pcm) { p, n in try Native.needed(Native.call { alk_coach_verify(c, timbre.handle.ptr, p, n, $0) }) }
                     let (same, score) = (r["same"]?.bool ?? false, r["score"]?.num ?? 0)
@@ -622,10 +665,10 @@ public class AlkoveInput: @unchecked Sendable {
 
     // on the capture thread: what setters changed while the pipeline was built
     private func applySettings() {
-        let (s, st, en, pr) = lock { (settings, _strength, enabled, _print) }
+        let (s, en, pr, sa, l) = lock { (settings, enabled, _print, _sample, _learning) }
         if built == s { return }
         built = s
-        set(.obj([("strength", .num(st)), ("enabled", .bool(en)), ("print", pr.map { .floats($0.embedding) } ?? .null)]))
+        set(.obj([("enabled", .bool(en)), ("print", pr.map { .floats($0.embedding) } ?? .null)] + (sa.map { [("sample", .floats($0))] } ?? []) + (l ? [("learn", true)] : [])))
     }
 
     private func changed(_ change: Value) {
@@ -667,17 +710,28 @@ public class AlkoveInput: @unchecked Sendable {
         }
     }
 
-    /// How much of Focus goes out, 0 to 1, the rest being the raw microphone.
-    public func setStrength(_ s: Double) {
-        strength = s
-        changed(.obj([("strength", .num(s))]))
+    /// Focus keeps this voice from the next silence on; nil goes back to the closest voice. While the print learns, learning starts again from it.
+    public func setVoiceprint(_ p: Voiceprint?) { applyPrint(p, nil) }
+
+    /// A few seconds of the user alone at 16 kHz: its print, made by Timbre in the background, and the recording as Focus's sample; a failure gives a diag `voiceprint.reset`.
+    public func setVoiceprint(_ recording: [Float]) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                self.applyPrint(try Timbre(models: try await Alkove.models(["timbre"])).embed(recording), recording)
+            } catch {
+                self.diag("voiceprint.reset", "warn", [("message", .str("A recording as the voiceprint: \(error)"))])
+            }
+        }
     }
 
-    /// Focus keeps this voice from the next silence on; nil goes back to the closest voice. With `learn`, learning starts again from it.
-    public func setVoiceprint(_ p: Voiceprint?) {
-        print = p
-        changed(.obj([("print", p.map { .floats($0.embedding) } ?? .null)]))
-        if learning() {
+    private func applyPrint(_ p: Voiceprint?, _ recording: [Float]?) {
+        lock {
+            _print = p
+            _sample = recording
+        }
+        changed(.obj([("print", p.map { .floats($0.embedding) } ?? .null)] + (recording.map { [("sample", .floats($0))] } ?? [])))
+        if learning {
             let start = p?.value ?? .null
             background("learner") { c, _ in _ = try Native.bytes(Value.obj([("start", start)]).encoded()) { b, n in try Native.call { alk_coach_learner(c, b, n, $0) } } }
         }
@@ -685,20 +739,27 @@ public class AlkoveInput: @unchecked Sendable {
 
     /// Drops the print and what was learned of it.
     public func forgetVoiceprint() {
-        print = nil
+        lock {
+            _print = nil
+            _sample = nil
+        }
         changed(.obj([("print", nil)]))
         background("forget") { c, _ in try Native.call { alk_coach_forget(c, $0) } }
     }
 
-    /// The app's own playback starts or stops (an agent's voice): learning skips what the far end may have put in the microphone, and interruptions are told.
+    /// The app's own playback starts or stops (an agent's voice): the interruptions come while it plays; the first call starts learning the print, which skips what the far end may have put in the microphone.
     public func farEndActive(_ on: Bool) {
-        lock {
+        let ran = lock { () -> Bool in
             farActive = on
             if on { farStarted = true }
+            if _farCalled { return false }
+            _farCalled = true
+            return modelsRan
         }
+        if ran { Task { [weak self] in await self?.startLearning() } }
     }
 
-    /// Speech heard and noise removed so far (`stats: true`), nil before the models run or once closed.
+    /// Speech heard and noise removed so far, nil before the models run or once closed.
     public func stats() async -> Stats? {
         await withCheckedContinuation { (c: CheckedContinuation<Stats?, Never>) in
             command(orElse: { c.resume(returning: nil) }) { [self] in
@@ -762,12 +823,17 @@ public class AlkoveInput: @unchecked Sendable {
         }
     }
 
-    func listenFor(_ words: [Word], _ context: String) {
+    // before start(): the pipeline starts with them, Spot loaded with its models
+    func startWords(_ words: [Word], _ context: String) {
         lock { spotWords = .obj([("words", .arr(words.map(\.value))), ("context", .str(context))]) }
+    }
+
+    func listenFor(_ words: [Word], _ context: String) {
+        startWords(words, context)
         Task { [weak self] in
             guard let self else { return }
             do {
-                let m = try await Alkove.models(["spot"], baseURL: self.baseURL)
+                let m = try await Alkove.models(["spot"])
                 self.lock { self.spotModel = m.model("spot") }
                 self.command { [self] in self.applyWords() }
             } catch {
@@ -804,46 +870,63 @@ public class AlkoveInput: @unchecked Sendable {
     }
 }
 
-/// What an agent input does with the user's voice. `farEnd`: the app calls `farEndActive` around its own playback, which `learn` needs.
+/// What an agent input does with the user's voice; it learns the print from the first `farEndActive` call on.
 public struct AgentOptions: Sendable {
-    public var voiceprint: Voiceprint?
-    public var learn = false
-    public var farEnd = false
-    public var strength = 1.0
-    public var normalize = true
-    public var speech: SpeechParams?
+    /// A `Voiceprint`, or a few seconds of the user alone at 16 kHz (`[Float]`): its print made by Timbre before the models run, and the recording as Focus's sample.
+    public var voiceprint: VoiceprintSource?
+    /// Phrases, turns and interruptions only in the print's voice (`voiceprint`, or the one learned): Timbre hears 0.6 s of each first, another voice gives a diag `speech.other-voice`.
+    public var onlyMyVoice = false
     public var output = Output()
     public var keepRecent = 0.0
     public var trace = false
-    public var stats = false
-    public var echoCancellation = true
-    public var baseURL: URL?
-    /// Speech ends and utterances carry their `PhraseLevel`.
-    public var levels = false
-    /// A voice this many dB under the session's main voice (`Alkove.nearGapDb`) opens no phrase, but a diag `speech.far`; nil: off.
-    public var near: Double?
-    /// `turn` and `turnEnd` events; nil: off.
-    public var turn: TurnParams? = TurnParams()
-    /// `interruptStart`, `interrupt`, `interruptCancel` while `farEnd` speaks; nil: off.
-    public var interrupt: InterruptParams? = InterruptParams()
+    /// A voice 10 dB under the session's main voice opens no phrase, but a diag `speech.far`.
+    public var near = false
+    /// When `turn` and `turnEnd` come.
+    public var turn = TurnParams()
+    /// Wake words on the raw microphone: each decides whether the user is far for what follows (diag `wake.far`) and, without a print, gives Focus the voice that said it (`wake.print`); the wakes come on `events`.
+    public var wake: WakeWords?
 
-    public init(voiceprint: Voiceprint? = nil, learn: Bool = false, farEnd: Bool = false, strength: Double = 1, normalize: Bool = true, speech: SpeechParams? = nil, output: Output = Output(), keepRecent: Double = 0, trace: Bool = false, stats: Bool = false, echoCancellation: Bool = true, baseURL: URL? = nil, levels: Bool = false, near: Double? = nil, turn: TurnParams? = TurnParams(), interrupt: InterruptParams? = InterruptParams()) {
+    public init(voiceprint: VoiceprintSource? = nil, onlyMyVoice: Bool = false, output: Output = Output(), keepRecent: Double = 0, trace: Bool = false, near: Bool = false, turn: TurnParams = TurnParams(), wake: WakeWords? = nil) {
         self.voiceprint = voiceprint
-        self.learn = learn
-        self.farEnd = farEnd
-        self.strength = strength
-        self.normalize = normalize
-        self.speech = speech
+        self.onlyMyVoice = onlyMyVoice
         self.output = output
         self.keepRecent = keepRecent
         self.trace = trace
-        self.stats = stats
-        self.echoCancellation = echoCancellation
-        self.baseURL = baseURL
-        self.levels = levels
         self.near = near
         self.turn = turn
-        self.interrupt = interrupt
+        self.wake = wake
+    }
+}
+
+/// An agent's wake words: typed in `lang` (compiled by Lex when the input starts), phonemes between slashes, or `Word`s and their JSON.
+public struct WakeWords: Sendable {
+    public var words: [WordSource]
+    public var lang: [String]
+    public var context = "pause"
+
+    public init(words: [WordSource], lang: [String] = [], context: String = "pause") {
+        self.words = words
+        self.lang = lang
+        self.context = context
+    }
+
+    public init(words: [WordSource], lang: String, context: String = "pause") {
+        self.init(words: words, lang: [lang], context: context)
+    }
+
+    // a string that is no word's JSON is typed, as on the web
+    private static func typed(_ w: WordSource) -> String? {
+        guard let s = w as? String, !s.drop(while: \.isWhitespace).hasPrefix("{") else { return nil }
+        return s
+    }
+
+    func compiled() async throws -> WakeWords {
+        let lexed = words.compactMap(Self.typed).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("/") }
+        if !lexed.isEmpty, lang.isEmpty { throw AlkoveError(.argument, "", "wake.lang is needed for a typed word") }
+        let lex = lexed.isEmpty ? nil : try Lex(models: try await Alkove.models(["lex"]))
+        var w = self
+        w.words = try words.map { try Self.typed($0).map { try compile($0, lang: lang, lex: lex) } ?? $0.word() }
+        return w
     }
 }
 
@@ -870,9 +953,9 @@ public final class AgentInput: AlkoveInput, @unchecked Sendable {
         o.chunkMs = max(16, Int((Double(o.chunkMs) / 16).rounded()) * 16)
         output = o
         self.onAudio = onAudio
-        super.init(source: source, baseURL: options.baseURL)
-        print = options.voiceprint
-        strength = options.strength
+        super.init(source: source)
+        print = options.voiceprint as? Voiceprint
+        if let r = options.voiceprint as? [Float] { voiceFrom(r) }
     }
 
     private func outputValue(_ utterance: Bool) -> Value {
@@ -880,23 +963,25 @@ public final class AgentInput: AlkoveInput, @unchecked Sendable {
     }
 
     override func models() -> [String] { ["focus", "cue"] }
-    override func wantsBackground() -> Bool { opts.learn }
-    override func learning() -> Bool { opts.learn }
+    override func wantsBackground() -> Bool { learning || opts.onlyMyVoice }
+    // the print Timbre checks the phrases against; while it learns, the one being learned
+    override func reference() -> Voiceprint? { opts.onlyMyVoice && !learning ? voiceprint : nil }
+    override func learns() -> Bool { farCalled }
     override func rawOutput() -> Value? { outputValue(false) }
     override func audio(_ chunk: Data) { onAudio?(chunk) }
 
     override func pipelineOptions() -> Value {
-        var chain = chainOptions(gate: false, normalize: opts.normalize, strength: strength, voiceprint: print, speech: opts.speech, sleep: true, levels: opts.levels, near: opts.near)
-        chain = chain.without("sleep")
-        return .obj([
-            ("chain", chain),
-            ("learn", .bool(opts.learn)),
+        .obj([
+            ("chain", chainOptions(gate: false, normalize: true, strength: 1, print: print, sample: sample, speech: nil, sleep: true, near: opts.near)),
+            ("onlyMyVoice", .bool(opts.onlyMyVoice)),
+            ("learn", .bool(learning)),
             ("keepRecent", .num(opts.keepRecent)),
             ("trace", .bool(opts.trace)),
-            ("stats", .bool(opts.stats)),
+            ("stats", true),
             ("output", outputValue(true)),
-            ("turn", opts.turn?.value ?? false),
-            ("interrupt", opts.interrupt?.value ?? false),
+            ("turn", opts.turn.value),
+            ("interrupt", true),
+            ("wake", .bool(opts.wake != nil)),
         ])
     }
 
@@ -909,34 +994,36 @@ public final class AgentInput: AlkoveInput, @unchecked Sendable {
 
     /// Opens the microphone (asking for it the first time) and starts; the models load in the background, raw audio meanwhile. `onAudio` runs on the audio thread: hand the chunk over, do not block.
     public static func start(_ options: AgentOptions = AgentOptions(), onAudio: (@Sendable (Data) -> Void)? = nil) async throws -> AgentInput {
+        var o = options
+        o.wake = try await options.wake?.compiled()
         guard await Mic.permission() else { throw AlkoveError(code: "mic.denied", message: "The microphone is not allowed: NSMicrophoneUsageDescription, and the user's yes.") }
-        return try start(options, source: Mic(echoCancellation: options.echoCancellation), onAudio: onAudio)
+        return try start(o, source: Mic(echoCancellation: true), onAudio: onAudio)
     }
 
+    // the wake words compiled already
     static func start(_ options: AgentOptions, source: AudioSource, onAudio: (@Sendable (Data) -> Void)?) throws -> AgentInput {
-        if options.learn, !options.farEnd {
-            throw AlkoveError(.argument, "", "learn needs farEnd: the agent's voice would teach the print (call farEndActive around your playback)")
-        }
+        try checkVoice(options.voiceprint)
+        let wake = try options.wake.map { try $0.words.map { try $0.word() } }
+        if wake?.isEmpty == true { throw AlkoveError(.argument, "", "wake.words is empty") }
         let i = AgentInput(options: options, source: source, onAudio: onAudio)
+        if let wake, let w = options.wake { i.startWords(wake, w.context) }
         try i.start()
         return i
     }
 }
 
-/// What a wake listener listens for. `onlyMyVoice`: only this voice wakes it, checked by Timbre on the word and the 0.5 s after it.
+/// What a wake listener listens for. `voiceprint`: only this voice wakes it, checked by Timbre on the word and the 0.5 s after it; a `Voiceprint`, or a few seconds of the user alone at 16 kHz (`[Float]`), made a print before the models run.
 public struct WakeOptions: Sendable {
     public var words: [WordSource]
     public var context = "pause"
-    public var onlyMyVoice: Voiceprint?
+    public var voiceprint: VoiceprintSource?
     public var trace = false
-    public var baseURL: URL?
 
-    public init(words: [WordSource], context: String = "pause", onlyMyVoice: Voiceprint? = nil, trace: Bool = false, baseURL: URL? = nil) {
+    public init(words: [WordSource], context: String = "pause", voiceprint: VoiceprintSource? = nil, trace: Bool = false) {
         self.words = words
         self.context = context
-        self.onlyMyVoice = onlyMyVoice
+        self.voiceprint = voiceprint
         self.trace = trace
-        self.baseURL = baseURL
     }
 }
 
@@ -944,12 +1031,17 @@ public struct WakeOptions: Sendable {
 public final class WakeListener: AlkoveInput, @unchecked Sendable {
     private let opts: WakeOptions
     private let words: [Word]
+    private let mine = Lock()
+    private var voice: Voiceprint?
 
     init(options: WakeOptions, source: AudioSource) throws {
         if options.words.isEmpty { throw AlkoveError(.argument, "", "WakeListener: no word") }
+        try checkVoice(options.voiceprint)
         opts = options
         words = try options.words.map { try $0.word() }
-        super.init(source: source, baseURL: options.baseURL)
+        super.init(source: source)
+        voice = options.voiceprint as? Voiceprint
+        if let r = options.voiceprint as? [Float] { voiceFrom(r) }
         for w in words where w.chain == "focus" {
             emit(.diag(Diag(code: "word.chain", level: "warn", data: .obj([("message", .str("\"\(w.text)\" was enrolled behind Focus: its thresholds are off on the raw microphone."))]))))
         }
@@ -957,11 +1049,13 @@ public final class WakeListener: AlkoveInput, @unchecked Sendable {
 
     override func models() -> [String] { ["spot"] }
     override func spots() -> Bool { true }
-    override func wantsBackground() -> Bool { opts.onlyMyVoice != nil }
-    override func reference() -> Voiceprint? { opts.onlyMyVoice }
+    override func wantsBackground() -> Bool { opts.voiceprint != nil }
+    override func reference() -> Voiceprint? { mine { voice } }
+    // a recording as the voiceprint: its print only, Spot has no Focus
+    override func voiced(_ p: Voiceprint, _: [Float]) { mine { voice = p } }
 
     override func pipelineOptions() -> Value {
-        .obj([("chain", nil), ("words", .arr(words.map(\.value))), ("context", .str(opts.context)), ("trace", .bool(opts.trace)), ("verify", .bool(opts.onlyMyVoice != nil))])
+        .obj([("chain", nil), ("words", .arr(words.map(\.value))), ("context", .str(opts.context)), ("trace", .bool(opts.trace)), ("verify", .bool(wantsBackground()))])
     }
 
     /// Listen for other words from now on.
@@ -981,18 +1075,16 @@ public final class WakeListener: AlkoveInput, @unchecked Sendable {
     }
 }
 
-// Spot on the raw microphone, the takes counted in the pipeline
+// Spot on the raw microphone, the three takes counted in the pipeline
 final class EnrollInput: AlkoveInput, @unchecked Sendable {
     private let word: Word
-    private let takes: Int
 
-    init(word: Word, takes: Int, source: AudioSource, baseURL: URL?) {
+    init(word: Word, source: AudioSource) {
         self.word = word
-        self.takes = takes
-        super.init(source: source, baseURL: baseURL)
+        super.init(source: source)
     }
 
     override func models() -> [String] { ["spot"] }
     override func spots() -> Bool { true }
-    override func pipelineOptions() -> Value { .obj([("chain", nil), ("enroll", .obj([("word", word.value), ("takes", .num(Double(takes)))]))]) }
+    override func pipelineOptions() -> Value { .obj([("chain", nil), ("enroll", .obj([("word", word.value)]))]) }
 }

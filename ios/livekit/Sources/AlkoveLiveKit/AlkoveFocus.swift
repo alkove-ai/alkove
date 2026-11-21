@@ -11,7 +11,7 @@ public final class AlkoveFocus: NSObject, AudioCustomProcessingDelegate, @unchec
     private let lock = NSLock()
     private var on = true
 
-    public init(models: Models, voiceprint: Voiceprint? = nil, strength: Double = 1, normalize: Bool = false, speech: SpeechParams? = nil, onEvent: (@Sendable (Event) -> Void)? = nil) throws {
+    public init(models: Models, voiceprint: VoiceprintSource? = nil, strength: Double = 1, normalize: Bool = false, speech: SpeechParams? = nil, onEvent: (@Sendable (Event) -> Void)? = nil) throws {
         processor = try CallProcessor(models: models, voiceprint: voiceprint, strength: strength, normalize: normalize, speech: speech)
         self.onEvent = onEvent
     }
@@ -65,8 +65,8 @@ public final class AlkoveFocus: NSObject, AudioCustomProcessingDelegate, @unchec
         if let cb = onEvent { events.forEach(cb) }
     }
 
-    /// Applied at the user's next silence; nil goes back to the closest voice.
-    public func setVoiceprint(_ p: Voiceprint?) throws { try processor.setVoiceprint(p) }
+    /// Applied at the user's next silence; nil goes back to the closest voice; a recording of the user at 16 kHz gives the print and Focus's sample.
+    public func setVoiceprint(_ p: VoiceprintSource?) throws { try processor.setVoiceprint(p) }
 
     /// How much of Focus goes out, 0 to 1, the rest being the raw microphone.
     public func setStrength(_ s: Double) throws { try processor.setStrength(s) }

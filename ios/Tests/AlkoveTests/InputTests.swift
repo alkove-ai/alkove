@@ -76,7 +76,7 @@ final class InputTests: XCTestCase {
     override func setUp() async throws {
         let dir = Fixtures.modelDir
         if !Fixtures.required { try XCTSkipUnless(FileManager.default.fileExists(atPath: dir.appendingPathComponent(try Models.file("focus")).path), "no models in packages/alkove/.cache/models") }
-        Alkove.loader = { name, _ in try Models.load([name], directory: dir).model(name)! }
+        Alkove.loader = { name in try Models.load([name], directory: dir).model(name)! }
     }
 
     private func collect(_ input: AlkoveInput) -> (Box<[Event]>, Task<Void, Never>) {
@@ -98,7 +98,7 @@ final class InputTests: XCTestCase {
     // what a pipeline gives on the same hops, stepped by hand: the input must send these bytes
     private func direct(_ opts: Value, _ hops: [Float], spot: Bool = false) throws -> (audio: Data, utterances: [Data], events: [Value]) {
         let m = try Fixtures.load("focus", "cue")
-        let p = try Native.bytes(opts.encoded()) { b, n in try Native.call { alk_pipeline_new(m.ptr("focus"), m.ptr("cue"), nil, b, n, $0) } }!
+        let p = try Native.bytes(opts.encoded()) { b, n in try Native.call { alk_pipeline_new(m.ptr("focus"), m.ptr("cue"), nil, m.ptr("timbre"), b, n, $0) } }!
         defer { alk_pipeline_free(p) }
         var audio = Data()
         var utterances = [Data]()
@@ -127,7 +127,7 @@ final class InputTests: XCTestCase {
         let source = ScriptedSource(script)
         let live = Box<AgentInput?>(nil)
         let afterModels = Box(Data())
-        let options = AgentOptions(output: Output(format: .s16, rate: 24000), levels: true)
+        let options = AgentOptions(output: Output(format: .s16, rate: 24000))
         source.ready = { live.value?.mode == .focus }
         let input = try AgentInput.start(options, source: source) { chunk in
             if live.value?.mode == .focus { afterModels.update { $0 += chunk } }
@@ -162,7 +162,7 @@ final class InputTests: XCTestCase {
 
     func testListenAndHoldAskedBeforeTheModelsHoldOnceTheyRun() throws {
         let source = ScriptedSource(silence(1.5) + Fixtures.wav("mix.wav") + silence(1))
-        let input = try AgentInput.start(AgentOptions(levels: true), source: source, onAudio: nil)
+        let input = try AgentInput.start(AgentOptions(), source: source, onAudio: nil)
         input.listen(false)
         input.hold()
         let (events, task) = collect(input)
@@ -188,18 +188,39 @@ final class InputTests: XCTestCase {
         XCTAssertNotNil(u?.level)
     }
 
-    func testTheAgentLearnsThePrint() throws {
+    // told once the models run: the running pipeline takes `learn`, the print comes from the speech after it
+    func testTheAgentLearnsThePrintFromItsFirstFarEndActive() throws {
         let enroll = Fixtures.wav("enroll.wav")
         let source = ScriptedSource(enroll + silence(0.5) + enroll + silence(0.5) + enroll + silence(1))
-        let input = try AgentInput.start(AgentOptions(learn: true, farEnd: true), source: source, onAudio: nil)
+        let live = Box<AgentInput?>(nil)
+        // the first window's print turns the mode to focusPrint
+        source.ready = { [.focus, .focusPrint].contains(live.value?.mode) && live.value?.learning == true }
+        let input = try AgentInput.start(AgentOptions(), source: source, onAudio: nil)
+        live.value = input
         let (events, task) = collect(input)
+        wait("the models") { input.mode == .focus }
+        XCTAssertEqual(input.pipelineOptions()["learn"], .bool(false), "nothing learned before the SDK knows when the agent speaks")
+        input.farEndActive(false)
         wait("a print learned", timeout: 30) { events.value.contains { if case .voiceprintLearned = $0 { return true } else { return false } } }
         input.close()
         task.cancel()
+        XCTAssertEqual(input.pipelineOptions()["learn"], .bool(true))
         XCTAssertEqual(input.voiceprint?.embedding.count, 192)
         let progress = events.value.compactMap { if case let .learn(p) = $0 { return p } else { return nil } }
-        XCTAssertEqual(progress.last, 1)
-        XCTAssertThrowsError(try AgentInput.start(AgentOptions(learn: true), source: ScriptedSource([]), onAudio: nil))
+        let coached = events.value.compactMap { if case let .diag(d) = $0, d.code.hasPrefix("print.") { return "\(d.code) \(d.data["score"]?.num ?? .nan)" } else { return nil } }
+        XCTAssertEqual(progress.last, 1, "\(coached)")
+    }
+
+    // told before the models run: the pipeline is built learning
+    func testAnAgentToldBeforeItsModelsStartsLearning() throws {
+        let input = try AgentInput.start(AgentOptions(), source: ScriptedSource([]), onAudio: nil)
+        input.farEndActive(true)
+        input.farEndActive(false)
+        wait("the models") { input.mode == .focus }
+        wait("its coach") { input.hasCoach }
+        input.close()
+        XCTAssertTrue(input.learning)
+        XCTAssertEqual(input.pipelineOptions()["learn"], .bool(true))
     }
 
     func testAWakeOnlyForMyVoice() throws {
@@ -211,7 +232,7 @@ final class InputTests: XCTestCase {
             let source = ScriptedSource(script)
             let live = Box<WakeListener?>(nil)
             source.ready = { [.spot, .spotPrint].contains(live.value?.mode) }
-            let listener = try WakeListener.start(WakeOptions(words: [word], context: "anywhere", onlyMyVoice: mine ? me : nil), source: source)
+            let listener = try WakeListener.start(WakeOptions(words: [word], context: "anywhere", voiceprint: mine ? me : nil), source: source)
             live.value = listener
             let (events, task) = collect(listener)
             wait("the script") { source.finished }
@@ -226,11 +247,111 @@ final class InputTests: XCTestCase {
         }
     }
 
+    func testAnAgentWokenDecidesFarAndTakesTheVoiceOfItsWord() throws {
+        let word = try Lex(models: try Fixtures.load("lex")).compile("amendement", lang: "fr")
+        let source = ScriptedSource(Fixtures.wav("speech.wav") + silence(2))
+        let live = Box<AgentInput?>(nil)
+        source.ready = { [.focus, .focusPrint].contains(live.value?.mode) }
+        let input = try AgentInput.start(AgentOptions(wake: WakeWords(words: [word], context: "anywhere")), source: source, onAudio: nil)
+        live.value = input
+        let (events, task) = collect(input)
+        let diags = { events.value.compactMap { if case let .diag(d) = $0 { return d } else { return nil } } }
+        wait("the script") { source.finished }
+        wait("the wake") { events.value.contains { if case .wake = $0 { return true } else { return false } } }
+        wait("its print") { diags().contains { $0.code == "wake.print" } }
+        input.close()
+        task.cancel()
+        XCTAssertEqual(input.pipelineOptions()["wake"], .bool(true))
+        let wake = events.value.compactMap { if case let .wake(w) = $0 { return w } else { return nil } }.first
+        XCTAssertEqual(wake?.word, "amendement")
+        XCTAssertGreaterThan(wake?.audio?.count ?? 0, 0)
+        XCTAssertNotNil(diags().first { $0.code == "wake.far" }?.data["far"]?.bool)
+    }
+
+    func testWakeWordsTypedNeedTheirLang() async throws {
+        let w = try await WakeWords(words: ["amendement", " /kamij/"], lang: "fr").compiled()
+        XCTAssertEqual(try w.words[0].word().text, "amendement")
+        XCTAssertEqual(try w.words[1].word().phonemes[0].ipa, "kamij")
+        let json = try await WakeWords(words: [try w.words[0].word().toJson(), "/kamij/"]).compiled()
+        XCTAssertEqual(json.words.count, 2, "a word's JSON and phonemes need no lang")
+        do {
+            _ = try await WakeWords(words: ["amendement"]).compiled()
+            XCTFail("a typed word without its lang")
+        } catch {
+            XCTAssertEqual((error as? AlkoveError)?.kind, .argument)
+        }
+        XCTAssertThrowsError(try AgentInput.start(AgentOptions(wake: WakeWords(words: [])), source: ScriptedSource([]), onAudio: nil))
+    }
+
+    // the web's two worker cases: my voice told once Timbre heard it; checked against a voice that is not there, a diag instead of each phrase
+    func testAnAgentForMyVoiceOnly() async throws {
+        let timbre = try Timbre(models: try Fixtures.load("timbre"))
+        let me = try timbre.embed(Fixtures.wav("enroll.wav"))
+        let other = try timbre.embed(Fixtures.noise(48000, 11, 0.1))
+        let enroll = Fixtures.wav("enroll.wav")
+        for mine in [true, false] {
+            if !mine {
+                // Focus loaded 3 s late: the input's clock 3 s ahead of the pipeline's
+                let dir = Fixtures.modelDir
+                await Alkove.shared.clear()
+                Alkove.loader = { name in
+                    if name == "focus" { try await Task.sleep(nanoseconds: 3_000_000_000) }
+                    return try Models.load([name], directory: dir).model(name)!
+                }
+            }
+            let source = ScriptedSource(enroll + silence(0.5) + enroll + silence(2))
+            let live = Box<AgentInput?>(nil)
+            let go = Box(false)
+            source.ready = { go.value && live.value?.mode == .focusPrint }
+            let input = try AgentInput.start(AgentOptions(voiceprint: mine ? me : other, onlyMyVoice: true), source: source, onAudio: nil)
+            live.value = input
+            wait("the models") { input.mode == .focusPrint }
+            // Timbre keeps the print it had when the models started: Focus on my voice, Timbre listening for the other
+            if !mine { input.setVoiceprint(me) }
+            go.value = true
+            let (events, task) = collect(input)
+            let codes = { events.value.compactMap { e -> String? in if case .speechEnd = e { return "speechend" } else if case let .diag(d) = e { return d.code } else { return nil } } }
+            wait("the script") { source.finished }
+            wait(mine ? "a phrase" : "another voice") { codes().contains(mine ? "speechend" : "speech.other-voice") }
+            input.close()
+            task.cancel()
+            XCTAssertEqual(input.pipelineOptions()["onlyMyVoice"], .bool(true))
+            XCTAssertEqual(codes().contains("speech.other-voice"), !mine, "\(codes())")
+            XCTAssertEqual(codes().contains("speechend"), mine, "\(codes())")
+            if !mine {
+                let other = events.value.compactMap { if case let .diag(d) = $0, d.code == "speech.other-voice" { return d.data["start"]?.num } else { return nil } }.first
+                XCTAssertGreaterThan(other ?? 0, Double(source.idleHops * 256) / 16000 - 0.1, "the phrase's start on the input's clock")
+                await Alkove.shared.clear()
+            }
+        }
+    }
+
+    func testARecordingAsTheVoiceprintOfAnInput() throws {
+        let recording = Fixtures.wav("enroll.wav")
+        let print = try Timbre(models: try Fixtures.load("timbre")).embed(recording).embedding
+        let agent = try AgentInput.start(AgentOptions(voiceprint: recording), source: ScriptedSource([]), onAudio: nil)
+        wait("the models") { agent.mode == .focusPrint }
+        XCTAssertEqual(agent.voiceprint?.embedding, print)
+        XCTAssertEqual(agent.pipelineOptions()["chain"]?["sample"], .floats(recording))
+        agent.setVoiceprint(nil)
+        XCTAssertNil(agent.sample)
+        agent.setVoiceprint(recording)
+        wait("its print again") { agent.voiceprint != nil }
+        XCTAssertEqual(agent.sample, recording)
+        agent.close()
+        let word = try Lex(models: try Fixtures.load("lex")).compile("amendement", lang: "fr")
+        let listener = try WakeListener.start(WakeOptions(words: [word], voiceprint: recording), source: ScriptedSource([]))
+        wait("the wake listener") { listener.mode == .spotPrint }
+        XCTAssertEqual(listener.reference()?.embedding, print)
+        XCTAssertNil(listener.sample, "a print only: Spot has no Focus")
+        listener.close()
+    }
+
     func testAWordEnrolledOnItsTakes() async throws {
         let speech = Fixtures.wav("speech.wav")
         let quiet = silence(1)
         let script = quiet + speech + quiet + speech + quiet + speech + quiet + speech + quiet
-        let e = WordEnrollment(text: "amendement", lang: ["fr"], takes: 3, baseURL: nil) { ScriptedSource(script) }
+        let e = WordEnrollment(text: "amendement", lang: ["fr"]) { ScriptedSource(script) }
         let takes = Box(0)
         let t = Task { for await ev in e.events { if case .take = ev { takes.update { $0 += 1 } } } }
         let r = try await e.result()
@@ -271,7 +392,7 @@ final class InputTests: XCTestCase {
         let source = ScriptedSource(Fixtures.wav("speech.wav") + silence(1))
         let live = Box<AgentInput?>(nil)
         source.ready = { live.value?.mode == .focus }
-        let input = try AgentInput.start(AgentOptions(keepRecent: 2, stats: true), source: source, onAudio: nil)
+        let input = try AgentInput.start(AgentOptions(keepRecent: 2), source: source, onAudio: nil)
         live.value = input
         wait("the models") { input.mode == .focus }
         async let wav = input.record(seconds: 1)
@@ -344,11 +465,12 @@ final class InputTests: XCTestCase {
     func testAnInputClosedWhileTimbreLoadsMakesNoCoach() async throws {
         let dir = Fixtures.modelDir
         await Alkove.shared.clear()
-        Alkove.loader = { name, _ in
+        Alkove.loader = { name in
             if name == "timbre" { try await Task.sleep(nanoseconds: 800_000_000) }
             return try Models.load([name], directory: dir).model(name)!
         }
-        let input = try AgentInput.start(AgentOptions(learn: true, farEnd: true), source: ScriptedSource([]), onAudio: nil)
+        let input = try AgentInput.start(AgentOptions(), source: ScriptedSource([]), onAudio: nil)
+        input.farEndActive(false)
         try await Task.sleep(nanoseconds: 300_000_000)
         input.close()
         try await Task.sleep(nanoseconds: 1_500_000_000)
