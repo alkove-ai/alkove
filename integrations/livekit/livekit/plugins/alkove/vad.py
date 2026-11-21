@@ -217,16 +217,19 @@ class VADStream(agents.vad.VADStream):
                 p = row["speech"]
                 now = (k + 1) * WINDOW
                 speaking = tracker.confirmed
+                voiced = p >= v.speech.confidence or (tracker.active and p >= v.speech.exit_confidence)
                 if speaking:
                     speech_pub += WINDOW
                 else:
                     silence_pub += WINDOW
+                # LiveKit interrupts on this duration: the pause before stop_secs ends the phrase does not count
+                heard = max(0.0, speech_pub - (0.0 if voiced else silence_acc + WINDOW)) if speaking else speech_pub
                 self._event_ch.send_nowait(
                     agents.vad.VADEvent(
                         type=agents.vad.VADEventType.INFERENCE_DONE,
                         samples_index=(k + 1) * 480,
                         timestamp=now,
-                        speech_duration=speech_pub,
+                        speech_duration=heard,
                         silence_duration=silence_pub,
                         frames=[as_frame(recent.slice(at(k * WINDOW), at(now)))],
                         probability=p,
@@ -236,7 +239,7 @@ class VADStream(agents.vad.VADStream):
                         raw_accumulated_speech=speech_acc,
                     )
                 )
-                if p >= v.speech.confidence or (tracker.active and p >= v.speech.exit_confidence):
+                if voiced:
                     speech_acc += WINDOW
                     silence_acc = 0.0
                 else:

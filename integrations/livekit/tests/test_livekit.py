@@ -150,6 +150,21 @@ def test_vad_long_speech_keeps_its_start_up_to_max_buffered_speech(models, caplo
     assert "max_buffered_speech reached" in caplog.text
 
 
+def test_vad_short_acknowledgement_stays_under_the_interruption_minimum(models):
+    pcm = wav("speech.wav", 16000)
+    # the loudest half second of the file: an acknowledgement Cue confirms as speech
+    on = int(np.argmax(np.convolve(pcm.astype(np.float64) ** 2, np.ones(8000), "valid")))
+    for burst in (0.35, 0.5):
+        clip = np.concatenate([np.zeros(16000, np.int16), pcm[on : on + int(burst * 16000)], np.zeros(32000, np.int16)])
+        events = run_vad(plugin.VAD.load(models=models), frames(clip, 16000))
+        inference = [e for e in events if e.type == agents_vad.VADEventType.INFERENCE_DONE]
+        assert any(e.speaking for e in inference)
+        # the session's interruption minimum (0.7 s): the pause before the end of speech does not count
+        assert max(e.speech_duration for e in inference) < 0.7
+    long = run_vad(plugin.VAD.load(models=models), frames(np.concatenate([pcm, np.zeros(32000, np.int16)]), 16000))
+    assert max(e.speech_duration for e in long if e.type == agents_vad.VADEventType.INFERENCE_DONE) > 2
+
+
 def test_vad_min_silence_duration_follows_its_speech_params(models):
     vad = plugin.VAD.load(models=models)
     assert vad.min_silence_duration == 0.6
