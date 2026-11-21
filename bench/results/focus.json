@@ -1,8 +1,46 @@
 {
- "model": "alkove-focus-1-preview",
- "file": "alkove-focus-1-preview.alk",
- "bytes": 1111696,
- "sha256": "a63cda32e023b8d76089f4c3df0cc2c69ba36017b8f6cdea1da1094ef8022b6a",
+ "model": "alkove-focus-1",
+ "file": "alkove-focus-1.alk",
+ "bytes": 2320032,
+ "sha256": "25028c1f9faf765ccab4076716b5e8a8e756cd7662babd2bc078951982df5ce4",
+ "sizes": {
+  "alkove-focus-1": {
+   "bytes": 2320032,
+   "files": [
+    "alkove-focus-1.alk"
+   ],
+   "license": "Apache-2.0"
+  },
+  "VoxLock": {
+   "bytes": 50598514,
+   "files": [
+    "chunk_fp16.onnx",
+    "enroll_fp16.onnx"
+   ],
+   "license": "Apache-2.0 (arbazsiddiqui/voxlock 1.0.0, the version run in fp32; its fp16 files, which its card says match fp32)"
+  },
+  "Hush": {
+   "bytes": 9229701,
+   "files": [
+    "model_best.ckpt"
+   ],
+   "license": "Apache-2.0"
+  },
+  "DeepFilterNet 3": {
+   "bytes": 8714073,
+   "files": [
+    "model_120.ckpt.best"
+   ],
+   "license": "MIT / Apache-2.0"
+  },
+  "GTCRN": {
+   "bytes": 257746,
+   "files": [
+    "gtcrn_simple.onnx"
+   ],
+   "license": "MIT"
+  }
+ },
  "benchmarks": [
   {
    "id": "another-voice",
@@ -16,7 +54,7 @@
      "license": "CC-BY-SA-3.0"
     }
    ],
-   "protocol": "10 s scenes, 7 languages, 30 per case and language: the target speaks, both speak at the same level, the other voice speaks alone; voice+noise adds DEMAND noise at 10 dB. Print from 3 other clips of the target (alkove-timbre); VoxLock enrolls on the same clips.",
+   "protocol": "10 s scenes, 7 languages (fr, en, es, it, pt, ca, ro), 30 per case and language: the target speaks, both speak at the same level, the other voice speaks alone; voice+noise adds DEMAND noise at 10 dB. Print given: Timbre's print and Focus's sample from 3 other clips of the target; VoxLock enrolls on the same clips.",
    "metrics": {
     "sisdr": "SI-SDR of the target, dB, higher is better",
     "other_db": "level of the other voice while it speaks alone, dB, lower is better"
@@ -27,11 +65,19 @@
       "sisdr": 3.37,
       "other_db": 0.0
      },
-     "alkove-focus, print": {
+     "alkove-focus-1, print given": {
+      "sisdr": 10.7,
+      "other_db": -33.82
+     },
+     "alkove-focus-1": {
+      "sisdr": 3.51,
+      "other_db": -1.44
+     },
+     "alkove-focus-1-preview, print given": {
       "sisdr": 7.14,
       "other_db": -22.56
      },
-     "alkove-focus, no print": {
+     "alkove-focus-1-preview": {
       "sisdr": 4.46,
       "other_db": -7.76
      },
@@ -57,11 +103,19 @@
       "sisdr": 2.42,
       "other_db": 0.0
      },
-     "alkove-focus, print": {
+     "alkove-focus-1, print given": {
+      "sisdr": 9.12,
+      "other_db": -31.15
+     },
+     "alkove-focus-1": {
+      "sisdr": 3.1,
+      "other_db": -3.4
+     },
+     "alkove-focus-1-preview, print given": {
       "sisdr": 4.98,
       "other_db": -18.05
      },
-     "alkove-focus, no print": {
+     "alkove-focus-1-preview": {
       "sisdr": 3.66,
       "other_db": -8.01
      },
@@ -82,6 +136,72 @@
       "other_db": -1.36
      }
     }
+   },
+   "results_de_nl_pl_sv": {
+    "voice": {
+     "raw": {
+      "sisdr": 2.63,
+      "other_db": 0.0
+     },
+     "alkove-focus-1, print given": {
+      "sisdr": 10.54,
+      "other_db": -32.79
+     },
+     "alkove-focus-1": {
+      "sisdr": 2.75,
+      "other_db": -0.79
+     }
+    },
+    "voice+noise": {
+     "raw": {
+      "sisdr": 1.72,
+      "other_db": 0.0
+     },
+     "alkove-focus-1, print given": {
+      "sisdr": 8.6,
+      "other_db": -30.92
+     },
+     "alkove-focus-1": {
+      "sisdr": 2.25,
+      "other_db": -4.22
+     }
+    }
+   },
+   "results_11_languages": {
+    "voice": {
+     "raw": {
+      "sisdr": 3.1,
+      "other_db": 0.0
+     },
+     "alkove-focus-1, print given": {
+      "sisdr": 10.64,
+      "other_db": -33.45
+     },
+     "alkove-focus-1": {
+      "sisdr": 3.23,
+      "other_db": -1.21
+     }
+    },
+    "voice+noise": {
+     "raw": {
+      "sisdr": 2.17,
+      "other_db": 0.0
+     },
+     "alkove-focus-1, print given": {
+      "sisdr": 8.93,
+      "other_db": -31.06
+     },
+     "alkove-focus-1": {
+      "sisdr": 2.79,
+      "other_db": -3.7
+     }
+    }
+   },
+   "notes": {
+    "alkove-focus-1": "through its SDK (process); with no print given, the SDK learns one from the stream",
+    "alkove-focus-1-preview": "the previous version, as published in 0.4, without a print",
+    "results_de_nl_pl_sv": "the same scenes in German, Dutch, Polish and Swedish, people neither Timbre nor Focus trained on (Common Voice 17 test and dev)",
+    "results_11_languages": "the 7 and the 4 together, 30 scenes per case and language"
    }
   },
   {
@@ -93,7 +213,7 @@
      "cite": "Carletta et al., 2005"
     }
    ],
-   "protocol": "VoxLock's protocol, same draws: windows of the wearer's headset while others talk. Transcribed with Whisper large-v3 turbo. With print: another turn of the wearer, up to 8 s.",
+   "protocol": "VoxLock's protocol, same draws: 134 windows of the wearer's headset while others talk. Transcribed with Whisper large-v3 turbo. Print given: another turn of the wearer, up to 8 s.",
    "metrics": {
     "wer": "word error rate on the wearer's words, %",
     "leak_wpm": "words of the other voices that get through, per minute"
@@ -102,6 +222,16 @@
     "raw": {
      "wer": 20.8,
      "leak_wpm": 16.98,
+     "windows": 134
+    },
+    "alkove-focus-1": {
+     "wer": 16.17,
+     "leak_wpm": 2.39,
+     "windows": 134
+    },
+    "alkove-focus-1, print given": {
+     "wer": 16.83,
+     "leak_wpm": 2.26,
      "windows": 134
     },
     "GTCRN": {
@@ -124,22 +254,34 @@
      "leak_wpm": 0.4,
      "windows": 134
     },
-    "alkove-focus, no print": {
+    "alkove-focus-1-preview": {
      "wer": 16.66,
      "leak_wpm": 1.19,
      "windows": 134
     },
-    "alkove-focus, print": {
+    "alkove-focus-1-preview, print given": {
      "wer": 16.07,
      "leak_wpm": 0.53,
      "windows": 134
     }
    },
+   "notes": {
+    "alkove-focus-1": "through its SDK (process); with no print given, the SDK learns one from the stream",
+    "alkove-focus-1-preview": "the previous version, as published in 0.4, without a print"
+   },
    "gap_vs_voxlock": {
-    "points": 0.97,
+    "points": 1.73,
     "ci95": [
-     -0.44,
-     2.74
+     0.55,
+     3.27
+    ],
+    "speakers": 19
+   },
+   "gap_vs_preview": {
+    "points": 0.76,
+    "ci95": [
+     -0.74,
+     2.16
     ],
     "speakers": 19
    }
@@ -153,7 +295,7 @@
      "cite": "Valentini-Botinhao, C. (2017). Noisy speech database for training speech enhancement algorithms and TTS models. University of Edinburgh, CSTR. https://doi.org/10.7488/ds/2117"
     }
    ],
-   "protocol": "824 test clips, Focus without a print, VoxLock enrolled on the noisy clip. DNSMOS (Reddy et al., ICASSP 2021 and 2022); WER: Whisper large-v3 turbo.",
+   "protocol": "824 test clips, no print given, VoxLock enrolled on the noisy clip. DNSMOS (Reddy et al., ICASSP 2021 and 2022); WER: Whisper large-v3 turbo.",
    "metrics": {
     "stoi": "STOI",
     "sisdr": "SI-SDR, dB",
@@ -172,6 +314,15 @@
      "wer": 2.72,
      "n": 824
     },
+    "alkove-focus-1": {
+     "stoi": 0.892,
+     "sisdr": 13.258,
+     "ovr": 3.07,
+     "p808": 3.423,
+     "bak": 4.108,
+     "wer": 5.62,
+     "n": 824
+    },
     "GTCRN": {
      "stoi": 0.918,
      "sisdr": 14.603,
@@ -181,7 +332,7 @@
      "wer": 3.47,
      "n": 824
     },
-    "alkove-focus": {
+    "alkove-focus-1-preview": {
      "stoi": 0.895,
      "sisdr": 12.066,
      "ovr": 3.039,
@@ -226,6 +377,10 @@
      "wer": 3.47,
      "n": 824
     }
+   },
+   "notes": {
+    "alkove-focus-1": "through its SDK (process); with no print given, the SDK learns one from the stream",
+    "alkove-focus-1-preview": "the previous version, as published in 0.4, without a print"
    }
   },
   {
@@ -238,7 +393,7 @@
      "use": "evaluation only"
     }
    ],
-   "protocol": "600 clips, 490 real recordings, no clean reference. DNSMOS (Reddy et al., ICASSP 2021 and 2022). VoxLock enrolled on the noisy clip.",
+   "protocol": "600 clips, 490 real recordings, no clean reference, no print given. DNSMOS (Reddy et al., ICASSP 2021 and 2022). VoxLock enrolled on the noisy clip.",
    "metrics": {
     "p808": "DNSMOS P.808",
     "bak": "P.835 background",
@@ -253,6 +408,13 @@
      "ovr": 2.334,
      "n": 600
     },
+    "alkove-focus-1": {
+     "p808": 3.312,
+     "bak": 3.92,
+     "sig": 2.98,
+     "ovr": 2.695,
+     "n": 600
+    },
     "GTCRN": {
      "p808": 3.447,
      "bak": 3.893,
@@ -260,7 +422,7 @@
      "ovr": 2.709,
      "n": 600
     },
-    "alkove-focus": {
+    "alkove-focus-1-preview": {
      "p808": 3.359,
      "bak": 3.952,
      "sig": 2.97,
@@ -288,25 +450,10 @@
      "ovr": 2.58,
      "n": 600
     }
-   }
-  },
-  {
-   "id": "speed-native",
-   "data": [],
-   "protocol": "crates/engine/examples/bench.rs on the published file, alkove-engine 0.2.0: one thread, 3000 runs of the plan back to back on fixed random inputs, the median of several passes; the outputs' fingerprints are the same on both machines. Measured 2026-10-20. Focus runs once per 256 samples (16 ms).",
-   "metrics": {
-    "us_per_run": "µs per run",
-    "ms_per_second": "ms per second of audio"
    },
-   "results": {
-    "Galaxy Z Fold8 (SM-F971B, Snapdragon SM8850), Android 17, native arm64": {
-     "us_per_run": 618,
-     "ms_per_second": 38.6
-    },
-    "Apple M1 Max, macOS, native arm64": {
-     "us_per_run": 892,
-     "ms_per_second": 55.8
-    }
+   "notes": {
+    "alkove-focus-1": "through its SDK (process); with no print given, the SDK learns one from the stream",
+    "alkove-focus-1-preview": "the previous version, as published in 0.4, without a print"
    }
   }
  ]

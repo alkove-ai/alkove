@@ -4,7 +4,7 @@ use crate::{Error, RATE};
 pub const READY: usize = 4;
 pub const MAX: usize = 200;
 // a window joins a print still being built over this cosine, a ready print over the measured `balanced` one for 1.5 s
-pub const MATCH: f64 = 0.25;
+pub const MATCH: f64 = 0.35;
 pub const RESTART: usize = 5;
 pub const LEVEL: f64 = 0.005;
 pub const RESEND: f64 = 0.98;
@@ -65,6 +65,11 @@ impl Learner {
             p.windows = self.ws[self.ws.len().saturating_sub(64)..].to_vec();
             p
         })
+    }
+
+    // before the print is ready: what its windows so far give Focus (never stored, never compared)
+    pub fn early(&self) -> Option<Vec<f32>> {
+        (!self.ws.is_empty() && !self.ready()).then(|| trimmed_mean(&self.ws, self.seconds()).embedding)
     }
 
     // one window of the user's speech: its Timbre outputs, from a 1.5 s window the caller chose

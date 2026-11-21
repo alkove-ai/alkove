@@ -15,11 +15,13 @@ use crate::{js, Error, CUE, FOCUS, RATE};
 pub struct FocusOptions {
     pub print: Option<Vec<f32>>,
     pub strength: f64,
+    // a few seconds of the user's voice (16 kHz) for a Focus that reads a sample; without one the recording gives its own
+    pub sample: Option<Vec<f32>>,
 }
 
 impl Default for FocusOptions {
     fn default() -> Self {
-        FocusOptions { print: None, strength: 1.0 }
+        FocusOptions { print: None, strength: 1.0, sample: None }
     }
 }
 
@@ -48,6 +50,8 @@ pub struct Models {
     pub focus: Option<Arc<Model>>,
     pub cue: Option<Arc<Model>>,
     pub spot: Option<Arc<Model>>,
+    // the far pass and the sample Focus takes from the recording, when none is given
+    pub timbre: Option<Arc<Model>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,13 +136,21 @@ impl Processor {
         let model = |m: &Option<Arc<Model>>, name| m.clone().ok_or(Error::Missing(name));
         let (mut chain, mut cue, mut tracker) = (None, None, None);
         if let Some(f) = &opts.focus {
-            let o = ChainOptions { gate: false, normalize: opts.normalize, strength: f.strength, print: f.print.clone(), speech: opts.speech, sleep: true, levels: false, near: None };
-            chain = Some(Chain::new(&model(&models.focus, "focus")?, &model(&models.cue, "cue")?, o)?);
+            let o = ChainOptions { gate: false, normalize: opts.normalize, strength: f.strength, print: f.print.clone(), sample: None, speech: opts.speech, sleep: true, levels: false, near: None };
+            let mut c = Chain::new(&model(&models.focus, "focus")?, &model(&models.cue, "cue")?, o)?;
+            if let Some(t) = &models.timbre {
+                c.attach_timbre(t)?;
+            }
+            if let Some(s) = &f.sample {
+                c.set_sample(Some(s));
+            }
+            chain = Some(c);
         } else if opts.cue == Some(true) {
             cue = Some(Cue::new(&model(&models.cue, "cue")?)?);
             tracker = Some(SpeechTracker::cue(opts.speech));
         }
         let delay = chain.as_ref().map_or(0, |c| c.delay());
+        let shift = chain.as_ref().map_or(0.0, |c| c.focus_lag() as f64 / RATE);
         let input = if opts.rate != RATE { Some(Resampler::new(opts.rate, RATE, true)?) } else { None };
         let listener = match &opts.spot {
             Some((words, context)) if !words.is_empty() => Some(Listener::new(&model(&models.spot, "spot")?, words.clone(), *context)?),
@@ -149,7 +161,7 @@ impl Processor {
             hops: Chunker::new(FOCUS.chunk),
             cue,
             tracker,
-            shift: if opts.focus.is_some() { FOCUS.lag as f64 / RATE } else { 0.0 },
+            shift,
             opts,
             skip: delay,
             delay,
@@ -197,7 +209,7 @@ impl Processor {
                 out.extend_from_slice(chain.step(&hop, &mut events));
                 for &e in &events {
                     if let ChainEvent::Focus { .. } = e {
-                        feed_spot(&mut self.listener, &mut self.part, self.chain.as_ref().expect("checked").focus_out(), self.shift, self.opts.trace);
+                        feed_spot(&mut self.listener, &mut self.part, self.chain.as_ref().expect("checked").listened(), self.shift, self.opts.trace);
                     }
                     match e {
                         ChainEvent::Focus { t } if self.opts.trace => {
@@ -352,7 +364,8 @@ impl ProcessOptions {
         let focus = match v.get("focus") {
             Some(f @ Value::Obj(_)) => {
                 let print = f.get("print").and_then(Value::arr).map(|a| a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect());
-                Some(FocusOptions { print, strength: num(f, "strength", 1.0) })
+                let sample = f.get("sample").and_then(Value::arr).map(|a| a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect());
+                Some(FocusOptions { print, strength: num(f, "strength", 1.0), sample })
             }
             _ => None,
         };

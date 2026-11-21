@@ -1,8 +1,45 @@
 {
- "model": "alkove-timbre-1-preview",
- "file": "alkove-timbre-1-preview.alk",
- "bytes": 739632,
- "sha256": "d498a7dd8b20528d783052b1e1d49e54ab7ee4e47aa12712d04f3d43edc68bd8",
+ "model": "alkove-timbre-1",
+ "file": "alkove-timbre-1.alk",
+ "bytes": 970064,
+ "sha256": "fc94dfff533f1a4fb2abea172c1f5ff7a92cc00c6331275ea1a26e38f877b0e8",
+ "sizes": {
+  "alkove-timbre-1": {
+   "bytes": 970064,
+   "files": [
+    "alkove-timbre-1.alk"
+   ],
+   "license": "Apache-2.0"
+  },
+  "ECAPA 512 (WeSpeaker)": {
+   "bytes": 24861931,
+   "files": [
+    "voxceleb_ECAPA512.onnx"
+   ],
+   "license": "open weights (WeSpeaker)"
+  },
+  "CAM++ (3D-Speaker)": {
+   "bytes": 28281164,
+   "files": [
+    "campplus.onnx"
+   ],
+   "license": "Apache-2.0"
+  },
+  "ReDimNet2-B6": {
+   "bytes": 51149219,
+   "files": [
+    "b6-vb2+vox2_v0-lm.pt"
+   ],
+   "license": "MIT"
+  },
+  "w2v-BERT 2.0 SV": {
+   "bytes": 2508339095,
+   "files": [
+    "ckpt_0027_6000item.pth"
+   ],
+   "license": "public weights, no license stated"
+  }
+ },
  "benchmarks": [
   {
    "id": "common-voice",
@@ -12,7 +49,7 @@
      "license": "CC0-1.0"
     }
    ],
-   "protocol": "2029 speakers never heard in training, 8057 clips, 7 languages; CAM++ (3D-Speaker speech_campplus_sv_zh_en_16k-common_advanced, Apache-2.0) on the same trials. Mean of the languages.",
+   "protocol": "2325 speakers never heard in training, 9241 clips, 11 languages (fr, en, es, it, pt, ca, ro, de, nl, pl, sv): the Common Voice test sets, and for de, nl, pl, sv the Common Voice 17 test and dev speakers Timbre never learnt. Timbre's network run in float on whole clips (the published file takes windows of up to 2 s); CAM++ (3D-Speaker speech_campplus_sv_zh_en_16k-common_advanced, Apache-2.0) on the same trials. Mean of the languages.",
    "metrics": {
     "eer": "equal error rate, %"
    },
@@ -24,29 +61,88 @@
     "1.5s": "clip against clip, 1.5 s"
    },
    "results": {
-    "alkove-timbre id": {
-     "print-1.5s": 2.95,
-     "print-1.5s:close": 4.11,
-     "full": 4.42,
-     "3s": 4.9,
-     "1.5s": 7.14
+    "alkove-timbre-1 id": {
+     "print-1.5s": 2.07,
+     "print-1.5s:close": 2.71,
+     "full": 2.8,
+     "3s": 3.13,
+     "1.5s": 4.39
+    },
+    "alkove-timbre-1-preview id": {
+     "print-1.5s": 2.7,
+     "print-1.5s:close": 3.65,
+     "full": 3.61,
+     "3s": 4.13,
+     "1.5s": 6.5
     },
     "CAM++": {
-     "print-1.5s": 1.72,
-     "print-1.5s:close": 2.32,
-     "full": 2.61,
-     "3s": 3.02,
-     "1.5s": 4.75
+     "print-1.5s": 1.54,
+     "print-1.5s:close": 2.01,
+     "full": 2.16,
+     "3s": 2.57,
+     "1.5s": 4.37
     }
    },
    "per_language_print_1.5s": {
-    "fr": 2.68,
-    "en": 3.2,
-    "es": 2.79,
-    "it": 2.57,
-    "pt": 4.28,
-    "ca": 2.83,
-    "ro": 2.3
+    "alkove-timbre-1 id": {
+     "fr": 2.5,
+     "en": 1.96,
+     "es": 1.82,
+     "it": 1.77,
+     "pt": 3.03,
+     "ca": 2.25,
+     "ro": 2.5,
+     "de": 0.31,
+     "nl": 1.25,
+     "pl": 2.24,
+     "sv": 3.12
+    },
+    "alkove-timbre-1-preview id": {
+     "fr": 2.68,
+     "en": 3.27,
+     "es": 2.71,
+     "it": 2.65,
+     "pt": 4.16,
+     "ca": 2.84,
+     "ro": 2.37,
+     "de": 0.86,
+     "nl": 1.88,
+     "pl": 2.81,
+     "sv": 3.48
+    },
+    "CAM++": {
+     "fr": 2.03,
+     "en": 1.71,
+     "es": 1.73,
+     "it": 1.37,
+     "pt": 2.58,
+     "ca": 1.83,
+     "ro": 0.8,
+     "de": 0.57,
+     "nl": 1.25,
+     "pl": 2.18,
+     "sv": 0.93
+    }
+   }
+  },
+  {
+   "id": "common-voice-open-models",
+   "data": [
+    {
+     "name": "Common Voice test sets",
+     "license": "CC0-1.0"
+    }
+   ],
+   "protocol": "The same trials on the first 7 languages (fr, en, es, it, pt, ca, ro), a print of about 12 s (3 clips) against a 1.5 s window, open speaker models run the same way (each on its own features, in float). Mean of the 7 languages.",
+   "metrics": {
+    "eer": "equal error rate, %"
+   },
+   "results": {
+    "alkove-timbre-1 id": 2.26,
+    "ECAPA 512 (WeSpeaker)": 5.52,
+    "CAM++ (3D-Speaker)": 1.72,
+    "ReDimNet2-B6": 1.67,
+    "w2v-BERT 2.0 SV": 1.31
    }
   },
   {
@@ -77,41 +173,20 @@
      "license": "Apache-2.0"
     }
    ],
-   "protocol": "1,424 windows from scenes with noise, music or another voice: raw microphone, after alkove-focus with a print, after alkove-focus without one. About ±1 point.",
+   "protocol": "1389 windows of 1.5 s and 1353 of 1 s from scenes with noise, music or another voice: the user holding the window against the user silent, on the raw microphone and after alkove-focus-1 (through the SDK, with the user's print and sample, or nothing given). The published file on the engine. Few windows without the user after Focus (about 60 to 100 per column): several points of uncertainty.",
    "metrics": {
-    "eer": "equal error rate, %"
+    "eer": "equal error rate of `id`, %"
    },
    "results": {
-    "id, 1.5 s": {
-     "raw": 11.9,
-     "focus, print": 10.1,
-     "focus, no print": 11.6
+    "1.5 s": {
+     "raw": 13.28,
+     "after alkove-focus-1, print given": 18.83,
+     "after alkove-focus-1, nothing given": 18.44
     },
-    "id, 1 s": {
-     "raw": 14.4,
-     "focus, print": 14.2,
-     "focus, no print": 13.4
-    },
-    "embedding, 1.5 s": {
-     "raw": 15.7,
-     "focus, print": 18.6,
-     "focus, no print": 19.1
-    }
-   }
-  },
-  {
-   "id": "speed-native",
-   "data": [],
-   "protocol": "crates/engine/examples/bench.rs on the published file, alkove-engine 0.2.0: one thread, 3000 runs of the plan back to back on fixed random inputs, the median of several passes; the outputs' fingerprints are the same on both machines. Measured 2026-10-20. Timbre runs once per 1.5 s window.",
-   "metrics": {
-    "ms_per_window": "ms per 1.5 s window"
-   },
-   "results": {
-    "Galaxy Z Fold8 (SM-F971B, Snapdragon SM8850), Android 17, native arm64": {
-     "ms_per_window": 2.0
-    },
-    "Apple M1 Max, macOS, native arm64": {
-     "ms_per_window": 2.9
+    "1 s": {
+     "raw": 14.38,
+     "after alkove-focus-1, print given": 21.26,
+     "after alkove-focus-1, nothing given": 21.01
     }
    }
   }

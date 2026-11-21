@@ -73,6 +73,19 @@ impl Band {
         *self = Band::new();
     }
 
+    // whether the stream is held narrow now
+    pub(crate) fn narrow(&self) -> bool {
+        self.narrow
+    }
+
+    // the same noise over a whole recording, whatever its band: what a narrow stream's sample gets, as the stream does
+    pub(crate) fn fill(pcm: &mut [f32]) {
+        let mut b = Band::new();
+        for x in pcm {
+            *x = (*x as f64 + b.noise()) as f32;
+        }
+    }
+
     fn frame(&mut self) {
         let mut sq = 0.0;
         for &x in &self.ring {

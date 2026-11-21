@@ -86,8 +86,11 @@ pub struct ChainState {
 }
 
 impl ChainState {
-    pub fn new(focus: Option<Arc<Model>>, cue: Option<Arc<Model>>, options: &Value) -> Result<ChainState, Error> {
-        let chain = Chain::new(&needed(focus, "focus")?, &needed(cue, "cue")?, ChainOptions::from_value(options))?;
+    pub fn new(focus: Option<Arc<Model>>, cue: Option<Arc<Model>>, timbre: Option<Arc<Model>>, options: &Value) -> Result<ChainState, Error> {
+        let mut chain = Chain::new(&needed(focus, "focus")?, &needed(cue, "cue")?, ChainOptions::from_value(options))?;
+        if let Some(t) = &timbre {
+            chain.attach_timbre(t)?;
+        }
         Ok(ChainState { chain, events: Vec::with_capacity(16), records: Vec::with_capacity(64) })
     }
 
@@ -108,8 +111,11 @@ pub struct LiveState {
 }
 
 impl LiveState {
-    pub fn new(focus: Option<Arc<Model>>, cue: Option<Arc<Model>>, rate: f64, options: &Value) -> Result<LiveState, Error> {
-        let live = Live::new(&needed(focus, "focus")?, &needed(cue, "cue")?, rate, ChainOptions::from_value(options))?;
+    pub fn new(focus: Option<Arc<Model>>, cue: Option<Arc<Model>>, timbre: Option<Arc<Model>>, rate: f64, options: &Value) -> Result<LiveState, Error> {
+        let mut live = Live::new(&needed(focus, "focus")?, &needed(cue, "cue")?, rate, ChainOptions::from_value(options))?;
+        if let Some(t) = &timbre {
+            live.attach_timbre(t)?;
+        }
         Ok(LiveState { live, out: Vec::new(), events: Vec::with_capacity(16), records: Vec::with_capacity(64) })
     }
 
@@ -329,8 +335,12 @@ pub fn learner_voiceprint(l: &Learner, raw: bool) -> Value {
     l.voiceprint().map_or(Value::Null, |p| if raw { p.to_raw_value() } else { p.to_value() })
 }
 
-pub fn pipeline(focus: Option<Arc<Model>>, cue: Option<Arc<Model>>, spot: Option<Arc<Model>>, options: &Value) -> Result<Pipeline, Error> {
-    Pipeline::new(focus.as_ref(), cue.as_ref(), spot.as_ref(), PipelineOptions::from_value(options)?)
+pub fn pipeline(focus: Option<Arc<Model>>, cue: Option<Arc<Model>>, spot: Option<Arc<Model>>, timbre: Option<Arc<Model>>, options: &Value) -> Result<Pipeline, Error> {
+    let mut p = Pipeline::new(focus.as_ref(), cue.as_ref(), spot.as_ref(), PipelineOptions::from_value(options)?)?;
+    if let Some(t) = &timbre {
+        p.attach_timbre(t)?;
+    }
+    Ok(p)
 }
 
 pub fn pipeline_step<'a>(p: &'a mut Pipeline, hop: &[f32], far_quiet_ms: f64) -> &'a [f32] {

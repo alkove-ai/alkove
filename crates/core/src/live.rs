@@ -39,6 +39,11 @@ impl Live {
         })
     }
 
+    // Timbre for the far pass and the sample Focus takes from the stream
+    pub fn attach_timbre(&mut self, timbre: &Arc<Model>) -> Result<(), Error> {
+        self.chain.attach_timbre(timbre)
+    }
+
     // the user's turns and the far end's interruptions, as an agent input gives them
     pub fn set_turns(&mut self, turns: Option<Turns>) {
         self.turns = turns;

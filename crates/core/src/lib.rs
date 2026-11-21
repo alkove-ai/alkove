@@ -3,6 +3,7 @@
 mod band;
 mod chain;
 mod cue;
+mod farpass;
 mod focus;
 pub mod fp;
 pub mod js;
@@ -11,6 +12,7 @@ mod level;
 pub mod lex;
 mod live;
 pub mod math;
+mod mine;
 mod near;
 pub mod pipeline;
 mod process;

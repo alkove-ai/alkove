@@ -7,7 +7,6 @@ use crate::value::{obj, Value};
 use crate::{js, Error, RATE, TIMBRE_ID};
 
 pub const WINDOW: usize = 24000;
-pub const MIN: usize = 280;
 pub const DIM: usize = 192;
 
 // Timbre's two outputs for some voice: `embedding` for Focus's print, `id` to compare voices; `seconds` of voice it was made from
@@ -258,9 +257,9 @@ impl Level {
 
 const PRINT: [f64; 5] = [1.5, 3.0, 6.0, 12.0, 24.0];
 const HEARD: [f64; 4] = [0.6, 0.9, 1.5, 3.0];
-const LENIENT: [[f64; 4]; 5] = [[-0.07, -0.065, -0.05, -0.0325], [0.0025, 0.0275, 0.0825, 0.1075], [0.045, 0.105, 0.135, 0.17], [0.07, 0.1125, 0.2025, 0.255], [0.0875, 0.15, 0.23, 0.2825]];
-const BALANCED: [[f64; 4]; 5] = [[0.1675, 0.195, 0.2225, 0.245], [0.2, 0.2325, 0.2675, 0.2925], [0.23, 0.27, 0.3125, 0.335], [0.2475, 0.295, 0.34, 0.37], [0.26, 0.3125, 0.36, 0.3925]];
-const STRICT: [[f64; 4]; 5] = [[0.335, 0.35, 0.365, 0.38], [0.3475, 0.365, 0.385, 0.405], [0.3625, 0.3825, 0.4075, 0.4275], [0.3725, 0.395, 0.4225, 0.445], [0.38, 0.405, 0.4325, 0.455]];
+const LENIENT: [[f64; 4]; 5] = [[0.0375, 0.0725, 0.0925, 0.1125], [0.0775, 0.1675, 0.195, 0.2275], [0.1125, 0.2375, 0.2925, 0.33], [0.155, 0.27, 0.335, 0.3725], [0.1775, 0.295, 0.365, 0.4075]];
+const BALANCED: [[f64; 4]; 5] = [[0.26, 0.3, 0.3325, 0.3575], [0.2975, 0.345, 0.3825, 0.41], [0.325, 0.38, 0.4225, 0.4525], [0.3475, 0.405, 0.4425, 0.475], [0.3575, 0.42, 0.465, 0.495]];
+const STRICT: [[f64; 4]; 5] = [[0.405, 0.4325, 0.455, 0.4725], [0.425, 0.455, 0.4775, 0.5], [0.44, 0.4725, 0.4975, 0.52], [0.4475, 0.48, 0.51, 0.5325], [0.4525, 0.4875, 0.515, 0.5375]];
 
 // cosine of `id` over which `seconds` of voice match a print made from `print_seconds` (Common Voice tests: 1 % false rejects, EER, 1 % false accepts): bilinear in the log of both, bounded to the table
 pub fn threshold(level: Level, seconds: f64, print_seconds: f64) -> f64 {
@@ -308,15 +307,15 @@ pub fn identify<'a>(voice: &[Center], known: &'a [(String, Voiceprint)], level: 
 // a voice from 16 kHz audio: Timbre on 1.5 s windows, half overlapping
 pub struct Timbre {
     net: Session,
+    // the shortest audio the model takes, from its file
+    min: usize,
 }
 
 impl Timbre {
     pub fn new(model: &Arc<Model>) -> Result<Timbre, Error> {
         let net = Session::new(model.clone())?;
-        if net.plan().frames().is_none() {
-            return Err(Error::Model("timbre: an input of any length"));
-        }
-        Ok(Timbre { net })
+        let Some(f) = net.plan().frames() else { return Err(Error::Model("timbre: an input of any length")) };
+        Ok(Timbre { min: f.min_len, net })
     }
 
     pub fn window(&mut self, pcm: &[f32]) -> Result<Center, Error> {
@@ -328,9 +327,13 @@ impl Timbre {
         Ok(Center { embedding: out("embedding")?, id: out("id")?, seconds: pcm.len() as f64 / RATE })
     }
 
+    pub fn min(&self) -> usize {
+        self.min
+    }
+
     pub fn windows(&mut self, pcm: &[f32]) -> Result<Vec<Center>, Error> {
-        if pcm.len() < MIN {
-            return Err(Error::Range(format!("audio.too-short: {} samples, Timbre needs at least {MIN}", pcm.len())));
+        if pcm.len() < self.min {
+            return Err(Error::Range(format!("audio.too-short: {} samples, Timbre needs at least {}", pcm.len(), self.min)));
         }
         if pcm.len() <= WINDOW {
             return Ok(vec![self.window(pcm)?]);

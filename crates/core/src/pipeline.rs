@@ -5,9 +5,10 @@ use alkove_engine::Model;
 use crate::chain::{Chain, ChainEvent, ChainOptions};
 use crate::learner::{rms, Learner, LEVEL, RESEND};
 use crate::math::log10;
+use crate::mine::{Mine, Told};
 use crate::resample::Resampler;
 use crate::spot::{Context, EnrollOptions, Enroller, Listener, Spot, Word, ENROLL};
-use crate::timbre::{dot, verify, Level, Timbre, Voiceprint, MIN, WINDOW};
+use crate::timbre::{dot, verify, Level, Timbre, Voiceprint, WINDOW};
 use crate::turn::{InterruptParams, TurnParams, Turns};
 use crate::value::{obj, Value};
 use crate::{js, Error, FOCUS, RATE};
@@ -22,6 +23,8 @@ const PREROLL: f64 = 0.3;
 const TAPE: usize = 8 * 16000;
 // on the raw mic, a wake carries its audio; with onlyMyVoice it waits 0.5 s more for Timbre in the background
 const VERIFY_AFTER: usize = 8000;
+// the wake word's print is made again from the word and this much after its start: the request is the same voice
+const REFINE_AFTER: f64 = 4.0;
 const HISTORY: usize = 4 * 16000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +46,8 @@ pub struct PipelineOptions {
     // None: the wake and enroll pipelines, Spot on the raw mic
     pub chain: Option<ChainOptions>,
     pub verify: bool,
+    // with a chain and a print: a phrase is the app's only once Timbre has heard the print's voice in it
+    pub only_my_voice: bool,
     pub learn: bool,
     pub keep_recent: f64,
     pub trace: bool,
@@ -50,13 +55,15 @@ pub struct PipelineOptions {
     pub output: Option<Output>,
     pub words: Vec<Word>,
     pub context: Context,
+    // with a chain: the words are wake words, heard on the raw mic, and each decides far for what follows (Chain::wake)
+    pub wake: bool,
     pub enroll: Option<(Word, usize)>,
     pub turn: Option<TurnParams>,
     pub interrupt: Option<InterruptParams>,
 }
 
 impl PipelineOptions {
-    // { chain: options | null, verify, learn, keepRecent, trace, stats, output: { format, rate, chunkMs, audio, utterance } | null, words, context, enroll: { word, takes } | null, turn: true | { threshold, minPause, maxPause }, interrupt: true | { minDuration } (an agent's input; off by default) }
+    // { chain: options | null, verify, onlyMyVoice, learn, keepRecent, trace, stats, output: { format, rate, chunkMs, audio, utterance } | null, words, context, wake, enroll: { word, takes } | null, turn: true | { threshold, minPause, maxPause }, interrupt: true | { minDuration } (an agent's input; off by default) }
     pub fn from_value(v: &Value) -> Result<PipelineOptions, Error> {
         let flag = |k: &str| v.get(k).and_then(Value::bool).unwrap_or(false);
         let output = match v.get("output") {
@@ -80,6 +87,7 @@ impl PipelineOptions {
                 _ => None,
             },
             verify: flag("verify"),
+            only_my_voice: flag("onlyMyVoice"),
             learn: flag("learn"),
             keep_recent: v.get("keepRecent").and_then(Value::num).unwrap_or(0.0),
             trace: flag("trace"),
@@ -87,6 +95,7 @@ impl PipelineOptions {
             output,
             words,
             context: crate::spot::context_of(v.get("context").and_then(Value::str).unwrap_or("anywhere")),
+            wake: flag("wake"),
             enroll,
             turn: TurnParams::from_value(v.get("turn"))?,
             interrupt: InterruptParams::from_value(v.get("interrupt"))?,
@@ -118,7 +127,7 @@ pub enum Out {
     Event(Value),
     // a window of the user's speech for the background learner, at sample `t`
     Window { pcm: Vec<f32>, far_quiet_ms: f64, t: f64 },
-    // a wake's audio and the 0.5 s after it, for Timbre in the background
+    // a wake's audio and the 0.5 s after it, or the last seconds of a phrase, for Timbre in the background
     Verify { key: u32, pcm: Vec<f32> },
     Audio(Vec<u8>),
     Utterance { pcm: Vec<u8>, start: f64, end: f64, level: Option<Value> },
@@ -200,6 +209,19 @@ struct LearnTap {
     fill: usize,
     fresh: usize,
     silent: usize,
+}
+
+impl LearnTap {
+    fn new() -> LearnTap {
+        LearnTap { buf: vec![0.0; WINDOW], fill: 0, fresh: 0, silent: 0 }
+    }
+}
+
+// Focus's last 6 s, for Timbre's checks of a phrase
+struct Span {
+    buf: Vec<f32>,
+    pos: usize,
+    total: u64,
 }
 
 struct Held {
@@ -284,6 +306,10 @@ pub struct Pipeline {
     // samples given to Spot so far: a listener or an enroller started later counts from there
     fed: u64,
     learn: Option<LearnTap>,
+    mine: Option<(Mine, Span)>,
+    mine_key: Option<u32>,
+    restart: bool,
+    told: Vec<Told>,
     held: Vec<Held>,
     keys: u32,
     history: Option<History>,
@@ -294,6 +320,9 @@ pub struct Pipeline {
     recent: Option<Recent>,
     record: Option<Recording>,
     verify: bool,
+    wake: bool,
+    // the last wake word's start, and when its print is made again from the word and the request after it
+    refine: Option<(f64, f64)>,
     trace: bool,
     cue_rows: usize,
     far_quiet_ms: f64,
@@ -329,6 +358,11 @@ fn energy(x: &[f32]) -> f64 {
 }
 
 impl Pipeline {
+    // Timbre for the far pass and the sample Focus takes from the stream, before the first hop; nothing without a chain
+    pub fn attach_timbre(&mut self, timbre: &Arc<Model>) -> Result<(), Error> {
+        self.chain.as_mut().map_or(Ok(()), |c| c.attach_timbre(timbre))
+    }
+
     pub fn new(focus: Option<&Arc<Model>>, cue: Option<&Arc<Model>>, spot: Option<&Arc<Model>>, opts: PipelineOptions) -> Result<Pipeline, Error> {
         let turns = opts.chain.as_ref().filter(|_| opts.turn.is_some() || opts.interrupt.is_some()).map(|c| Turns::new(opts.turn, opts.interrupt, &c.speech));
         let chain = match (opts.chain, focus, cue) {
@@ -344,9 +378,14 @@ impl Pipeline {
             }
         }
         let keep = js::round(seconds("keepRecent", opts.keep_recent)? * RATE) as usize;
+        let wake = opts.wake && chain.is_some();
         let mut p = Pipeline {
-            learn: (opts.learn && chain.is_some()).then(|| LearnTap { buf: vec![0.0; WINDOW], fill: 0, fresh: 0, silent: 0 }),
-            tape: chain.is_none().then(|| vec![0.0; TAPE]),
+            learn: (opts.learn && chain.is_some()).then(LearnTap::new),
+            mine: (opts.only_my_voice && chain.is_some()).then(|| (Mine::default(), Span { buf: vec![0.0; (crate::mine::LONG * RATE) as usize], pos: 0, total: 0 })),
+            mine_key: None,
+            restart: false,
+            told: Vec::new(),
+            tape: (chain.is_none() || wake).then(|| vec![0.0; TAPE]),
             chain,
             spot: None,
             spot_model: spot.cloned(),
@@ -363,6 +402,8 @@ impl Pipeline {
             recent: (keep > 0).then(|| Recent { raw: vec![0.0; keep], out: vec![0.0; keep], pos: 0, full: false }),
             record: None,
             verify: opts.verify,
+            wake,
+            refine: None,
             trace: opts.trace,
             cue_rows: 0,
             far_quiet_ms: f64::INFINITY,
@@ -424,8 +465,12 @@ impl Pipeline {
             }
             None => {
                 let m = self.spot_model.clone().ok_or(Error::Missing("spot"))?;
-                let lag = if self.chain.is_some() { FOCUS.lag as f64 / RATE } else { 0.0 };
-                self.spot = Some((Listener::new(&m, words, context)?, names, lag - self.fed as f64 / RATE));
+                let shift = if self.wake {
+                    -((self.hops * HOP as u64) as f64) / RATE
+                } else {
+                    self.chain.as_ref().map_or(0.0, |c| c.focus_lag() as f64 / RATE) - self.fed as f64 / RATE
+                };
+                self.spot = Some((Listener::new(&m, words, context)?, names, shift));
             }
         }
         Ok(())
@@ -446,7 +491,7 @@ impl Pipeline {
         Ok(())
     }
 
-    // { strength?, enabled?, print?, words?, context?, enroll?, listen?, hold? }, applied in that order
+    // { strength?, enabled?, print?, words?, context?, enroll?, listen?, hold?, learn? }, applied in that order; learn: true starts the learning windows
     pub fn set(&mut self, v: &Value) -> Result<(), Error> {
         if let Some(s) = v.get("strength").and_then(Value::num) {
             if let Some(c) = self.chain_mut() {
@@ -463,9 +508,21 @@ impl Pipeline {
                 Value::Arr(a) => Some(a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect()),
                 Value::Floats(x) => Some(x.clone()),
                 _ => None,
-            };
+            }
+            .filter(|p| !p.is_empty());
             if let Some(c) = self.chain_mut() {
                 c.set_print(print.as_deref())?;
+            }
+        }
+        // after the print: a print of another person drops the sample
+        if let Some(sv) = v.get("sample") {
+            let pcm: Vec<f32> = match sv {
+                Value::Arr(a) => a.iter().map(|x| x.num().unwrap_or(0.0) as f32).collect(),
+                Value::Floats(x) => x.clone(),
+                _ => Vec::new(),
+            };
+            if let Some(c) = self.chain_mut() {
+                c.set_sample((!pcm.is_empty()).then_some(&pcm[..]));
             }
         }
         if v.get("words").is_some() {
@@ -488,6 +545,9 @@ impl Pipeline {
             } else {
                 c.release();
             }
+        }
+        if v.get("learn").and_then(Value::bool) == Some(true) && self.chain.is_some() && self.learn.is_none() {
+            self.learn = Some(LearnTap::new());
         }
         Ok(())
     }
@@ -527,11 +587,11 @@ impl Pipeline {
             let mut events = std::mem::take(&mut self.events);
             events.clear();
             let out = self.chain.as_mut().expect("checked").step(hop, &mut events).to_vec();
-            let mut restart = false;
             for e in &events {
+                let mut app = None;
                 match *e {
                     ChainEvent::Focus { t } => {
-                        let focus = self.chain.as_ref().expect("checked").focus_out().to_vec();
+                        let focus = self.chain.as_ref().expect("checked").listened().to_vec();
                         self.on_focus(&focus, t);
                     }
                     ChainEvent::Cue { speech, t, .. } => {
@@ -552,21 +612,32 @@ impl Pipeline {
                                     _ => f.extend(l),
                                 }
                             }
-                            self.on_event(&v);
-                            self.outs.push(Out::Event(v));
+                            app = Some(v);
                         }
                     }
                 }
-                if let Some(tu) = &mut self.turns {
-                    restart |= tu.hop(std::slice::from_ref(e), far_quiet_ms, &mut self.turn_events);
+                if self.mine.is_some() && !matches!(e, ChainEvent::Focus { .. } | ChainEvent::Level { .. }) {
+                    let (printed, now) = self.chain.as_ref().map_or((false, 0.0), |c| (c.has_print(), c.time()));
+                    let mut told = std::mem::take(&mut self.told);
+                    self.mine.as_mut().expect("checked").0.event(*e, app, far_quiet_ms, printed, (now, self.hops), &mut told);
+                    self.tell(told);
+                } else {
+                    self.pass(e, app, far_quiet_ms);
                 }
-                self.outs.extend(self.turn_events.drain(..).map(Out::Event));
             }
-            if restart {
+            if std::mem::take(&mut self.restart) {
                 self.chain.as_mut().expect("checked").reset_turn();
             }
             self.events = events;
             self.out.copy_from_slice(&out);
+            if self.wake {
+                self.tape_hop(hop);
+                self.refine_print();
+                self.feed_spot(hop);
+                if !self.held.is_empty() {
+                    self.release();
+                }
+            }
         } else {
             self.tape_hop(hop);
             self.feed_spot(hop);
@@ -590,19 +661,79 @@ impl Pipeline {
         &self.out
     }
 
+    // an event for the app, then for the turns
+    fn pass(&mut self, e: &ChainEvent, app: Option<Value>, far_quiet_ms: f64) {
+        if let Some(v) = app {
+            self.on_event(&v);
+            self.outs.push(Out::Event(v));
+        }
+        if let Some(tu) = &mut self.turns {
+            self.restart |= tu.hop(std::slice::from_ref(e), far_quiet_ms, &mut self.turn_events);
+        }
+        self.outs.extend(self.turn_events.drain(..).map(Out::Event));
+    }
+
+    // what the print's gate gave: events as they are, a question for Timbre, a diag
+    fn tell(&mut self, mut told: Vec<Told>) {
+        for t in told.drain(..) {
+            match t {
+                Told::Event(e, app, far) => self.pass(&e, app, far),
+                Told::Diag(v) => self.outs.push(Out::Event(v)),
+                Told::Ask(seconds) => {
+                    let Some((_, s)) = &self.mine else { continue };
+                    let len = s.buf.len();
+                    let n = (js::round(seconds * RATE) as usize).min(s.total.min(len as u64) as usize);
+                    let pcm = (0..n).map(|i| s.buf[(s.pos + len - n + i) % len]).collect();
+                    self.keys += 1;
+                    self.mine_key = Some(self.keys);
+                    self.outs.push(Out::Verify { key: self.keys, pcm });
+                }
+            }
+        }
+        self.told = told;
+    }
+
+    fn mine_hop(&mut self, hop: &[f32]) {
+        let (speaking, now) = self.chain.as_ref().map_or((false, 0.0), |c| (c.speaking(), c.time()));
+        let Some((m, s)) = &mut self.mine else { return };
+        for &x in hop {
+            s.buf[s.pos] = x;
+            s.pos = (s.pos + 1) % s.buf.len();
+        }
+        s.total += hop.len() as u64;
+        let mut told = std::mem::take(&mut self.told);
+        m.hop(speaking, self.far_quiet_ms, now, self.hops, &mut told);
+        if !m.asked() && told.is_empty() {
+            self.mine_key = None;
+        }
+        self.tell(told);
+    }
+
     fn on_focus(&mut self, hop: &[f32], t: f64) {
-        self.feed_spot(hop);
+        if !self.wake {
+            self.feed_spot(hop);
+        }
+        if self.mine.is_some() {
+            self.mine_hop(hop);
+        }
         if self.learn.is_some() {
             self.tap_learn(hop);
         }
         if self.enroll.is_some() {
-            self.tape_hop(hop);
+            if !self.wake {
+                self.tape_hop(hop);
+            }
             self.feed_enroll(hop);
         }
         self.fed += HOP as u64;
         if self.trace && (t / HOP as f64) % TRACE_EVERY as f64 == 0.0 {
             let db = js::to_fixed(10.0 * log10(energy(hop) / HOP as f64 + 1e-12), 1);
-            self.outs.push(event(vec![("type", "trace".into()), ("primitive", "focus".into()), ("t", (t / RATE - FOCUS.lag as f64 / RATE).into()), ("db", db.into())]));
+            self.outs.push(event(vec![
+                ("type", "trace".into()),
+                ("primitive", "focus".into()),
+                ("t", (t / RATE - self.chain.as_ref().map_or(FOCUS.lag, |c| c.focus_lag()) as f64 / RATE).into()),
+                ("db", db.into()),
+            ]));
         }
     }
 
@@ -654,11 +785,19 @@ impl Pipeline {
 
     fn on_wake(&mut self, mut w: Vec<(String, Value)>) {
         let get = |w: &[(String, Value)], k: &str| w.iter().find(|(x, _)| x == k).and_then(|(_, v)| v.num()).unwrap_or(0.0);
-        if self.tape.is_none() || self.chain.is_some() {
+        if self.tape.is_none() || (self.chain.is_some() && !self.wake) {
             self.outs.push(Out::Event(Value::Obj(w)));
             return;
         }
         let (start, end) = (get(&w, "start"), get(&w, "end"));
+        if let Some(c) = &mut self.chain {
+            let gap = c.wake(start, end);
+            let data = obj([("far", c.far().into()), ("gapDb", gap.map_or(Value::Null, |g| js::to_fixed(g, 1).into()))]);
+            self.outs.push(event(vec![("type", "diag".into()), ("code", "wake.far".into()), ("level", "info".into()), ("data", data)]));
+            // the word and whatever of the request the tape holds already: the print of whoever woke it
+            self.wake_print(start, f64::INFINITY);
+            self.refine = Some((start, start + REFINE_AFTER));
+        }
         if !self.verify {
             let audio = self.cut(start, end);
             w.push(("audio".into(), Value::Floats(audio)));
@@ -667,6 +806,27 @@ impl Pipeline {
         }
         self.keys += 1;
         self.held.push(Held { wake: w, ready: js::round(end * RATE) as u64 + VERIFY_AFTER as u64, key: self.keys, cut: false });
+    }
+
+    fn wake_print(&mut self, start: f64, end: f64) {
+        let pcm = self.cut(start, end);
+        if let Some(c) = &mut self.chain {
+            if c.print_from_wake(&pcm).unwrap_or(false) {
+                self.outs.push(event(vec![("type", "diag".into()), ("code", "wake.print".into()), ("level", "info".into()), ("data", obj([("seconds", (pcm.len() as f64 / RATE).into())]))]));
+                if self.mine.is_some() {
+                    self.outs.push(Out::Window { pcm, far_quiet_ms: f64::INFINITY, t: WAKE_WINDOW });
+                }
+            }
+        }
+    }
+
+    fn refine_print(&mut self) {
+        let Some((start, at)) = self.refine else { return };
+        if (self.written as f64) < at * RATE {
+            return;
+        }
+        self.refine = None;
+        self.wake_print(start, at);
     }
 
     fn release(&mut self) {
@@ -687,6 +847,15 @@ impl Pipeline {
 
     // Timbre's answer for a held wake: the wake with the likeness, or a diag for another voice
     pub fn verified(&mut self, key: u32, same: bool, score: f64) {
+        if self.mine_key == Some(key) {
+            self.mine_key = None;
+            let mut told = std::mem::take(&mut self.told);
+            if let Some((m, _)) = &mut self.mine {
+                m.verdict(score, self.far_quiet_ms, self.hops, &mut told);
+            }
+            self.tell(told);
+            return;
+        }
         let Some(i) = self.held.iter().position(|h| h.key == key) else { return };
         let h = self.held.remove(i);
         if same {
@@ -706,7 +875,7 @@ impl Pipeline {
 
     fn feed_enroll(&mut self, hop: &[f32]) {
         let Some(en) = &mut self.enroll else { return };
-        let shift = if self.chain.is_some() { FOCUS.lag as f64 / RATE } else { 0.0 } - en.stream;
+        let shift = self.chain.as_ref().map_or(0.0, |c| c.focus_lag() as f64 / RATE) - en.stream;
         let tape = en.tape;
         let mut takes = Vec::new();
         let enroller = &mut en.enroller;
@@ -776,7 +945,8 @@ impl Pipeline {
             return;
         }
         l.fresh = 0;
-        self.outs.push(Out::Window { pcm: l.buf[..l.fill].to_vec(), far_quiet_ms: far, t });
+        let pcm = l.buf[..l.fill].to_vec();
+        self.outs.push(Out::Window { pcm, far_quiet_ms: far, t });
     }
 
     fn keep_history(&mut self, out: &[f32]) {
@@ -880,8 +1050,15 @@ pub struct Coach {
     pub reference: Option<Voiceprint>,
     learner: Option<Learner>,
     sent: Option<Vec<f32>>,
+    // what Focus got before the print was ready
+    early: Option<Vec<f32>>,
     at: f64,
+    // the voice of the last wake word, for the checks when the app gave no print and none is learned
+    wake: Option<Voiceprint>,
 }
+
+// a window at a negative time is a wake word's audio (Pipeline::wake_print), not speech to learn from
+const WAKE_WINDOW: f64 = -1.0;
 
 pub enum Coached {
     // a diag `print.learn`, `print.reject` or `print.restart` (the platform adds how long Timbre took, `ms`), then maybe `learn` and `voiceprint`
@@ -892,14 +1069,17 @@ pub enum Coached {
 
 impl Coach {
     pub fn new(reference: Option<Voiceprint>) -> Coach {
-        Coach { reference, learner: None, sent: None, at: f64::NEG_INFINITY }
+        Coach { reference, learner: None, sent: None, early: None, at: f64::NEG_INFINITY, wake: None }
     }
 
+    // the checks go to the learned print from now on, as for an input that learned from the start
     pub fn learner(&mut self, start: Option<&Voiceprint>) -> f64 {
+        self.reference = None;
         let l = Learner::new("focus", start);
         let progress = l.progress();
         self.learner = Some(l);
         self.sent = start.map(|p| p.embedding().to_vec());
+        self.early = None;
         progress
     }
 
@@ -908,10 +1088,15 @@ impl Coach {
             l.forget();
         }
         self.sent = None;
+        self.early = None;
     }
 
     // a window from the real-time side at its sample `t`
     pub fn window(&mut self, timbre: &mut Timbre, pcm: &[f32], far_quiet_ms: f64, t: f64) -> Result<Vec<Coached>, Error> {
+        if t == WAKE_WINDOW {
+            self.wake = if pcm.len() >= timbre.min() { Some(timbre.embed(pcm, "wake")?) } else { None };
+            return Ok(Vec::new());
+        }
         let Some(l) = &mut self.learner else { return Ok(Vec::new()) };
         let count = l.voiceprint().map_or(0, |p| p.windows.len());
         let gap = LEARN_GAP[(count >= LEARN_SLOW) as usize];
@@ -937,7 +1122,20 @@ impl Coach {
             return Ok(out);
         }
         out.push(Coached::Event(obj([("type", "learn".into()), ("progress", l.progress().into())])));
-        let Some(print) = l.voiceprint() else { return Ok(out) };
+        self.hand_off(out)
+    }
+
+    // the learner's print to Focus: early from its first windows, then the ready print when it moves
+    fn hand_off(&mut self, mut out: Vec<Coached>) -> Result<Vec<Coached>, Error> {
+        let l = self.learner.as_ref().expect("learning");
+        let Some(print) = l.voiceprint() else {
+            // Focus gets the voice from its first window (1.5 s): as good for it as the ready print, 5 s sooner
+            if let Some(e) = l.early().filter(|e| !self.early.as_ref().is_some_and(|s| dot(e, s) >= RESEND)) {
+                self.early = Some(e.clone());
+                out.push(Coached::Print(e));
+            }
+            return Ok(out);
+        };
         if self.sent.as_ref().is_some_and(|s| dot(print.embedding(), s) >= RESEND) {
             return Ok(out);
         }
@@ -947,15 +1145,49 @@ impl Coach {
         Ok(out)
     }
 
-    // a wake's audio against the reference print: same voice and score; no print, or too short, counts as the same
+    // a wake's or a phrase's audio against the reference print, else the learned one: same voice and score; no print, or too short, counts as the same
     pub fn verify(&self, timbre: &mut Timbre, pcm: &[f32]) -> Result<(bool, f64), Error> {
-        match &self.reference {
+        let learned = if self.reference.is_none() { self.learner.as_ref().and_then(Learner::voiceprint) } else { None };
+        match self.reference.as_ref().or(learned.as_ref()).or(self.wake.as_ref()) {
             // a word and its 0.5 s past one window: Timbre's windows, as for a print
-            Some(r) if pcm.len() >= MIN => {
+            Some(r) if pcm.len() >= timbre.min() => {
                 let v = verify(r, &timbre.windows(pcm)?, Level::Balanced);
                 Ok((v.same, v.score))
             }
             _ => Ok((true, 1.0)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // the SDK's own models and fixtures (packages/alkove): skipped where they are not fetched
+    #[test]
+    fn a_wake_word_gives_the_checks_their_voice() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/alkove");
+        let Ok(bytes) = std::fs::read(root.join(".cache/models/alkove-timbre-1.alk")) else { return };
+        let mut timbre = Timbre::new(&Arc::new(Model::load(&bytes).unwrap())).unwrap();
+        let wav = |n: &str| {
+            let b = std::fs::read(root.join("test/fixtures").join(n)).unwrap();
+            let at = b.windows(4).position(|w| w == b"data").unwrap() + 8;
+            b[at..].chunks_exact(2).map(|s| i16::from_le_bytes([s[0], s[1]]) as f32 / 32768.0).collect::<Vec<f32>>()
+        };
+        let (enroll, speech) = (wav("enroll.wav"), wav("speech.wav"));
+        let mut noise = 0x2545_f491u32;
+        let other: Vec<f32> = (0..24000)
+            .map(|_| {
+                noise ^= noise << 13;
+                noise ^= noise >> 17;
+                noise ^= noise << 5;
+                noise as f32 / u32::MAX as f32 * 0.2 - 0.1
+            })
+            .collect();
+        let mut coach = Coach::new(None);
+        assert_eq!(coach.verify(&mut timbre, &other).unwrap(), (true, 1.0));
+        assert!(coach.window(&mut timbre, &enroll[..48000], f64::INFINITY, WAKE_WINDOW).unwrap().is_empty());
+        assert!(coach.verify(&mut timbre, &speech[..24000]).unwrap().0);
+        assert!(!coach.verify(&mut timbre, &other).unwrap().0);
     }
 }

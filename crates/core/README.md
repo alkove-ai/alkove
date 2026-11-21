@@ -8,7 +8,7 @@ Rust, no dependencies beyond the engine, Apache-2.0.
 
 | Piece | |
 |---|---|
-| `Chain` | Focus, then Cue on Focus's output, the mix with the raw mic (`strength`), the level (`normalize`), the gate; a new print applied at the next silence from a fresh state (after 60 s at most), sleep in silences. One hop of 256 samples at 16 kHz per `step`. |
+| `Chain` | Focus, then Cue on Focus's output, the mix with the raw mic (`strength`), the level (`normalize`), the gate; a new print applied at the next hop, sleep in silences. One hop of 256 samples at 16 kHz per `step`. |
 | `Processor`, `process` | Focus and Cue over audio pushed in blocks of any size, the output aligned with the input, as `Alkove.process` and `Alkove.stream` give them. |
 | `SpeechTracker` | the speech state machine on Cue's probabilities: `confidence`, `exitConfidence`, `startSecs`, `stopSecs`. |
 | `Resampler` | windowed sinc between any two rates, across chunks. |
@@ -34,7 +34,7 @@ use std::sync::Arc;
 use alkove_core::{Chain, ChainOptions};
 use alkove_engine::Model;
 
-let focus = Arc::new(Model::load(&std::fs::read("alkove-focus-1-preview.alk")?)?);
+let focus = Arc::new(Model::load(&std::fs::read("alkove-focus-1.alk")?)?);
 let cue = Arc::new(Model::load(&std::fs::read("alkove-cue-1-preview.alk")?)?);
 let mut chain = Chain::new(&focus, &cue, ChainOptions::default())?;
 let mut events = Vec::new();

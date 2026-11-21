@@ -1,4 +1,4 @@
-//! cargo run --release --example bench -- model.alk [runs] [--top N] [--only kind] [--range a-b] [--kinds]: for each plan, time per run and per kind of instruction, and a fingerprint of the outputs of 200 runs on fixed inputs (equal on every target).
+//! cargo run --release --example bench -- model.alk [runs] [--top N] [--only kind] [--range a-b] [--kinds] [--len samples]: for each plan, time per run and per kind of instruction, and a fingerprint of the outputs of 200 runs on fixed inputs (equal on every target).
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -26,6 +26,9 @@ fn bench(model: &Arc<Model>, p: usize, args: &[String]) {
         return;
     }
     let mut s = Session::of(model.clone(), p).unwrap();
+    if let Some(len) = flag("--len") {
+        s.set_len(len.parse().unwrap()).expect("--len: a length the plan takes");
+    }
     let mut seed = 0x2545_f491_4f6c_dd1du64;
     let mut noise = move || {
         seed ^= seed << 13;

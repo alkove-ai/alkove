@@ -49,7 +49,7 @@ pub unsafe extern "C" fn alk_chain(
     print_len: usize,
 ) -> *mut ChainHandle {
     let speech = SpeechParams { confidence, exit_confidence, start_secs, stop_secs };
-    let opts = ChainOptions { gate: gate != 0, normalize: normalize != 0, strength, print: print(print_at, print_len).map(|p| p.to_vec()), speech, sleep: sleep != 0, levels: false, near: None };
+    let opts = ChainOptions { gate: gate != 0, normalize: normalize != 0, strength, print: print(print_at, print_len).map(|p| p.to_vec()), sample: None, speech, sleep: sleep != 0, levels: false, near: None };
     match Chain::new(&shared(focus), &shared(cue), opts) {
         Ok(chain) => Box::into_raw(Box::new(ChainHandle { chain, hop: vec![0.0; 256], events: Vec::with_capacity(16), records: Vec::with_capacity(64) })),
         Err(e) => {
@@ -267,10 +267,10 @@ pub struct ProcessorHandle {
     audio: Vec<f32>,
 }
 
-// Safety: models live or null; the options as `ProcessOptions::from_value` reads them, in the input value
+// Safety: models live or null (Timbre: the far pass and the sample Focus takes from the recording); the options as `ProcessOptions::from_value` reads them, in the input value
 #[no_mangle]
-pub unsafe extern "C" fn alk_processor(focus: *const Model, cue: *const Model, spot: *const Model) -> *mut ProcessorHandle {
-    let models = Models { focus: model(focus), cue: model(cue), spot: model(spot) };
+pub unsafe extern "C" fn alk_processor(focus: *const Model, cue: *const Model, spot: *const Model, timbre: *const Model) -> *mut ProcessorHandle {
+    let models = Models { focus: model(focus), cue: model(cue), spot: model(spot), timbre: model(timbre) };
     made(input().and_then(|v| ProcessOptions::from_value(&v)).and_then(|o| Processor::new(&models, o)).map(|p| ProcessorHandle { p, audio: Vec::new() }))
 }
 
@@ -532,6 +532,18 @@ pub unsafe extern "C" fn alk_pipeline_spot(p: *mut PipelineHandle, m: *const Mod
     (*p).p.set_spot(&shared(m));
 }
 
+// Safety: `p` is live, `m` a live Timbre model: the far pass and the sample Focus takes from the stream, before the first hop; -1 on error
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_timbre(p: *mut PipelineHandle, m: *const Model) -> i32 {
+    match (*p).p.attach_timbre(&shared(m)) {
+        Ok(()) => 0,
+        Err(e) => {
+            fail(e);
+            -1
+        }
+    }
+}
+
 // Safety: `p` is live; a raw hop while the worklet bypasses the models: for the app's audio only
 #[no_mangle]
 pub unsafe extern "C" fn alk_pipeline_raw(p: *mut PipelineHandle) {
@@ -581,7 +593,7 @@ pub unsafe extern "C" fn alk_pipeline_stats(p: *mut PipelineHandle) -> i32 {
     answer(Ok((*p).p.stats()))
 }
 
-// Safety: `p` is live; 0 time in seconds, 1 asleep, 2 gain in dB, 3 hops, 4 has a chain
+// Safety: `p` is live; 0 time in seconds, 1 asleep, 2 gain in dB, 3 hops, 4 has a chain, 5 Focus's lag in samples
 #[no_mangle]
 pub unsafe extern "C" fn alk_pipeline_get(p: *mut PipelineHandle, what: u32) -> f64 {
     let h = &(*p).p;
@@ -591,6 +603,7 @@ pub unsafe extern "C" fn alk_pipeline_get(p: *mut PipelineHandle, what: u32) -> 
         2 => h.chain().map_or(0.0, |c| c.gain_db()),
         3 => h.hops() as f64,
         4 => h.chain().is_some() as u8 as f64,
+        5 => h.chain().map_or(0.0, |c| c.focus_lag() as f64),
         _ => f64::NAN,
     }
 }
