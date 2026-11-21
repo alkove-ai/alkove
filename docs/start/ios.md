@@ -7,7 +7,7 @@ sidebar:
 
 ```swift
 // Package.swift, or File > Add Package Dependencies in Xcode
-.package(url: "https://github.com/alkove-ai/alkove.git", from: "0.4.3")
+.package(url: "https://github.com/alkove-ai/alkove.git", from: "0.5.0")
 // the target
 .product(name: "Alkove", package: "alkove")
 ```
@@ -24,11 +24,21 @@ Say why the app uses the microphone in its `Info.plist`; the inputs ask for it t
 ## The models
 
 ```swift
-try await Alkove.preload(["focus", "cue"]) { p in bar.progress = Double(p.loaded) / Double(p.total) }
-let offline = Alkove.cached(["focus", "cue"])   // true: an input can start without network
+try await Alkove.preload(.agent) { p in bar.progress = Double(p.loaded) / Double(p.total) }
+let offline = Alkove.cached(.agent)   // true: an input can start without network
 ```
 
-The inputs load what they need themselves: from the app's cache (Application Support, out of iCloud backups), else from Hugging Face at this version's revision, each file checked by its sha256 (`models.hash`). Download them ahead on a settings screen, on Wi-Fi if you can. Serve them from your own host with `baseURL`, or ship the `.alk` files in your bundle and use `Models.load(names, directory: Bundle.main.resourceURL!)`.
+The inputs load what they need themselves: from the app's cache (Application Support, out of iCloud backups), else from Hugging Face at this version's revision, each file checked by its sha256 (`models.hash`). Download them ahead on a settings screen, on Wi-Fi if you can: `.call` and `.agent` get Focus, Cue and Timbre, `.wake` Spot (`voiceprint: true` adds Timbre, `typedWords: true` Lex).
+
+One configuration, before the first input, says where every model comes from, for the inputs, `Models.load` and `Alkove.preload` alike:
+
+```swift
+Alkove.configure(modelBaseURL: URL(string: "https://example.com/alkove/"))   // your own host, into the app's cache
+Alkove.configure(directory: Bundle.main.resourceURL)                         // .alk files shipped in the app's bundle: nothing on the network
+Alkove.configure(models: ["spot": bytes])                                    // a model's bytes, before all the rest
+```
+
+With `directory`, every model comes from there: Focus brings Timbre with it, so a bundle that holds `alkove-focus-1.alk` holds `alkove-timbre-1.alk` too; a missing file leaves the input on the raw microphone (`models.failed`).
 
 ## A voice agent
 
@@ -38,7 +48,7 @@ let input = try await AgentInput.start(AgentOptions(output: Output(format: .s16,
 }
 for await e in input.events {
     switch e {
-    case .interrupt: interruptTheAgent()        // speech over the agent long enough (farEnd)
+    case .interrupt: interruptTheAgent()        // speech over the agent long enough (farEndActive)
     case let .utterance(u): transcribe(u.pcm)   // from speech start to speech end, with its pre-roll
     case let .mode(m, _): showMode(m)           // raw while the models load, then focus
     default: break
@@ -50,23 +60,34 @@ input.close()
 
 The SDK opens the microphone through `AVAudioEngine` with Apple's voice processing, its echo canceller (the audio session in `.playAndRecord`, `.voiceChat` on iOS), then brings it to 16 kHz with its own resampler and runs Focus and Cue on its own thread. The echo canceller takes away what the device's own speakers play, the agent's voice included, and lowers other apps' sound as little as the system allows (iOS 17, macOS 14). A wake listener and an enrollment run without it (`.measurement` on iOS): nothing of the platform's in front of Spot. A call or Siri taking the microphone gives `.mic(.muted)` and `.status(.interrupted)`, then `.unmuted` and `.running`; a route change (headphones, AirPods) restarts the capture in place.
 
-The options are those of [`createAgentInput`](/docs/start/agent/): `voiceprint`, `learn` (with `farEnd: true`: call `input.farEndActive(true)` and `false` around your agent's playback), `strength`, `normalize`, `speech`, `output`, `keepRecent`, `trace`, `stats`. `try await input.record(seconds: 10)` gives the next ten seconds as a stereo WAV, the microphone on the left, the output on the right.
+The options are those of [`createAgentInput`](/docs/start/agent/): `voiceprint` (a `Voiceprint`, or a few seconds of the user alone at 16 kHz as a `[Float]`), `onlyMyVoice`, `wake`, `near`, `turn`, `output`, `keepRecent`, `trace`. `try await input.record(seconds: 10)` gives the next ten seconds as a stereo WAV, the microphone on the left, the output on the right; `await input.stats()` the speech heard and the noise removed so far.
+
+Call `input.farEndActive(true)` and `false` around your agent's playback. From the first call, the input learns the user's print while the user talks, never while the agent does (before it, the agent's own voice would teach the print), starting from `voiceprint` when you gave one: store it from `.voiceprintLearned` and pass it back next time.
+
+```swift
+let input = try await AgentInput.start(AgentOptions(onlyMyVoice: true, wake: WakeWords(words: ["Hey Nova"], lang: "en")))
+for await e in input.events {
+    if case let .wake(w) = e { openRequest(w.start) }   // heard on the raw microphone; its voice is Focus's print for the request
+}
+```
+
+[`wake`](/docs/start/agent/#a-wake-word-in-front-of-the-agent-wake) takes words, their JSON, or texts typed in `lang`; each wake word gives Focus the voice that said it (diag `wake.print`) and decides whether the raw microphone passes for the request, the user being too far for Focus (diag `wake.far`). [`onlyMyVoice`](/docs/start/agent/#only-the-users-phrases-onlymyvoice) tells only the phrases in the voice of `voiceprint`, or of the print the input learns; another voice's phrase gives the diag `speech.other-voice`.
 
 `input.spot(words)` listens for words in Focus's output, on the same thread: their wakes come on `events`.
 
 As on the web ([voices far from the microphone](/docs/start/agent/#voices-far-from-the-microphone-near), [mute and hold to talk](/docs/start/agent/#mute-and-hold-to-talk)):
 
 ```swift
-let input = try await AgentInput.start(AgentOptions(near: Alkove.nearGapDb))   // a voice 10 dB under the user's opens no phrase
+let input = try await AgentInput.start(AgentOptions(near: true))   // a voice 10 dB under the user's opens no phrase
 input.listen(false)   // mute: the phrase under way comes as .speechCancel; kept before the models run
 input.hold()          // hold to talk: a phrase until release(), whatever Cue hears
 input.release()
 ```
 
-The [end of turn](/docs/start/agent/#when-the-user-is-done-turnend) and the [interruptions](/docs/start/agent/#when-the-user-cuts-in-interrupt) come as on the web, on by default (`turn: nil` or `interrupt: nil` to turn them off); the interruptions need `farEnd: true` and `input.farEndActive()` around your agent's playback:
+The [end of turn](/docs/start/agent/#when-the-user-is-done-turnend) and the [interruptions](/docs/start/agent/#when-the-user-cuts-in-interrupt) come as on the web; the interruptions come while `input.farEndActive()` says your agent speaks:
 
 ```swift
-let input = try await AgentInput.start(AgentOptions(farEnd: true, turn: TurnParams(threshold: 0.7)))
+let input = try await AgentInput.start(AgentOptions(turn: TurnParams(threshold: 0.7)))
 switch e {
 case .turnEnd: answer()                 // start, end, probability, hesitation, at
 case .interruptStart: player.duck()
@@ -76,7 +97,7 @@ default: break
 }
 ```
 
-With `levels` or `near`, `.speechEnd` and `.utterance` carry a `PhraseLevel` (`voiceDb`, `noiseDb`, `refDb`), and a far voice comes as the diag `speech.far`. `Chain` and `Live` take `levels` and `near` too, with `setListen`, `hold`, `release` and `inputGainDb`, the gain a quiet microphone gets before Focus.
+`.speechEnd` and `.utterance` carry a `PhraseLevel` (`voiceDb`, `noiseDb`, `refDb`); with `near`, a far voice comes as the diag `speech.far`. `Chain` and `Live` give the levels and take `near` too, with `setListen`, `hold`, `release` and `inputGainDb`, the gain a quiet microphone gets before Focus.
 
 When the device cannot keep up, the input does not stutter: it sends the raw microphone (`.mode(.raw, reason: .overload)`) and tries the models again after 10 s, then 20 s, up to 160 s. If the engine fails, the raw microphone goes on and the models load again 5 s later (`engine.crash`). The `timing` diag, every 2 s, says how much of each 16 ms the models take.
 
@@ -90,7 +111,7 @@ let listener = try await WakeListener.start(WakeOptions(words: [word]))   // aft
 for await e in listener.events { if case let .wake(w) = e { wakeUp(w.word, w.audio) } }
 ```
 
-`Spot.enroll("Camille", lang: ["fr"])` sets the word's thresholds on the user's own voice from three takes, and gives the print of their voice too (`try await enrollment.result()`). A stored word is bound to this version's Spot: `Word.fromJson` gives nil for a word made by another one.
+`Spot.enroll("Camille", lang: ["fr"])` sets the word's thresholds on the user's own voice from three takes, and gives the print of their voice too (`try await enrollment.result()`). A stored word is bound to this version's Spot: `Word.fromJson` gives nil for a word made by another one. `WakeOptions(words: [word], voiceprint: me)` wakes only for that voice, checked by Timbre on the word and the 0.5 s after it; a `[Float]` of the user alone at 16 kHz works too.
 
 The microphone goes on in the background only with the `audio` background mode (`UIBackgroundModes`), which the App Store grants to apps whose main use is audio; a wake word alone rarely qualifies.
 
@@ -104,6 +125,9 @@ r.speech   // [Speech(start, end)]
 
 let p = try Processor(models: models, focus: true, cue: true, rate: 48000)
 let part = try p.push(frame)                  // [Float] or [Int16], any length
+
+let q = try Processor(models: models, voiceprint: me)          // a voiceprint runs Focus on that voice
+let s = try Processor(models: models, voiceprint: userAlone)   // or a few seconds of it alone at 16 kHz: its print, and Focus's sample
 ```
 
 `Live`, `Chain`, `Listener`, `Enroller`, `Timbre`, `Voiceprint` and `VoiceprintLearner` are those of the [Python package](/docs/start/python/), with Swift names. A native object is freed with its Swift object; each one may be used from any thread.
@@ -111,7 +135,7 @@ let part = try p.push(frame)                  // [Float] or [Int16], any length
 ## In a LiveKit room
 
 ```swift
-.package(url: "https://github.com/alkove-ai/alkove-livekit-swift.git", from: "0.4.3")
+.package(url: "https://github.com/alkove-ai/alkove-livekit-swift.git", from: "0.5.0")
 .product(name: "AlkoveLiveKit", package: "alkove-livekit-swift")
 ```
 

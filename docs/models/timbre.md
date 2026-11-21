@@ -1,6 +1,6 @@
 ---
 title: Timbre
-description: alkove-timbre-1-preview, voiceprints from 16 kHz speech, to tell whether a voice is your user and to tell Focus whom to keep.
+description: alkove-timbre-1, voiceprints from 16 kHz speech, to tell whether a voice is your user and to tell Focus whom to keep.
 sidebar:
   order: 5
 ---
@@ -14,13 +14,13 @@ const heard = await timbre.embed(lastSentencePcm)
 timbre.verify(print, heard) // { same, score }
 ```
 
-**alkove-timbre-1-preview** turns speech into a voiceprint. It answers "is this my user?" on the device, and gives [Focus](/docs/models/focus/) the print of the person to keep.
+**alkove-timbre-1** turns speech into a voiceprint. It answers "is this my user?" on the device, gives [Focus](/docs/models/focus/) the print of the person to keep, and finds where that person's voice is in the stream.
 
 | | |
 |---|---|
-| Size | 0.74 MB (int8 weights) |
-| Input | 16 kHz mono speech, one window of 280 to 24,000 samples (1.5 s, advised) |
-| Output | two unit vectors of 192 values: `embedding` (the print Focus follows) and `id` (to compare voices) |
+| Size | 0.97 MB (4-bit and int8 weights) |
+| Input | 16 kHz mono speech, one window of 1,400 to 32,000 samples (88 ms to 2 s; 1.5 s advised) |
+| Output | a unit vector of 192 values, given twice: `embedding` (the print Focus follows) and `id` (to compare voices), the same vector in this version |
 | License | Apache-2.0 |
 
 ## Using Timbre from the SDK
@@ -29,21 +29,24 @@ Most apps get voiceprints without calling Timbre:
 
 | Where | What Timbre does |
 |---|---|
-| `learn: true` on a [call](/docs/start/call/) or [agent](/docs/start/agent/) input | learns the user's print while they talk (about 6 s of their voice), then Focus keeps only them; `voiceprint` events give you the print to store |
-| `onlyMyVoice: print` on a [wake listener](/docs/start/wake-word/) | checks that the voice that said the word is the user's (adds 0.5 s of latency to a detection) |
+| every [call](/docs/start/call/) and [agent](/docs/start/agent/) input, beside Focus | hears the print's voice on the microphone: gives Focus a sample of it, and passes the raw microphone when Focus keeps removing it (the user far from the microphone) |
+| a call input, an agent input once it knows when the agent talks | learns the user's print while they talk: Focus uses it from their first 1.5 s of voice, the print is ready after about 6 s; `voiceprint` events give you the print to store |
+| `onlyMyVoice: true` on a call or agent input | checks each phrase against the print before the app hears of it |
+| `wake` on an agent input | makes the print from the voice that said the wake word |
+| `voiceprint` on a [wake listener](/docs/start/wake-word/) | checks that the voice that said the word is the user's (adds 0.5 s of latency to a detection) |
 | `Spot.enroll()` | gives a print from the takes of the word, along with the word |
-| `VoiceprintLearner` | an enrollment screen ("read this sentence"), with the same rules as `learn` |
+| `VoiceprintLearner` | an enrollment screen ("read this sentence"), with the same rules as the inputs' learning |
 
 Call it directly to compare voices yourself:
 
 | API | What it gives |
 |---|---|
 | `Timbre.create()` | a Timbre instance, once the model is loaded in the background worker |
-| `timbre.embed(pcm, { source })` | a `Voiceprint` from 16 kHz audio. `source` is `'raw'` (the default, a microphone or a file) or `'focus'` (Focus's output). |
+| `timbre.embed(pcm)` | a `Voiceprint` from 16 kHz audio. |
 | `timbre.verify(print, heard, { level })` | `{ same, score }`: whether `heard` is the voice of `print` |
 | `timbre.identify(voice, known, { level })` | `{ who, score }` for the best match among named prints, or `null` |
 
-`embed()` cuts the audio into 1.5 s windows and averages them, leaving out the 10 % least alike, so a cough or a word from someone else does not spoil the print. Give it at least 1.5 s; a few seconds of the user alone make a good print.
+`embed()` cuts the audio into 1.5 s windows and averages them, leaving out the 10 % least alike, so a cough or a word from someone else does not spoil the print. It takes at least 1,400 samples (88 ms); give it 1.5 s or more, and a few seconds of the user alone make a good print.
 
 ### Levels
 
@@ -68,7 +71,7 @@ const saved = Voiceprint.fromJSON(localStorage.getItem('print')!)
 if (!saved) relearn() // made by another version of Timbre
 ```
 
-A print is plain JSON: numbers, no audio. `Voiceprint.fromJSON()` returns `null` for a print made by another version of Timbre, which no longer means anything to this one: learn it again. Every API that takes a print accepts the `Voiceprint`, its JSON, or the JSON string.
+A print is plain JSON: numbers, no audio. `Voiceprint.fromJSON()` returns `null` for a print made by another version of Timbre, which no longer means anything to this one: learn it again. Prints made by alkove-timbre-1-preview (Alkove 0.4 and earlier) are such prints; in Python, Kotlin and Swift, comparing or merging one throws `voiceprint.outdated`. Every API that takes a print accepts the `Voiceprint`, its JSON, or the JSON string; in Python, on Android and on iOS, the `Voiceprint` only (`Voiceprint.from_json` and `Voiceprint.fromJson` read the JSON).
 
 `Voiceprint.merge([a, b])` combines prints of the same person (a phone and a headset, say). A print is personal data: see [Voiceprints](/docs/guides/voiceprints/) and [Privacy](/docs/guides/privacy/) for consent and storage.
 
@@ -76,44 +79,44 @@ A print is plain JSON: numbers, no audio. `Voiceprint.fromJSON()` returns `null`
 
 | | |
 |---|---|
-| Native, 1 thread, Galaxy Z Fold8 (Android 17) | 2.0 ms per 1.5 s window |
-| Native, 1 thread, Apple M1 Max (macOS) | 2.9 ms per 1.5 s window |
+| Native, 1 thread, Galaxy Z Fold8 (Android 17) | 5.9 ms per 1.5 s window |
+| Native, 1 thread, Apple M1 Max (macOS) | 7.8 ms per 1.5 s window |
 
-Timbre runs in the background worker, never on the audio path.
+Beside Focus, Timbre reads one 1.5 s window every 0.5 s while a print is in use, and none on a silent microphone. Learning a print, checking a phrase or a wake word and `embed()` run in the background worker.
 
 ## Benchmarks
 
-Equal error rate (same voice or not, lower is better) on the Common Voice test sets of 7 languages (CC0): 2,029 speakers never heard in training, 4 clips each (8,057 clips). For reference, the open 3D-Speaker CAM++ (Apache-2.0, 28 MB) on the same trials.
+Equal error rate (same voice or not, lower is better) on the Common Voice test sets of 11 languages (CC0): 2,325 speakers never heard in training, up to 4 clips each (9,241 clips). For reference, the open 3D-Speaker CAM++ (Apache-2.0, 28 MB) on the same trials.
 
-| EER | alkove-timbre `id` (0.74 MB) | CAM++ (28 MB) |
+| EER | alkove-timbre-1 `id` (0.97 MB) | CAM++ (28 MB) |
 |---|---|---|
-| A print of about 12 s (3 clips) against a 1.5 s window | **2.95 %** | 1.72 % |
-| The same, impostors only with a close pitch (±2 semitones) | 4.11 % | 2.32 % |
-| Clip against clip, whole clips (about 4 s) | 4.42 % | 2.61 % |
-| Clip against clip, 3 s | 4.90 % | 3.02 % |
-| Clip against clip, 1.5 s | 7.14 % | 4.75 % |
+| A print of about 12 s (3 clips) against a 1.5 s window | **2.07 %** | 1.54 % |
+| The same, impostors only with a close pitch (±2 semitones) | 2.71 % | 2.01 % |
+| Clip against clip, whole clips (about 4 s) | 2.80 % | 2.16 % |
+| Clip against clip, 3 s | 3.13 % | 2.57 % |
+| Clip against clip, 1.5 s | 4.39 % | 4.37 % |
 
-Mean of the 7 languages. Print against a 1.5 s window, per language: French 2.68 %, English 3.20, Spanish 2.79, Italian 2.57, Portuguese 4.28, Catalan 2.83, Romanian 2.30 (30 speakers only). The published file takes windows of up to 1.5 s; the whole-clip and 3 s rows ran the same weights on longer windows.
+Mean of the 11 languages. Print against a 1.5 s window, per language: French 2.50 %, English 1.96, Spanish 1.82, Italian 1.77, Portuguese 3.03, Catalan 2.25, Romanian 2.50 (30 speakers only), German 0.31, Dutch 1.25, Polish 2.24, Swedish 3.12 (56 speakers). For German, Dutch, Polish and Swedish, the speakers are the Common Voice 17 test and dev speakers Timbre never learnt. These rows ran Timbre 1's network in float on whole clips; the published file, its 4-bit rounding, takes windows of up to 2 s.
 
-Harder, and closer to a live call: 1,424 windows taken from scenes with noise, music or another voice.
+Harder, and closer to a live call: windows taken from scenes with noise, music or another voice (1,389 of 1.5 s, 1,353 of 1 s), the user holding the window against the user silent. After Focus is the path the SDK takes when it checks whose phrase it is.
 
-| EER | raw mic | after Focus, with print | after Focus, without print |
+| EER of `id` | raw mic | after Focus, with print | after Focus, without print |
 |---|---|---|---|
-| `id`, 1.5 s windows | 11.9 % | 10.1 % | 11.6 % |
-| `id`, 1 s windows | 14.4 % | 14.2 % | 13.4 % |
-| `embedding`, 1.5 s windows | 15.7 % | 18.6 % | 19.1 % |
+| 1.5 s windows | 13.3 % | 18.8 % | 18.4 % |
+| 1 s windows | 14.4 % | 21.3 % | 21.0 % |
 
-About ±1 point on this smaller protocol. Speech from Common Voice French dev (CC0), Multilingual LibriSpeech French dev (CC BY 4.0) and LibriTTS-R dev-clean (CC BY 4.0). Noise and music from MUSAN (CC BY 4.0), the DNS Challenge (CC BY 4.0) and RIRS_NOISES (Apache-2.0).
+Focus removes most of what is not the user, so only 60 to 100 windows per column are left without the user: these figures move by several points. Measured with the published file. Speech from Common Voice French dev (CC0), Multilingual LibriSpeech French dev (CC BY 4.0) and LibriTTS-R dev-clean (CC BY 4.0). Noise and music from MUSAN (CC BY 4.0), the DNS Challenge (CC BY 4.0) and RIRS_NOISES (Apache-2.0).
 
 ## Limitations
 
 - 16 kHz only; short windows (under 1 s) are less reliable.
-- `embedding` is made for Focus; use `id` to compare voices. The SDK does this for you: `verify()` and `identify()` compare `id`.
+- Timbre is less sure of a voice on Focus's output than on the raw microphone (table above).
+- Compare voices with `id`, the output kept for that: the SDK's `verify()` and `identify()` do.
 
 Out of scope:
 
-- **authentication or access control**: at about 3 % equal error rate it is a convenience filter, not a security check;
-- identifying or tracking people, or forensic speaker comparison;
+- **authentication or access control**: at about 2 % equal error rate it is a convenience filter, not a security check;
+- forensic speaker comparison;
 - comparing voices across very short windows (under 1 s).
 
 ## Running it without the SDK
@@ -122,7 +125,7 @@ The model is an `.alk` file for the [Alkove engine](https://github.com/alkove-ai
 
 | Name | Type | |
 |---|---|---|
-| `audio` (in) | float32 `[1, samples]` | 16 kHz mono, -1 to 1, 280 to 24,000 samples; 1.5 s (24,000 samples) advised |
+| `audio` (in) | float32 `[1, samples]` | 16 kHz mono, -1 to 1, 1,400 to 32,000 samples; 1.5 s (24,000 samples) advised |
 | `embedding` (out) | float32 `[1, 192]` | unit norm: the print for Focus |
 | `id` (out) | float32 `[1, 192]` | unit norm: compare two voices by the dot product |
 

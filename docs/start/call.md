@@ -5,14 +5,10 @@ sidebar:
   order: 2
 ---
 
-:::caution[A near microphone, one person]
-The call input keeps one voice: the person in front of the microphone. Use it on a phone, a headset or a laptop, not on a microphone shared by a room.
-:::
-
 ```ts
 import { createCallInput } from 'alkove'
 
-const input = await createCallInput({ learn: true, farEnd: remoteTrack })
+const input = await createCallInput({ farEnd: remoteTrack })
 const sender = pc.addTrack(input.track)
 input.bind(sender) // the SDK swaps tracks itself if the audio clock stalls
 input.on('voiceprint', (p) => localStorage.setItem('print', JSON.stringify(p)))
@@ -22,9 +18,9 @@ input.on('voiceprint', (p) => localStorage.setItem('print', JSON.stringify(p)))
 
 ## What goes out
 
-- **The user's voice only.** Focus keeps the closest voice and removes noise, music and other voices. Once a voiceprint is known, it keeps only that person, even when someone else is louder or closer.
+- **The user's voice only.** Focus keeps the closest voice and removes noise, music and other voices. Once a voiceprint is known, it keeps only that person, even when someone else talks at the same time, louder or at the same distance. From far, when Focus keeps removing the voice of the print, the raw microphone goes out instead, for the rest of the call.
 - **Silence between sentences.** A gate driven by Cue opens 100 ms before each sentence and closes after it. Nothing of the room leaks between sentences.
-- **A steady level.** The level is normalized on speech only (target -23 dB, at most +18 dB of boost and -12 dB of cut, with a limiter at -6 dB). Turn it off with `normalize: false`.
+- **A steady level.** The level is normalized on speech only (target -23 dB, at most +18 dB of boost and -12 dB of cut, with a limiter at -6 dB).
 - **Sound in every case.** While the models load, if they fail, or if the device is too slow, the raw microphone goes out at the same delay and the SDK tries again. Listen to `mode` to know which path is live.
 
 ```ts
@@ -35,32 +31,33 @@ input.on('mode', ({ mode, reason }) => badge.set(mode === 'raw' ? `raw (${reason
 
 ## Learn the user's voice
 
-With `learn: true`, the SDK learns the user's voiceprint while they talk. After about 6 s of their voice, Focus keeps only them. `learn` events report the progress, and a `voiceprint` event fires each time the print gets better: store it, and pass it back next time so the call starts with it.
+A call input learns the user's voiceprint while they talk. Focus takes their voice from their first 1.5 s of speech and keeps only them; after about 6 s of it, the print is ready. `learn` events report the progress, and a `voiceprint` event fires each time the print gets better: store it, and pass it back next time so the call starts with it and goes on learning from there.
 
 ```ts
 const input = await createCallInput({
-  voiceprint: localStorage.getItem('print'), // a Voiceprint, its JSON, or the JSON string
-  learn: true,
+  voiceprint: localStorage.getItem('print'), // a Voiceprint, its JSON, the JSON string, or a 16 kHz recording of the user
   farEnd: remoteTrack,
 })
 input.on('learn', ({ progress }) => meter.set(progress)) // 0 to 1
 ```
 
-`farEnd` is the other side of the call: the remote `MediaStreamTrack`, an `AudioNode`, or `'manual'` if you report it yourself with `input.farEndActive(true)` and `input.farEndActive(false)`. The print only learns while the far end has been quiet, so a voice coming out of the speaker never gets into it. Without `farEnd`, `learn` still works but raises a `diag` `learn.no-far-end`.
+`farEnd` is the other side of the call: the remote `MediaStreamTrack` or an `AudioNode`. Without one, report it yourself with `input.farEndActive(true)` and `input.farEndActive(false)`. The print only learns while the far end has been quiet, so a voice coming out of the speaker never gets into it: give the SDK one or the other.
 
 A voiceprint is biometric data: read [Privacy](/docs/guides/privacy/) before you store or send one. More in [Voiceprints](/docs/guides/voiceprints/).
+
+With a print, `onlyMyVoice: true` tells `speechstart` and `speechend` only for phrases in the user's voice, once Timbre has heard 0.6 s of them; another voice's phrase gives the diag `speech.other-voice`. The track is the same either way. See [only the user's phrases](/docs/start/agent/#only-the-users-phrases-onlymyvoice).
 
 ## Controls
 
 ```ts
 await input.setEnabled(false) // raw microphone at the same delay, mode 'raw' with reason 'off'
-input.setStrength(0.8) // 80 % Focus, 20 % raw microphone
+input.setStrength(0.8) // 80 % Focus, 20 % raw microphone (the option `strength` at creation)
 input.setVoiceprint(print) // or null
 await input.setDevice(deviceId) // another microphone, the same output track
 input.dispose() // stops the microphone the SDK opened and frees the input
 ```
 
-When the SDK opened the microphone itself, the input follows the system's default microphone when it changes (unless you passed a `deviceId` or `followDefault: false`), and reopens it if it is lost. `mic` events report it: `lost`, `reopened`, `denied`, `muted`, `unmuted`.
+When the SDK opened the microphone itself, the input follows the system's default microphone when it changes (unless you gave a `deviceId` or called `setDevice()`), and reopens it if it is lost. `mic` events report it: `lost`, `reopened`, `denied`, `muted`, `unmuted`.
 
 ## Your own stream or context
 
@@ -72,7 +69,7 @@ const input = await createCallInput({ stream, audioContext: ctx })
 
 ## When the page is hidden
 
-A call keeps running when the tab is hidden: by default the input plays a 30 Hz tone at a level phone speakers cannot render, so Chrome does not freeze the page. Turn it off with `keepAliveWhenHidden: false`. On mobile, also read [Mobile and background](/docs/guides/mobile/).
+A call keeps running when the tab is hidden: while it is, the input plays a 30 Hz tone at a level phone speakers cannot render, so Chrome does not freeze the page. On mobile, also read [Mobile and background](/docs/guides/mobile/).
 
 ## If creation fails
 

@@ -1,6 +1,6 @@
 ---
 title: "Quick start: React Native"
-description: "The hooks of alkove/react on iOS and Android, on the native SDKs: useAgentInput, useWakeListener, Spot.compile, and Focus in LiveKit React Native."
+description: "The hooks of alkove/react on iOS and Android, on the native SDKs: useAgentInput, useWakeListener, Spot.compile, Alkove.configure, Alkove.preload, and Focus in LiveKit React Native."
 sidebar:
   order: 8.5
 ---
@@ -58,12 +58,11 @@ then `npx expo prebuild`. The microphone permission is asked the first time an i
 
 ## A voice agent
 
-`useAgentInput` takes the options of [`createAgentInput`](/docs/start/agent/): `voiceprint`, `learn`, `farEnd`, `strength`, `normalize`, `speech`, `output`, `levels`, `near`, `turn`, `interrupt`. It returns `status`, `mode`, `error` and `input`:
+`useAgentInput` takes the options of [`createAgentInput`](/docs/start/agent/): `voiceprint`, `output`, `near`, `turn`, `onlyMyVoice`, `wake`, `keepRecent` and `trace`. It returns `status`, `mode`, `error` and `input`:
 
 ```tsx
 const { status, mode, error, input } = useAgentInput({
   enabled: talking,
-  farEnd: true,
   on: {
     utterance: ({ pcm }) => transcribe(pcm),   // one phrase, 300 ms before the speech to its end
     turnend: () => agent.reply(),
@@ -79,7 +78,12 @@ input?.hold()               // hold to talk, until release()
 - **`enabled`**: `false` opens nothing; switching it to `false` closes the input and the microphone.
 - **`on`**: the events by name, as on the web. The latest functions are always called: an arrow written inline never reopens the input.
 - `on.audio` streams the continuous output (32 ms chunks by default, `output` sets the format and rate) and `on.utterance` the phrases' PCM, each as an `ArrayBuffer` and each only when the app gives it: no audio crosses to JavaScript otherwise.
-- `strength` and `voiceprint` change on the running input; the other options reopen it.
+- `voiceprint` changes on the running input; the other options reopen it. It takes a print's JSON, or a few seconds of the user alone at 16 kHz as a number array.
+- From the first `input.farEndActive()` call, the input learns the user's print while the user talks, never while the agent does, starting from `voiceprint` when you gave one: store it from `on.voiceprint` and pass it back next time. See [your agent's voice](/docs/start/agent/#your-agents-voice-farend).
+- `wake: { words: ['Hey Nova'], lang: 'en' }` hears wake words on the raw microphone, as on the web: their wakes come as `on.wake` with the word's `audio`, and each one gives Focus the voice that said it and decides whether the raw microphone passes for the request. `lang` takes one language or several (`['fr', 'en']`), and is needed only for typed words; `context` is that of [a wake word](#a-wake-word). `onlyMyVoice: true` tells only the phrases in the print's voice. See [the agent quick start](/docs/start/agent/#a-wake-word-in-front-of-the-agent-wake).
+- `keepRecent: 20` keeps the last 20 seconds, up to 600: `await input.recent()` gives them as a stereo WAV at 16 kHz in an `ArrayBuffer`, the microphone on the left and the output on the right, for a "report a problem" button; `null` without `keepRecent`.
+- `await input.record(10)` gives the next ten seconds, up to 600, as the same WAV; it rejects with `engine.failed` before the models run. `await input.stats()` gives `{ speechSeconds, seconds, noiseRemovedDb }` since the models started, the noise removed being measured where Cue hears no speech; `null` before.
+- `trace: true` sends `on.trace` (every step of every model) and `on.heard` (Spot's speech probability and each word's score), to plot.
 
 `status` is `'off'` while closed, then `'starting'`, `'running'`, `'interrupted'` (a call or Siri took the microphone) or `'disposed'` (the input stopped on its own). `error` is what kept the input from opening: an `AlkoveError` with one of the [web library's codes](/docs/guides/errors/), such as `mic.denied` or `models.fetch`, else the platform's own error.
 
@@ -105,7 +109,9 @@ function Wake() {
 
 Store a compiled word with `JSON.stringify(word)` and give it back with `Word.fromJSON`: no compile at the next launch.
 
-`context: 'anywhere'` hears the word in the middle of a sentence; by default it is heard after a pause. `word.warnings` says when the word will misfire more (`word.too-short`) or will not be read as written (`text.digits`, `text.acronym`).
+`context: 'anywhere'` hears the word in the middle of a sentence, `'both'` everywhere, with a stricter threshold mid-sentence; by default it is heard after a pause. Each wake says which context it matched, and carries `audio`: the word itself, a `Float32Array` at 16 kHz from the raw microphone. `word.warnings` says when the word will misfire more (`word.too-short`) or will not be read as written (`text.digits`, `text.acronym`).
+
+`voiceprint` lets only the user wake it: a print's JSON (an agent input's `on.voiceprint`), or a few seconds of the user alone at 16 kHz as a number array. Timbre checks the word and the 0.5 s after it, so the wake comes 0.5 s later, with `voice`, the likeness to the print; another voice gives a `diag` `wake.other-voice` instead. A new `voiceprint` reopens the listener. `trace: true` sends `on.heard` and `on.trace`, as for an agent.
 
 ## In a LiveKit room
 
@@ -126,4 +132,25 @@ Focus then runs on the microphone's frames inside LiveKit's audio path, before W
 
 ## The models
 
-The inputs load the models they need the first time they start: from the app's cache, else from Hugging Face at this version's revision, each file checked by its sha256. The first start needs the network; the next ones do not.
+The inputs load the models they need the first time they start: from the app's cache, else from Hugging Face at this version's revision, each file checked by its sha256. The first start needs the network; the next ones do not. To download them ahead, on a settings or onboarding screen:
+
+```ts
+import { Alkove } from '@alkove/react-native'
+
+await Alkove.preload('agent', { onProgress: ({ loaded, total }) => setProgress(loaded / total) })
+const offline = await Alkove.cached('wake', { typedWords: true })   // true: an input can start without network
+```
+
+The usage is `'call'` (`AlkoveFocus`), `'agent'` or `'wake'`. A call or an agent brings Focus, Cue and Timbre, a wake listener Spot: add `voiceprint: true` for its `voiceprint` (Timbre), and `typedWords: true` for a word compiled from text (Lex). Models from a folder or shipped in the app are only checked: `preload` rejects with `models.fetch` when one is missing.
+
+`Alkove.configure`, before the first input, says where every model comes from, for the hooks, `Spot.compile`, `Alkove.preload` and `AlkoveFocus` alike:
+
+```ts
+import { Alkove } from '@alkove/react-native'
+
+Alkove.configure({ modelBaseUrl: 'https://example.com/alkove/' })   // your own host, into the app's cache
+Alkove.configure({ modelBaseUrl: 'alkove' })                        // .alk files shipped in the app: nothing on the network
+Alkove.configure({ modelBaseUrl: folder })                          // a folder of .alk files on the device: a path or a file: URL
+```
+
+A relative path is a folder shipped in the app: `android/app/src/main/assets/alkove` on Android, a folder reference named `alkove` in the iOS app's bundle. An absolute path or a `file:` URL is a folder on the device, one the app downloaded. Focus brings Timbre with it, so a folder that holds `alkove-focus-1.alk` holds `alkove-timbre-1.alk` too; a missing file leaves the input on the raw microphone (`models.failed`).

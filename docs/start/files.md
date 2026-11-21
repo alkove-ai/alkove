@@ -5,10 +5,6 @@ sidebar:
   order: 5
 ---
 
-:::caution[A near microphone, one person]
-Focus keeps one voice, the closest one or the one of a print. Use it on recordings made close to the speaker (a phone, a headset, a laptop), not on a room microphone where everyone should be kept.
-:::
-
 ```ts
 import { Alkove } from 'alkove'
 
@@ -32,13 +28,13 @@ Stereo is mixed down to mono.
 
 ```ts
 const r = await Alkove.process(file, {
-  focus: { voiceprint: print }, // or true: keep the closest voice
+  focus: { voiceprint: userAlone }, // or true: keep the closest voice
   cue: true, // speech segments in r.speech
   spot: { words: [word] }, // detections in r.wakes
 })
 ```
 
-- `focus`: `true` keeps the closest voice. `{ voiceprint }` keeps one person; `{ strength }` mixes Focus with the original (1 by default). Without `focus`, `r.audio` is the input, resampled.
+- `focus`: `true` keeps the closest voice. `{ voiceprint }` keeps one person: their print, or a few seconds of them alone at 16 kHz, which also lets Focus tell them apart from another voice at once (from a print alone, it takes its own sample from the recording); `{ strength }` mixes Focus with the original (1 by default). Without `focus`, `r.audio` is the input, resampled.
 - `cue`: speech segments. `true`, or the speech parameters to tune ([`SpeechParams`](/docs/reference/interfaces/speechparams/)). With `focus`, Cue listens to Focus's output.
 - `spot`: `{ words, context }`, the words to find. With `focus`, Spot listens behind Focus. `context` is `'anywhere'` by default here.
 - `normalize`: level the voice as a call input does. Off by default for files.
@@ -72,14 +68,14 @@ npx alkove models ./models
 import { readFile, writeFile } from 'node:fs/promises'
 import { Alkove } from 'alkove'
 
-Alkove.configure({ modelDir: './models' })
+Alkove.configure({ modelBaseUrl: './models' }) // a folder, or a file: URL
 const r = await Alkove.process(await readFile('call.wav'), { focus: true, cue: true })
 await writeFile('call.clean.wav', r.toWav())
 ```
 
 Node decodes WAV only. For MP3, Opus or anything else, decode the file with your own tool and pass `{ pcm, rate }`; outside a browser, other formats reject with `AlkoveError` code `browser.unsupported`.
 
-Without `modelDir`, Node downloads the models from Hugging Face on every run (there is no cache outside the browser).
+Without a folder as `modelBaseUrl`, Node downloads the models on every run (there is no cache outside the browser).
 
 ## The CLI
 
@@ -89,17 +85,18 @@ The package ships one command, to copy what your installed version loads into a 
 npx alkove models <dir> [focus cue spot timbre lex]
 ```
 
-It downloads the models at the revision pinned by your version, checks their sha256, and copies `alkove-engine.wasm`, `alkove-worker.js` and `alkove-worklet.js` next to them. Name models to copy only those; with none, it copies all five. Use the folder as `modelDir` in Node, or serve it and set `modelBaseUrl` and `assetBaseUrl` in the browser (see [Self-hosting the models](/docs/guides/self-hosting/)).
+It downloads the models at the revision pinned by your version, checks their sha256, and copies `alkove-engine.wasm`, `alkove-worker.js` and `alkove-worklet.js` next to them. Name models to copy only those (Focus needs Timbre beside it); with none, it copies all five. Give the folder as `modelBaseUrl` in Node, or serve it and set `modelBaseUrl` and `assetBaseUrl` in the browser (see [Self-hosting the models](/docs/guides/self-hosting/)).
 
 ## Voiceprints and words for files
 
-`focus.voiceprint` and `spot.words` take the same values as the live inputs: a `Voiceprint` or its JSON, a compiled word or its JSON. Make a print from a few seconds of the person's voice with `Timbre`:
+`focus.voiceprint` and `spot.words` take the same values as the live inputs: a `Voiceprint` or its JSON, or a recording of the person (a `Float32Array` at 16 kHz); a compiled word or its JSON. From a recording, Focus reads the first 3 s of speech, and takes no sample with less than 1 s. To keep the print, make it once with `Timbre`:
 
 ```ts
 import { Timbre } from 'alkove'
 
 const timbre = await Timbre.create()
-const print = await timbre.embed(sample) // Float32Array at 16 kHz, 1.5 s or more
+const print = await timbre.embed(userAlone) // Float32Array at 16 kHz, 1.5 s or more
+const r = await Alkove.process(file, { focus: { voiceprint: print } })
 ```
 
 See [Voiceprints](/docs/guides/voiceprints/) and [Primitives](/docs/guides/primitives/).

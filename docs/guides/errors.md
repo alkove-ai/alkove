@@ -39,8 +39,9 @@ An [`AlkoveError`](/docs/reference/classes/alkoveerror/) has `name` `'AlkoveErro
 | `mic.not-found` | no microphone, an unknown `deviceId`, or a stream without an audio track | ask for another device |
 | `mic.busy` | another app or a call holds the microphone | try again later |
 | `page.insecure` | the page is not served over HTTPS (or localhost) | serve it over HTTPS |
-| `lang.unsupported` | `Spot.compile`, `Spot.enroll` or `Lex.phonemize` with a language outside the seven | use one of `Lex.langs` |
+| `lang.unsupported` | `Spot.compile`, `Spot.enroll`, `Lex.phonemize` or an agent input's `wake` with a language outside the seven | use one of `Lex.langs` |
 | `word.outdated` | a stored word was compiled for another Spot | compile or enroll its text again |
+| `voiceprint.outdated` | Python, Android and iOS: a print made by another Timbre (alkove-timbre-1-preview, for one) given to `verify`, `identify`, `merge` or `similarity` | learn the print again |
 | `browser.unsupported` | no `AudioWorklet` (Safari before 14.1) or no `getUserMedia`; also `Alkove.process` on a non-WAV file outside a browser | offer another browser; decode the file yourself and pass `{ pcm, rate }` |
 | `models.fetch` | a model or the engine could not be downloaded (network, HTTP error) | check `modelBaseUrl` and your CSP `connect-src` |
 | `models.hash` | a downloaded file does not match its sha256 (truncated download, or a CDN that rewrites files) | serve the files byte for byte; see [Self-hosting](/docs/guides/self-hosting/) |
@@ -52,7 +53,8 @@ Inputs never reject with `models.fetch`, `models.hash` or `engine.failed`: those
 
 - An aborted `signal` rejects with the signal's own reason, an `AbortError` by default, not with an `AlkoveError`.
 - `enrollment.cancel()` rejects `enrollment.done` with an `AbortError`.
-- A programming mistake throws a `TypeError` at creation: `createAgentInput` with `learn` but no `farEnd`, or with the reserved `wake` option; `createWakeListener` without a word; `spot()` called on a wake listener; a voiceprint JSON that is not an Alkove voiceprint.
+- `createAgentInput` with `wake` compiles its typed words before it opens anything, as `Spot.compile` does: it rejects with `lang.unsupported`, `word.outdated`, or the code of a Lex that could not load (`models.fetch`, `models.hash`).
+- A programming mistake throws a `TypeError` at creation: `createAgentInput` with a `wake` whose `words` is empty or holds a typed word without `lang`; `createWakeListener` without a word; `spot()` called on a wake listener; a voiceprint JSON that is not an Alkove voiceprint.
 
 ## Modes and their reasons
 
@@ -64,7 +66,7 @@ input.on('mode', ({ mode, reason }) => log('mode', mode, reason))
 |---|---|
 | `raw` | the raw microphone, at the same delay as processed audio |
 | `focus` / `focus+print` | Focus on the closest voice, or on the voice of a print (call and agent inputs) |
-| `spot` / `spot+print` | Spot on the raw microphone, every voice or only the voice of `onlyMyVoice` (wake listeners) |
+| `spot` / `spot+print` | Spot on the raw microphone, every voice or only the voice of its `voiceprint` (wake listeners) |
 
 | Raw `reason` | Cause | Next |
 |---|---|---|
@@ -121,23 +123,24 @@ const off = Alkove.onDiag((d) => console.warn(d.code, d))
 | `mic.processed` | warn | the stream you gave is processed by the browser | `settings` | open it with those settings off |
 | `mic.twice` | warn | two inputs on the same microphone | | use `input.spot()` on one input |
 | `mic.browser` | info | raw for 2 s on a microphone the SDK opened: the browser's noise suppression and gain on; off once the models run | `noiseSuppression`, `autoGainControl` asked; `applied`, what the track reports (`null` when the browser does not tell) | nothing |
-| `speech.far` | info | with `near`, a voice far under the session's kept out of the phrases | `start`, `end`, `voiceDb`, `noiseDb`, `refDb` | tune `near.gapDb` |
-| `learn.no-far-end` | warn | a call input learns without `farEnd` | | pass the remote track |
+| `speech.far` | info | with `near`, a voice far under the session's kept out of the phrases | `start`, `end`, `voiceDb`, `noiseDb`, `refDb` | nothing |
+| `speech.other-voice` | info | with `onlyMyVoice`, a phrase in another voice than the print's was not told; after a `speechcancel` when a phrase heard whole turned out to be another voice's | `start`, `voice` (the likeness to the print) | nothing |
 | `config.late` | warn | `Alkove.configure()` after the first input | | configure first |
 | `models.default-host` | warn | a model comes from Hugging Face | | self-host in production |
-| `models.failed` | warn | models not loaded, raw, retry announced | `error` | check the network and `modelBaseUrl` |
+| `models.failed` | warn | models not loaded, raw, retry announced; or Timbre not loaded when an agent input starts learning at its first `farEndActive()`: no learning until the models start again | `error` | check the network and `modelBaseUrl` |
 | `engine.unsupported` | warn | no WebAssembly SIMD | | nothing: raw for the session |
 | `overload` | warn | the device is too slow | `queueMs`, `sent`, `received` | nothing: raw for a while |
 | `audio.stalled` / `audio.resumed` | warn / info | the audio clock stopped or dragged 1.5 s / runs again | | `bind(sender)` or `trackchange` |
 | `timing` | info, warn | every 2 s of processing; warn when over 10 % of 16 ms steps ran late | `meanMs`, `maxMs`, `slow`, `asleep`, `gainDb` | watch it on slow devices |
 | `queue` | info | every 2 s, the worklet's queue | `queueMs`, `debtMs`, `droppedMs`, `latencyMs` | latency analysis |
 | `idle` | info | Focus and Cue go to sleep in a silence, or wake up | `asleep`, `at` | nothing |
-| `focus.print` | info | a print was applied, at a silence | `print`, `after`, `why` | nothing |
+| `focus.print` | info | a print was applied | `print`, `after`, `why` | nothing |
 | `print.learn` / `print.reject` / `print.restart` | info | a learning window was accepted, refused, or the print started over | `score`, `progress`, `ms` | nothing |
-| `voiceprint.reset` | warn | a print from another version of Timbre was ignored (`voiceprint`, `setVoiceprint`, `onlyMyVoice`) | | let it learn again |
-| `spot.no-print` | warn | `input.spot(words, { onlyMyVoice: true })` on an input without a print: the closest voice wakes it | | give the input a `voiceprint`, or `learn: true` |
+| `voiceprint.reset` | warn | a print from another version of Timbre was ignored (`voiceprint`, `setVoiceprint`), such as one made before 0.5 | | let it learn again |
 | `engine.crash` | warn | the engine stopped: raw microphone, a new engine after the retry delay | `error` | nothing, or tell the user |
-| `wake.other-voice` | info | `onlyMyVoice` refused a detection | `word`, `voice` | nothing |
+| `wake.other-voice` | info | a wake listener's `voiceprint` refused a detection | `word`, `voice` | nothing |
+| `wake.print` | info | an agent input's wake word gave Focus the print of the voice that said it, then again 4 s after the word's start | `seconds`, the voice it was made from | nothing |
+| `wake.far` | info | at each wake word of an agent input: whether the user is too far for Focus, in which case the raw microphone passes until the next wake word | `far`; `gapDb`, Focus's output against the microphone over the word (`null` when it could not tell: `far` then stays as it was) | nothing |
 | `word.chain` | warn | a word enrolled behind Focus is used on the raw microphone | | use it with `input.spot()`, or enroll it with `Spot.enroll()` |
 | `worker.error` | warn | an error in a worker that no call was waiting for | `message`, `on` | report it |
 

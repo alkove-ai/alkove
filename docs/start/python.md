@@ -5,10 +5,6 @@ sidebar:
   order: 6
 ---
 
-:::caution[A near microphone, one person]
-Focus keeps one voice, the closest one or the one of a print. Use it on audio recorded close to the speaker (a phone, a headset, a laptop, a caller on a line), not on a room microphone where everyone should be kept.
-:::
-
 ```sh
 pip install alkove
 ```
@@ -24,7 +20,7 @@ models = alkove.Models.load(["focus", "cue"])                # from Hugging Face
 models = alkove.Models.load(["focus", "cue"], dir="models")   # a folder of .alk files, nothing on the network
 ```
 
-Each file is checked against the sha256 this version pins: a file that does not match raises `AlkoveError` with the code `models.hash`. `alkove.fetch()` downloads them ahead of time, `alkove.cache_dir()` says where they go. Load them once: a `Models` is shared by every stream, in any thread.
+Focus loads Timbre with it, so `["focus", "cue"]` loads three models, and a folder given as `dir` holds `alkove-timbre-1.alk` too. Each file is checked against the sha256 this version pins: a file that does not match raises `AlkoveError` with the code `models.hash`. `alkove.fetch()` downloads them ahead of time (Timbre comes along with Focus there too), `alkove.cache_dir()` says where they go. Load them once: a `Models` is shared by every stream, in any thread.
 
 ## A stream
 
@@ -42,10 +38,10 @@ The output comes back aligned with the input: the first `part.audio` is shorter 
 
 `push` releases the GIL: streams in several threads run on several cores. `alkove.Live(models, rate)` gives the chain frame by frame at the stream's own rate, as a real-time input runs it, for a pipeline that wants its audio back at the rate it came in.
 
-`Live` and `Chain` take the agent input's [`near` and `levels`](/docs/start/agent/#voices-far-from-the-microphone-near), and its [mute and hold to talk](/docs/start/agent/#mute-and-hold-to-talk) with `set_listen`, `hold` and `release`:
+`Live` and `Chain` give each `speechend` its level, take the agent input's [`near`](/docs/start/agent/#voices-far-from-the-microphone-near), and its [mute and hold to talk](/docs/start/agent/#mute-and-hold-to-talk) with `set_listen`, `hold` and `release`:
 
 ```python
-live = alkove.Live(models, 16000, near=True)       # or near=12, a gap in dB; alkove.NEAR_GAP_DB is the default
+live = alkove.Live(models, 16000, near=True)       # a voice 10 dB under the user's opens no phrase
 audio, events = live.push(frame)
 # {'type': 'speechend', 'start': …, 'end': …, 'voiceDb': -19.2, 'noiseDb': …, 'refDb': -18.7}
 # {'type': 'diag', 'code': 'speech.far', 'level': 'info', 'data': {'start': …, 'end': …, 'voiceDb': -40.2, …}}
@@ -61,7 +57,7 @@ audio, events = live.push(frame)
 # {'type': 'interruptstart', 'start': …}, then {'type': 'interrupt', 'start': …, 'at': …} or {'type': 'interruptcancel', 'start': …, 'end': …}
 ```
 
-For a microphone across the room, where Focus does not belong, `alkove.Turns(models, rate)` runs Cue alone on the raw audio and gives the same events, from `push(frame)`: `turn=True` by default, `interrupt` and `far_end_active()` as above.
+`alkove.Turns(models, rate)` runs Cue alone on the raw audio, without Focus, and gives the same events, from `push(frame)`: `turn=True` by default, `interrupt` and `far_end_active()` as above.
 
 ## A file
 
@@ -94,8 +90,11 @@ models = alkove.Models.load(["timbre", "focus", "cue"])
 timbre = alkove.Timbre(models)
 me = timbre.embed(pcm)                                   # 1.5 s of voice or more
 same, score = alkove.Timbre.verify(me, timbre.embed(other))
-p = alkove.Processor(models, focus=True, voiceprint=me)  # Focus keeps that voice, not just the closest one
+p = alkove.Processor(models, voiceprint=me)              # Focus keeps that voice, not just the closest one
+p = alkove.Processor(models, voiceprint=pcm)             # a recording of that voice: its print, and Focus knows it from the start
 ```
+
+`voiceprint` runs Focus by itself, without `focus=True`. It takes a `Voiceprint` (`Voiceprint.from_json` reads a stored one) or a recording: any array is a few seconds of the person alone, at 16 kHz whatever `rate`. Timbre makes the recording's print and Focus reads the first 3 s of speech in it as its sample; with a print alone, Focus takes its sample from the stream. `Chain`, `Live` and `set_voiceprint` take the same. A print made by another Timbre (Alkove 0.4 and earlier) gives `None` from `Voiceprint.from_json`, and raises `AlkoveError` (`voiceprint.outdated`) when compared.
 
 `alkove.VoiceprintLearner(models).offer(pcm)` learns a print from the user's speech, window by window, as the web inputs do. A print is biometric data: read [Voiceprints](/docs/guides/voiceprints/) and [Privacy](/docs/guides/privacy/) before you store one.
 

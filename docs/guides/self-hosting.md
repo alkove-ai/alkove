@@ -23,7 +23,7 @@ Without configuration, the SDK loads:
 
 | File | Default source |
 |---|---|
-| The models (`alkove-focus-1-preview.alk`, …) | Hugging Face, `https://huggingface.co/alkove-ai/<model>/resolve/…` |
+| The models (`alkove-focus-1.alk`, `alkove-timbre-1.alk`, `alkove-cue-1-preview.alk`, …) | Hugging Face, `https://huggingface.co/alkove-ai/<model>/resolve/…` |
 | `alkove-engine.wasm`, the WebAssembly engine | next to the package's own JavaScript, through `import.meta.url` |
 | The worker and the AudioWorklet | built into the package, started from `blob:` URLs |
 
@@ -49,15 +49,17 @@ It copies what the installed version of `alkove` loads into `<dir>`:
 With no model names it copies all five. Name only what your app uses to keep the folder small:
 
 ```sh
-npx alkove models public/alkove focus cue          # a call or a voice agent
+npx alkove models public/alkove focus cue timbre    # a call or a voice agent
 npx alkove models public/alkove spot lex            # a wake word typed as text
-npx alkove models public/alkove focus cue timbre    # a call with a voiceprint
+npx alkove models public/alkove spot timbre         # a wake word that checks a voiceprint
 ```
+
+Focus loads Timbre with it: a folder for a call or an agent holds both, `alkove-focus-1.alk` and `alkove-timbre-1.alk`.
 
 Each model prints its name, size and `sha256 ok`. Any error (network, hash, unknown model name) exits with code 1.
 
 :::caution
-The worker and the worklet talk to the main bundle of the same version. Run the CLI again every time you upgrade `alkove`, and deploy the new folder with the new bundle. A good habit is one folder per version, for example `public/alkove/0.4.0/`: you can then cache the files forever.
+The worker and the worklet talk to the main bundle of the same version. Run the CLI again every time you upgrade `alkove`, and deploy the new folder with the new bundle. A good habit is one folder per version, for example `public/alkove/0.5.0/`: you can then cache the files forever.
 :::
 
 ## Configuration
@@ -73,10 +75,9 @@ Alkove.configure({
 
 | Field | What it does |
 |---|---|
-| `modelBaseUrl` | Folder of the `.alk` files. Each model is read at `<modelBaseUrl>/<model>.alk`, for example `/alkove/alkove-focus-1-preview.alk`. |
+| `modelBaseUrl` | Folder of the `.alk` files. Each model is read at `<modelBaseUrl>/<model>.alk`, for example `/alkove/alkove-focus-1.alk`. In Node, a folder on disk (a path or a `file:` URL). |
 | `assetBaseUrl` | Folder of `alkove-engine.wasm`, `alkove-worker.js` and `alkove-worklet.js`. When it is set, the worker and the worklet load from these URLs instead of `blob:` URLs. |
 | `models` | One source per file, by name (`focus`, `cue`, `spot`, `timbre`, `lex`, or `engine` for `alkove-engine.wasm`): a URL, a string, an `ArrayBuffer` or a `Uint8Array`. Takes precedence over the base URLs for that file. |
-| `modelDir` | Node only: a folder on disk the models are read from. |
 
 The full type is in the [reference](/docs/reference/interfaces/config/).
 
@@ -118,13 +119,13 @@ Two helpers work with the cache, by usage (`'call'`, `'agent'` or `'wake'`):
 
 ```ts
 // a settings or onboarding screen: download and compile ahead, with progress
-await Alkove.preload('call', { voiceprint: true, onProgress: ({ loaded, total }) => bar(loaded / total) })
+await Alkove.preload('call', { onProgress: ({ loaded, total }) => bar(loaded / total) })
 
 // true when everything this usage needs is already here: it works offline
 if (await Alkove.cached('wake', { typedWords: true })) showOfflineBadge()
 ```
 
-`voiceprint: true` adds Timbre, `typedWords: true` adds Lex. A call or an agent needs Focus and Cue, a wake listener needs Spot. The engine (`alkove-engine.wasm`) is always included. See the [models overview](/docs/models/) for which model does what.
+A call or an agent needs Focus, Cue and Timbre, a wake listener needs Spot. `voiceprint: true` adds Timbre to a wake listener (its `voiceprint`), `typedWords: true` adds Lex. The engine (`alkove-engine.wasm`) is always included. See the [models overview](/docs/models/) for which model does what.
 
 ## Serving the files
 
@@ -153,7 +154,7 @@ With webpack, Next.js, SvelteKit or others, use their static folder the same way
 ```json
 {
   "scripts": {
-    "prebuild": "alkove models public/alkove focus cue"
+    "prebuild": "alkove models public/alkove focus cue timbre"
   }
 }
 ```
@@ -169,8 +170,8 @@ npx alkove models ./models
 ```ts
 import { Alkove } from 'alkove'
 
-Alkove.configure({ modelDir: './models' })
+Alkove.configure({ modelBaseUrl: './models' })
 const r = await Alkove.process(wavBytes, { focus: true, cue: true })
 ```
 
-In Node, `models` also accepts `file:` URLs. Use absolute URLs rather than relative ones for `modelBaseUrl`, since there is no page to resolve them against. The engine is read from the installed package.
+In Node, `modelBaseUrl` is a folder path (relative to the working directory) or a `file:` URL; an `https:` URL downloads the models instead. `models` also accepts `file:` URLs. The engine is read from the installed package.

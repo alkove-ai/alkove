@@ -5,7 +5,7 @@ sidebar:
   order: 13
 ---
 
-Alkove is in preview: the package is `0.x` and the models end in `-preview`. This page says what you can count on today, and what can still move.
+The packages are `0.x`. Focus and Timbre are generation 1 (`alkove-focus-1`, `alkove-timbre-1`); Spot, Cue and Lex still end in `-preview`. This page says what you can count on today, and what can still move.
 
 ## What a version fixes
 
@@ -24,11 +24,11 @@ Versions follow semver, with its rule for `0.x`:
 | Patch (`0.2.0` → `0.2.1`) | Fixes, and additions that do not break code written for the previous version. The same models. |
 | Minor (`0.2` → `0.3`) | Breaking changes: to the API, the models, the defaults. |
 
-`npm install alkove` saves a `^0.4.0` range, which takes patches and stops before the next minor: a breaking version never arrives on its own. Each version is in the [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md), with what to change in your code and which models moved.
+`npm install alkove` saves a `^0.5.0` range, which takes patches and stops before the next minor: a breaking version never arrives on its own. In Python, ask for `alkove>=0.5,<0.6`. Each version is in the [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md), with what to change in your code and which models moved; [moving from 0.4 to 0.5](/docs/guides/migration/) lists it for 0.5.
 
-The npm package, the Python package, the Android library and the Swift package share the minor version: `alkove` 0.3 on the web, in Python, on Android and on iOS runs the same core and the same models, and reads the same voiceprints and words. Their patches are numbered on their own.
+The npm package, the Python package, the Android library and the Swift package share the minor version: `alkove` 0.5 on the web, in Python, on Android and on iOS runs the same core and the same models, and reads the same voiceprints and words. Their patches are numbered on their own.
 
-The integrations have versions of their own: the LiveKit and Pipecat plugins, the Wyoming server (`wyoming-alkove`) and the ESPHome component (`alkove-esphome`). Each says the range of `alkove` it runs on, such as `alkove>=0.3.2,<0.4`: a new `alkove` does not move them, and a fix to one of them moves nothing else.
+The integrations have versions of their own: the LiveKit and Pipecat plugins, the Wyoming server (`wyoming-alkove`) and the ESPHome component (`alkove-esphome`). Each says the range of `alkove` it runs on, such as `alkove>=0.5.0,<0.6`: a new `alkove` does not move them, and a fix to one of them moves nothing else.
 
 Some things move in any version, patches included. Write your code so they do not break it:
 
@@ -42,17 +42,17 @@ Two things an app stores outlive a session. Each is bound to the model that made
 
 | Stored | Bound to | When that model changes |
 |---|---|---|
-| Voiceprints (`Voiceprint.toJSON()`) | Timbre | `Voiceprint.fromJSON()` returns `null`, and an input given the old print ignores it with a `voiceprint.reset` diag. Learn it again: about 6 s of voice with `learn: true`. |
+| Voiceprints (`Voiceprint.toJSON()`) | Timbre | `Voiceprint.fromJSON()` returns `null`, and an input given the old print ignores it with a `voiceprint.reset` diag; in Python, Kotlin and Swift, comparing one throws `voiceprint.outdated`. Learn it again: about 6 s of voice on an input that learns. |
 | Compiled and enrolled words | Spot | Refused with an `AlkoveError` `word.outdated`. Compile the text again; enroll a recorded word again. |
 
-A version that keeps Timbre and Spot keeps your prints and words, whatever else changes. See [voiceprints](/docs/guides/voiceprints/#when-prints-expire) and [wake words](/docs/guides/wake-words/#saving-words).
+A version that keeps Timbre and Spot keeps your prints and words, whatever else changes. 0.5 changes Timbre and keeps Spot: prints are learned again, words stay. See [voiceprints](/docs/guides/voiceprints/#when-prints-expire) and [wake words](/docs/guides/wake-words/#saving-words).
 
 ## The models
 
-A model's name is `alkove-<model>-<generation>`, for example `alkove-focus-1-preview`.
+A model's name is `alkove-<model>-<generation>`, for example `alkove-focus-1`.
 
-- **With `-preview`**, the weights may still change under the same name. The hash tells them apart: a print or a word made with other weights is refused, as above.
-- **From generation 1 on**, one name means one set of weights. New weights get a new name.
+- **With `-preview`** (Spot, Cue and Lex today), the weights may still change under the same name. The hash tells them apart: a print or a word made with other weights is refused, as above.
+- **From generation 1 on** (Focus and Timbre, since 0.5), one name means one set of weights. New weights get a new name.
 
 Each [model page](/docs/models/) gives its benchmarks and its limits for the weights this version ships.
 
@@ -65,10 +65,9 @@ The engine is open source (Apache-2.0), in [`crates/engine`](https://github.com/
 
 ## What 1.0 waits for
 
-From 1.0, the API and the models stop moving: breaking changes wait for 2.0, and the models drop `-preview`. Before that, these must be in and measured:
+From 1.0, the API and the models stop moving: breaking changes wait for 2.0, and Spot, Cue and Lex drop `-preview`, as Focus and Timbre did in 0.5. Before that, these must be in and measured:
 
 1. **Interruptions**: telling a real interruption from a "mm-hmm" while an agent speaks, with Spot and the user's print.
 2. **End of turn**: knowing when the user is done, not just pausing.
-3. **Close voices**: Focus and Timbre telling apart two voices of the same register.
-4. **Lex in English and Portuguese**: better pronunciations in these two languages.
-5. **Diagnostics**: events for what degrades the input, such as loud noise or another voice nearby.
+3. **Lex in English and Portuguese**: better pronunciations in these two languages.
+4. **Diagnostics**: events for what degrades the input, such as loud noise or another voice nearby.

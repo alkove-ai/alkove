@@ -5,10 +5,6 @@ sidebar:
   order: 1
 ---
 
-:::caution[One person, near the microphone]
-A call input keeps one voice: the closest one, or the voice of a print. It is made for a phone, a headset or a laptop in front of the user. On a room microphone in the middle of a meeting table, it removes the other people in the room.
-:::
-
 ## The smallest call
 
 ```ts
@@ -80,6 +76,8 @@ input.on('status', (status) => { if (status === 'blocked') showResumeButton() })
 | `focus` | the closest voice |
 | `focus+print` | the voice of the print |
 
+From far, when Focus keeps removing the voice of the print, the raw microphone goes out for the rest of the call, leveled and gated as usual; the mode stays `focus+print`.
+
 The raw reasons are `loading`, `failed`, `overload`, `off` and `unsupported` ([Errors and diagnostics](/docs/guides/errors/)). `status` is about the audio context: `starting`, `running`, `blocked` (call `input.resume()` in a click), `interrupted` and `disposed` ([Phones and Safari](/docs/guides/mobile/)).
 
 ## Fallback and retries
@@ -88,26 +86,28 @@ Nothing about models, network or a slow device ever ends the call. Models that f
 
 ## Level and gate
 
-`normalize` (on by default) levels the voice: it follows speech only, aims at −23 dB, stays within +18 dB and −12 dB of gain, with a limiter at −6 dB. Set `normalize: false` to keep the microphone's level.
+The input levels the voice: it follows speech only, aims at −23 dB, stays within +18 dB and −12 dB of gain, with a limiter at −6 dB.
 
 The gate belongs to call inputs: it opens as soon as Cue hears a frame of speech, 100 ms ahead of the audio so the first syllable is kept, and closes between sentences.
 
-`speechstart` and `speechend` tell where the user speaks. Their times are in seconds on the input's clock (`input.now()`), at the moment the voice reached the microphone. `speech` tunes Cue's state machine: `confidence` (0.5), `exitConfidence` (0.1), `startSecs` (0.2) and `stopSecs` (0.6). See [`SpeechParams`](/docs/reference/interfaces/speechparams/).
+`speechstart` and `speechend` tell where the user speaks. Their times are in seconds on the input's clock (`input.now()`), at the moment the voice reached the microphone.
+
+With `onlyMyVoice: true` and a print, a phrase is told only once Timbre has heard the print's voice in it (after 0.6 s of it); another voice's phrase gives the diag `speech.other-voice` instead. The track is the same either way: the gate follows Cue. See [the agent quick start](/docs/start/agent/#only-the-users-phrases-onlymyvoice).
 
 ## Learning the user's voice
 
 ```ts
 const saved = localStorage.getItem('alkove.print')
-const input = await createCallInput({ voiceprint: saved, learn: true, farEnd: remoteTrack })
+const input = await createCallInput({ voiceprint: saved, farEnd: remoteTrack })
 input.on('learn', ({ progress }) => meter.value = progress)
 input.on('voiceprint', (p) => localStorage.setItem('alkove.print', JSON.stringify(p.toJSON())))
 ```
 
-With `learn: true`, the SDK learns the user's print while they talk, from Focus's output in windows of 1.5 s. It is ready after about 6 s of voice (`progress` reaches 1) and keeps refining afterwards. A new print is applied at the next silence, and the mode becomes `focus+print`.
+A call input learns the user's print while they talk, from Focus's output in windows of 1.5 s, starting from the `voiceprint` given if any. Focus uses it from the first window, and the mode becomes `focus+print`; the print is ready after about 6 s of voice (`progress` reaches 1) and keeps refining afterwards. Each new print applies at once.
 
-`farEnd` tells the SDK when the other side talks, so their voice never gets into the print: windows are taken only after 2 s of quiet on the far end. Give the remote track (or any `AudioNode`), or `'manual'` and call `input.farEndActive(true)` and `input.farEndActive(false)` yourself. Without `farEnd`, the input emits `learn.no-far-end`.
+`farEnd` tells the SDK when the other side talks, so their voice never gets into the print: windows are taken only after 2 s of quiet on the far end. Give the remote track (or any `AudioNode`), or call `input.farEndActive(true)` and `input.farEndActive(false)` yourself. With neither, the other side's voice can get into the print.
 
-`voiceprint` takes a `Voiceprint`, its JSON or the JSON string. A print made by another version of Timbre is ignored (`voiceprint.reset` diag) and learned again. `setVoiceprint(p)` and `forgetVoiceprint()` change it during the call. A stored print is biometric data: read [Voiceprints](/docs/guides/voiceprints/) and [Privacy](/docs/guides/privacy/).
+`voiceprint` takes a `Voiceprint`, its JSON, the JSON string, or a 16 kHz recording of the user. A print made by another version of Timbre, such as one made before 0.5, is ignored (`voiceprint.reset` diag) and learned again. `setVoiceprint(p)` and `forgetVoiceprint()` change it during the call. A stored print is biometric data: read [Voiceprints](/docs/guides/voiceprints/) and [Privacy](/docs/guides/privacy/).
 
 ## Strength, on and off
 
@@ -116,11 +116,11 @@ input.setStrength(0.7) // 70 % Focus, 30 % raw, faded over 10 ms
 await input.setEnabled(false) // mode raw, reason off
 ```
 
-`strength` (0 to 1, default 1) mixes Focus with the raw microphone. `setEnabled(false)` fades to the untouched microphone at the same delay: no Focus, no level, no gate. The models keep running, so `setEnabled(true)` is instant. `setEnabled` resolves to `true` when the models run.
+`strength` (0 to 1, default 1, also an option at creation) mixes Focus with the raw microphone. `setEnabled(false)` fades to the untouched microphone at the same delay: no Focus, no level, no gate. The models keep running, so `setEnabled(true)` is instant. `setEnabled` resolves to `true` when the models run.
 
 ## Stats, recordings and traces
 
-- `stats: true`, then `await input.stats()`: `{ speechSeconds, seconds, noiseRemovedDb }`, the noise removed being measured where Cue hears no speech.
+- `await input.stats()`: `{ speechSeconds, seconds, noiseRemovedDb }` since the models started, the noise removed being measured where Cue hears no speech.
 - `await input.record(10)`: the next 10 seconds as a stereo WAV `Blob` at 16 kHz, the microphone on the left and the output on the right, up to 600 seconds. It throws `engine.failed` before the models run.
 - `keepRecent: 20`, then `await input.recent()`: the last 20 seconds in the same format, up to 600, for a "report a problem" button.
 - `trace: true`: `trace` events with Focus's level, Cue's speech probability and Spot's scores, to plot.
@@ -140,15 +140,15 @@ spot.dispose()
 
 ## Devices and lost microphones
 
-The `mic` event reports `lost`, `reopened`, `denied`, `muted` and `unmuted`. A microphone the SDK opened is reopened when its track ends, and by default (`followDefault`, without `deviceId`) the SDK follows the system's default microphone. `input.setDevice(id)` moves to another one. The output track stays the same: nothing to redo on the peer connection. With your own stream, give a new one with `input.setStream(stream)`, or rebuild with `input.restart({ track, audioContext })`, which emits `trackchange` when the track changes.
+The `mic` event reports `lost`, `reopened`, `denied`, `muted` and `unmuted`. A microphone the SDK opened is reopened when its track ends, and without a `deviceId` the SDK follows the system's default microphone. `input.setDevice(id)` moves to another one. The output track stays the same: nothing to redo on the peer connection. With your own stream, give a new one with `input.setStream(stream)`, or rebuild with `input.restart({ track, audioContext })`, which emits `trackchange` when the track changes.
 
 ## Several inputs, one engine
 
-A page has one engine: two workers sharing one compiled WebAssembly module. Several inputs can run side by side, each with its own pipeline. Call `Alkove.configure()` before the first input, and `Alkove.preload('call', { voiceprint: true })` on a settings screen to download everything ahead.
+A page has one engine: two workers sharing one compiled WebAssembly module. Several inputs can run side by side, each with its own pipeline. Call `Alkove.configure()` before the first input, and `Alkove.preload('call')` on a settings screen to download everything ahead.
 
 ## Hidden pages and closing
 
-Chrome freezes a hidden page after about a minute without sound. Call inputs play a 30 Hz tone at −54 dBFS, which phone speakers cannot play, to stay awake; set `keepAliveWhenHidden: false` to turn it off.
+Chrome freezes a hidden page after about a minute without sound. While the tab is hidden, call inputs play a 30 Hz tone at −54 dBFS, which phone speakers cannot play, to stay awake.
 
 `input.dispose()` stops the microphone it opened, closes the context it created and frees its sessions. When no input is left, the workers close too (the background one once no call is waiting); the next input or call starts them again. It is safe to call twice. Each `on()` returns its own unsubscribe function.
 

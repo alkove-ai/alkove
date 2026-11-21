@@ -5,10 +5,6 @@ sidebar:
   order: 5
 ---
 
-:::caution[A near microphone, one person]
-Spot listens best to the person in front of the microphone: a phone, a headset, a laptop. With `onlyMyVoice`, only that person's voice wakes it.
-:::
-
 ```ts
 import { createWakeListener, Spot } from 'alkove'
 
@@ -55,7 +51,7 @@ The `context` option says when a word may wake the listener ([`Context`](/docs/r
 - `'anywhere'`: in the middle of a sentence too.
 - `'both'`: after a pause with the pause threshold, elsewhere with the stricter one.
 
-`createWakeListener` defaults to `'pause'`. `input.spot()` and `Alkove.process` default to `'anywhere'`, since they look for words inside speech.
+`createWakeListener` and an agent input's `wake` default to `'pause'`. `input.spot()` and `Alkove.process` default to `'anywhere'`, since they look for words inside speech.
 
 After a detection, the same word cannot fire again for 1 s.
 
@@ -94,9 +90,9 @@ enrollment.on('warning', (w) => ui.warn(w.code, w.message))
 const { word, voiceprint } = await enrollment.done
 ```
 
-`Spot.enroll` opens the microphone itself (it takes the same `stream`, `track`, `deviceId` and `audioContext` options as the inputs). Each speech segment becomes a [`Take`](/docs/reference/interfaces/take/): `ok` when the word was heard in it, with its score, its time and the pronunciation that won. A segment where the word was not heard counts as other speech, and other speech raises the threshold's floor: ask the user to say only the word. Change the count with `takes` (3 by default).
+`Spot.enroll` opens the microphone itself (it takes the same `stream`, `track`, `deviceId` and `audioContext` options as the inputs). Each speech segment becomes a [`Take`](/docs/reference/interfaces/take/): `ok` when the word was heard in it, with its score, its time and the pronunciation that won. A segment where the word was not heard counts as other speech, and other speech raises the threshold's floor: ask the user to say only the word. The user says it three times.
 
-`done` resolves with the word, now `calibrated`, and a voiceprint made from the takes' audio (or `null` when they are too short). Use that print for `onlyMyVoice`. `enrollment.cancel()` stops the microphone and rejects `done` with an `AbortError`.
+`done` resolves with the word, now `calibrated`, and a voiceprint made from the takes' audio (or `null` when they are too short). Give that print to the wake listener as its `voiceprint`. `enrollment.cancel()` stops the microphone and rejects `done` with an `AbortError`.
 
 The enrollment warnings come as `warning` events, along with the text warnings above, and stay on the enrolled word's `warnings`:
 
@@ -109,16 +105,16 @@ The enrollment warnings come as `warning` events, along with the text warnings a
 ## Only my voice
 
 ```ts
-const wake = await createWakeListener({ words: [word], onlyMyVoice: voiceprint })
+const wake = await createWakeListener({ words: [word], voiceprint })
 wake.on('wake', ({ word, voice }) => console.log(word, voice))
 wake.on('diag', (d) => d.code === 'wake.other-voice' && console.log('someone else said', d.word))
 ```
 
-Once Spot hears the word, Timbre compares the word plus the next 0.5 s with the print, at the `balanced` level. The `wake` event comes 0.5 s later and carries `voice`, the similarity score. Another voice gets a `wake.other-voice` diag instead. The input's mode is `spot+print`. See [voiceprints](/docs/guides/voiceprints/) to get a print.
+With a `voiceprint` (a print, or a 16 kHz recording of the user), once Spot hears the word, Timbre compares the word plus the next 0.5 s with the print, at the `balanced` level. The `wake` event comes 0.5 s later and carries `voice`, the similarity score. Another voice gets a `wake.other-voice` diag instead. The input's mode is `spot+print`. See [voiceprints](/docs/guides/voiceprints/) to get a print.
 
 ## The wake event
 
-A [`WakeEvent`](/docs/reference/interfaces/wakeevent/) holds `word` (its text), `score`, `threshold`, `context` (`'pause'` or `'anywhere'`, the one that matched), and `start` and `end` in seconds on the input's clock (`input.now()` is the same clock). On a wake listener it also carries `audio`: the word itself, 16 kHz mono, from the raw microphone. With `onlyMyVoice` it carries `voice`.
+A [`WakeEvent`](/docs/reference/interfaces/wakeevent/) holds `word` (its text), `score`, `threshold`, `context` (`'pause'` or `'anywhere'`, the one that matched), and `start` and `end` in seconds on the input's clock (`input.now()` is the same clock). On a wake listener it also carries `audio`: the word itself, 16 kHz mono, from the raw microphone. With a `voiceprint` it carries `voice`.
 
 A wake listener also emits `heard` every 300 ms, with the speech probability and each word's current score: enough for a level meter or a tuning screen.
 
@@ -146,17 +142,28 @@ spot.on('wake', (e) => console.log(e.word))
 spot.dispose() // stop listening for these words
 ```
 
-Opening a second input on the same microphone runs everything twice; the SDK warns with a `mic.twice` diag. Behind Focus with a voiceprint, only that voice is left in the audio Spot reads: that is what `input.spot(words, { onlyMyVoice: true })` relies on. On an input without a print it warns with a `spot.no-print` diag.
+Opening a second input on the same microphone runs everything twice; the SDK warns with a `mic.twice` diag. Behind Focus with a voiceprint, only that voice is left in the audio Spot reads: on an input with a print, only the user wakes it.
 
-To enroll a word for such an input, use `input.enrollWord(text, { lang, takes })`: same events and result as `Spot.enroll`, with the takes read behind Focus. Its thresholds suit Focus's output, not the raw microphone: a wake listener given such a word warns with a `word.chain` diag, through `Alkove.onDiag`.
+To enroll a word for such an input, use `input.enrollWord(text, { lang })`: same events and result as `Spot.enroll`, with the takes read behind Focus. Its thresholds suit Focus's output, not the raw microphone: a wake listener given such a word warns with a `word.chain` diag, through `Alkove.onDiag`.
+
+## A wake word in front of an agent
+
+```ts
+const agent = await createAgentInput({ wake: { words: ['Camille'], lang: 'fr' } })
+agent.on('wake', ({ word, start }) => console.log(word, start))
+```
+
+`wake` gives an agent input its own wake words, read on the raw microphone like a wake listener's, in the same worker as Focus. `words` takes typed text or phonemes between slashes (with `lang`), or compiled and enrolled words; `context` is `'pause'` by default. The `wake` events carry the word's `audio`.
+
+Each wake word also sets up the request that follows. Without a `voiceprint` on the input, the voice that said the word becomes Focus's print (diag `wake.print`), made again 4 s after the word's start from the word and the request. And the word tells whether the user is too far for Focus: when Focus's output kept 10 dB less of it than the microphone, the raw microphone passes until the next wake word (diag `wake.far`). See [the agent quick start](/docs/start/agent/#a-wake-word-in-front-of-the-agent-wake).
 
 ## After the wake
 
-To send the sentence that follows the word, read words on an agent input and keep the next `utterance`:
+To send the sentence that follows the word, keep the next `utterance` of the agent input:
 
 ```ts
 let heard: number | null = null
-spot.on('wake', ({ start }) => (heard = start))
+agent.on('wake', ({ start }) => (heard = start))
 agent.on('utterance', ({ pcm, start, end }) => {
   if (heard === null || end < heard || start > heard + 8) return
   heard = null
@@ -168,7 +175,7 @@ See [the voice agent guide](/docs/guides/voice-agent/) for the audio formats.
 
 ## Load ahead
 
-A wake word needs Spot; typed words need Lex too; `onlyMyVoice` and enrollment need Timbre. Download and compile them on a settings screen:
+A wake word needs Spot; typed words need Lex too; a `voiceprint` and enrollment need Timbre. Download and compile them on a settings screen:
 
 ```ts
 import { Alkove } from 'alkove'

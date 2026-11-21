@@ -50,8 +50,8 @@ What each use downloads (brotli):
 
 | Use | Download |
 |---|---|
-| call or agent | Focus 0.9 MB + Cue 0.9 MB, + Timbre 0.7 MB with a voiceprint |
-| wake word | Spot 2.5 MB, + Lex 1.5 MB for a typed word |
+| call or agent | Focus 1.8 MB + Cue 1.0 MB + Timbre 0.8 MB |
+| wake word | Spot 2.5 MB, + Lex 1.5 MB for a typed word, + Timbre 0.8 MB with a `voiceprint` |
 | engine, for every use | 141 KB |
 
 ## Configure before the first input
@@ -73,12 +73,11 @@ The first input downloads and compiles what it needs, so its first seconds go ou
 
 ```ts
 await Alkove.preload('call', {
-  voiceprint: true, // also Timbre
-  onProgress: ({ loaded, total }) => bar.set(loaded / total),
+  onProgress: ({ loaded, total }) => bar.set(loaded / total), // Focus, Cue and Timbre
 })
 ```
 
-The usage is `'call'`, `'agent'` or `'wake'`. Add `voiceprint: true` if you use a print, and `typedWords: true` for a wake word you compile from text (Lex).
+The usage is `'call'`, `'agent'` or `'wake'`. A call or an agent brings Focus, Cue and Timbre. For a wake listener, add `voiceprint: true` for its `voiceprint` (Timbre), and `typedWords: true` for a word you compile from text (Lex).
 
 `Alkove.cached()` takes the same arguments and resolves to `true` when every file is already in the cache, so the app can start offline:
 
@@ -109,7 +108,7 @@ npx alkove models ./models
 ```ts
 import { Alkove } from 'alkove'
 
-Alkove.configure({ modelDir: './models' })
+Alkove.configure({ modelBaseUrl: './models' }) // a folder, or a file: URL
 ```
 
 In Node only WAV files are decoded. For other formats, decode them yourself and pass `{ pcm, rate }`. See [Files](/docs/start/files/).

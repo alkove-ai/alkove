@@ -5,10 +5,6 @@ sidebar:
   order: 2
 ---
 
-:::caution[One person, near the microphone]
-An agent input keeps one voice: the closest one, or the voice of a print. It is made for a phone, a headset or a laptop in front of the user, not for a microphone in the middle of a room.
-:::
-
 ## The smallest agent
 
 ```ts
@@ -21,7 +17,7 @@ input.on('speechstart', () => agent.interrupt())
 
 An agent input runs the same models as a call input (Focus, then Cue) but hands you PCM instead of a track. Nothing is cut: there is no gate, `audio` flows the whole time, and `speechstart` and `speechend` tell you where the user speaks.
 
-Every option is in the reference: [`AgentOptions`](/docs/reference/interfaces/agentoptions/) and [`AgentInput`](/docs/reference/interfaces/agentinput/). The microphone, `stream`, `audioContext`, `deviceId`, `signal`, `normalize`, `speech`, `strength`, `stats`, `record()` and the device handling work as on a call: see [Calls over WebRTC](/docs/guides/webrtc/).
+Every option is in the reference: [`AgentOptions`](/docs/reference/interfaces/agentoptions/) and [`AgentInput`](/docs/reference/interfaces/agentinput/). The microphone, `stream`, `audioContext`, `deviceId`, `signal`, `stats()`, `record()` and the device handling work as on a call: see [Calls over WebRTC](/docs/guides/webrtc/).
 
 ## `audio` or `utterance`
 
@@ -39,9 +35,9 @@ input.on('utterance', async ({ pcm, start, end }) => {
 
 - `audio`: an `ArrayBuffer` every `chunkMs` (32 ms by default), whatever is said.
 - `utterance`: one per sentence, sent when Cue closes it, with 300 ms of audio before the speech started so the first syllable is there. `start` and `end` are in seconds on the input's clock (`input.now()`); `start` includes the pre-roll.
-- `speechstart` arrives once speech is confirmed (0.2 s of it by default) and is dated from its first frame. `speechend` arrives after 0.6 s of silence. Tune both with `speech: { startSecs, stopSecs }`.
+- `speechstart` arrives once speech is confirmed (0.2 s of it) and is dated from its first frame. `speechend` arrives after 0.6 s of silence.
 
-Both outputs come from the same processed audio, leveled by default (`normalize`).
+Both outputs come from the same processed audio, leveled on speech.
 
 ## Format, rate and packet size
 
@@ -73,7 +69,7 @@ On that port you receive `{ type: 'audio', pcm }` and `{ type: 'utterance', pcm,
 
 ## A track as well
 
-`withTrack: true` also gives `input.track`, for a recorder or a WebRTC transport. Without it, `track` is `null`.
+`input.track` gives the processed audio as a track too, for a recorder or a WebRTC transport: the input makes it the first time you read it.
 
 ## While the models are not running
 
@@ -88,28 +84,28 @@ See [Errors and diagnostics](/docs/guides/errors/) for every reason and the retr
 ## The agent's own voice
 
 ```ts
-const input = await createAgentInput({ farEnd: 'manual', learn: true })
+const input = await createAgentInput()
 player.onplay = () => input.farEndActive(true)
 player.onended = () => input.farEndActive(false)
 ```
 
-`farEnd` tells the SDK when the agent talks: an `AudioNode` or a `MediaStreamTrack` that plays the agent's voice, or `'manual'` with `input.farEndActive()`. Its job is to keep the agent's voice out of the user's print: the print learns only after 2 s without the agent. `learn: true` without `farEnd` throws a `TypeError`.
+`input.farEndActive()` tells the SDK when the agent talks; `farEnd`, an `AudioNode` or a `MediaStreamTrack` that plays the agent's voice, lets it hear that by itself. From then on the input learns the user's print, and keeps the agent's voice out of it: the print learns only after 2 s without the agent. Without either, nothing is learned.
 
 Played through speakers, the agent's voice comes back into the microphone. The SDK opens the microphone with the browser's echo cancellation on for that reason; keep it on if you pass your own stream.
 
 ## Barge-in
 
-Alkove does not stop your text-to-speech: it tells you when to. With `farEnd`, speech over the agent comes in three steps, so a "mm" does not cut it:
+Alkove does not stop your text-to-speech: it tells you when to. Once it knows when the agent talks, speech over the agent comes in three steps, so a "mm" does not cut it:
 
 ```ts
 input.on('interruptstart', () => player.duck()) // the user starts talking over the agent
-input.on('interrupt', () => player.stop()) // the speech spans `interrupt.minDuration`, 0.7 s by default
+input.on('interrupt', () => player.stop()) // the speech spans 0.7 s
 input.on('interruptcancel', () => player.unduck()) // it stopped before: a backchannel
 ```
 
 Lowering the agent's volume at once costs little if it was a "mm", and the user hears that the agent listens. See [When the user cuts in](/docs/start/agent/#when-the-user-cuts-in-interrupt).
 
-With a print (`voiceprint`, or `learn` once ready), Focus keeps only the user's voice, so another person near the phone does not interrupt the agent.
+With a print (`voiceprint`, learned, or from a wake word), Focus keeps only the user's voice, so another person near the phone does not interrupt the agent. `onlyMyVoice: true` goes one step further: a phrase interrupts, or ends a turn, only once Timbre has heard the print's voice in it. See [only the user's phrases](/docs/start/agent/#only-the-users-phrases-onlymyvoice).
 
 Without a print, `near: true` keeps a voice far under the user's from interrupting: it never fires `speechstart`. It goes by loudness, so it keeps out a colleague across the room or a video on another device, not someone beside the user. See [Voices far from the microphone](/docs/start/agent/#voices-far-from-the-microphone-near).
 
@@ -124,12 +120,11 @@ input.on('turnend', () => llm.respond(transcript.take()))
 ## A wake word, then the sentence
 
 ```ts
-import { createAgentInput, Spot } from 'alkove'
+import { createAgentInput } from 'alkove'
 
-const word = await Spot.compile('Nova', { lang: 'en' })
-const agent = await createAgentInput()
+const agent = await createAgentInput({ wake: { words: ['Nova'], lang: 'en' } })
 let heard: number | null = null
-agent.spot([word], { context: 'pause' }).on('wake', ({ start }) => (heard = start))
+agent.on('wake', ({ start }) => (heard = start))
 agent.on('utterance', ({ pcm, start, end }) => {
   if (heard === null || end < heard || start > heard + 8) return
   heard = null
@@ -137,19 +132,21 @@ agent.on('utterance', ({ pcm, start, end }) => {
 })
 ```
 
-`agent.spot()` reads Focus's output in the same worker, so one microphone feeds both. You can call it right after creation: the words are sent once the models run. The `wake` option of `createAgentInput` is reserved for a later version and throws a `TypeError` today. More on words, contexts and thresholds in [Wake words](/docs/guides/wake-words/).
+`wake` hears the words on the raw microphone, after a pause by default, in the same worker as Focus. Each wake word gives Focus the voice that said it (unless the input has a `voiceprint`), and decides whether the user is too far for Focus, in which case the raw microphone passes for the request (diag `wake.far`). See [a wake word in front of the agent](/docs/start/agent/#a-wake-word-in-front-of-the-agent-wake).
+
+For words inside the conversation, `agent.spot([word])` reads Focus's output instead. You can call it right after creation: the words are sent once the models run. More on words, contexts and thresholds in [Wake words](/docs/guides/wake-words/).
 
 ## Enrolling a word on the agent input
 
 ```ts
-const enrollment = agent.enrollWord('Nova', { lang: 'en', takes: 3 })
+const enrollment = agent.enrollWord('Nova', { lang: 'en' })
 enrollment.on('take', (take) => showTake(take))
 enrollment.on('warning', (w) => console.warn(w.code, w.message))
 const { word, voiceprint } = await enrollment.done
 agent.spot([word])
 ```
 
-The user says the word `takes` times (3 by default). Spot reads the takes behind Focus, so the word's thresholds fit Focus's output; use such a word with `agent.spot()` or `call.spot()`, not with a wake listener on the raw microphone. `enrollment.cancel()` stops it. See [`Enrollment`](/docs/reference/interfaces/enrollment/).
+The user says the word three times. Spot reads the takes behind Focus, so the word's thresholds fit Focus's output; use such a word with `agent.spot()` or `call.spot()`, not with a wake listener on the raw microphone. `enrollment.cancel()` stops it. See [`Enrollment`](/docs/reference/interfaces/enrollment/).
 
 ## Closing
 

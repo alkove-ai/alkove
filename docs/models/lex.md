@@ -70,7 +70,7 @@ Phonemes outside the inventory are refused.
 
 ### Text that Lex reads poorly
 
-Before Lex, the text is put as it is said, in the word's language: numbers (cardinals, decimals, negatives, the ordinals written with their mark), times, percentages, currencies (€, $, £), common units (km, kg, °C, km/h…) and common abbreviations (« M. », « Dr. », « z.B. »…). « 14h30 » is read « quatorze heures trente », « 2 h » « dwie godziny » in Polish.
+Before Lex, the text is put as it is said, in the word's language: numbers (cardinals, decimals, negatives, the ordinals written with their mark), times, percentages, currencies (€, $, £), common units (km, kg, °C, km/h…) and common abbreviations (« M. », « Dr. », « Sr. »…). « 14h30 » is read « quatorze heures trente », « 2 h » « deux heures ».
 
 When it compiles a word, the SDK warns about text that will not be read the way you expect. The warnings are on `word.warnings`:
 

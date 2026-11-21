@@ -32,8 +32,8 @@ Cue runs behind Focus in every [call](/docs/start/call/) and [agent](/docs/start
 | `speechend` | Speech has stopped. `start` and `end` in seconds. |
 | `turn` | An agent input, every 0.1 s of a pause: `probability` that the turn ends here, `hesitation` that it ends on a hesitation. |
 | `turnend` | An agent input: the user's turn is over. `start`, `end`, `probability`, `hesitation`, `at`. |
-| `interruptstart` | An agent input with `farEnd`: speech starts while the agent talks. `start`. |
-| `interrupt` | That speech spans `minDuration` (0.7 s, short gaps included): a real interruption, stop the agent. `start`, `at`. |
+| `interruptstart` | An agent input that knows when the agent talks (`farEnd` or `farEndActive()`): speech starts while the agent talks. `start`. |
+| `interrupt` | That speech spans 0.7 s, short gaps included: a real interruption, stop the agent. `start`, `at`. |
 | `interruptcancel` | It stopped before: a "mm" or a "yeah", the agent goes on. `start`, `end`. See [When the user cuts in](/docs/start/agent/#when-the-user-cuts-in-interrupt). |
 
 What the recipes do with it:
@@ -45,12 +45,10 @@ Times are measured on the input audio: the delay of Focus and Cue is already tak
 
 ### Tuning the decision
 
-The default decision: speech starts when the probability reaches 0.5 and holds for 0.2 s, and ends once it has stayed under 0.1 for 0.6 s. Change it with the `speech` option of an input:
+The default decision: speech starts when the probability reaches 0.5 and holds for 0.2 s, and ends once it has stayed under 0.1 for 0.6 s. The inputs run with it; when an agent answers is the end of turn head's call, set with `turn` (see [When the user is done](/docs/start/agent/#when-the-user-is-done-turnend)). On a file, `cue` takes other values:
 
 ```ts
-const input = await createAgentInput({
-  speech: { stopSecs: 0.8 }, // wait longer before ending a turn
-})
+const { speech } = await Alkove.process(file, { cue: { stopSecs: 0.8 } }) // join phrases split by short pauses
 ```
 
 | Field | Default | Meaning |
@@ -60,7 +58,7 @@ const input = await createAgentInput({
 | `startSecs` | 0.2 | how long speech must last to be confirmed |
 | `stopSecs` | 0.6 | how long it must stay under `exitConfidence` to end |
 
-These defaults are tuned behind Focus. Lower `stopSecs` for snappier turns, raise it if users get cut off while they pause to think.
+These defaults are tuned behind Focus. Lower `stopSecs` to split on shorter pauses, raise it to join them.
 
 ### Files
 
@@ -88,7 +86,9 @@ With `focus`, Cue runs on the cleaned audio, as in a live input. With `cue` alon
 
 ## Benchmarks
 
-24 test streams of one minute, run behind alkove-focus. In each one, a voice between -45 and -25 dBFS speaks over noise or music, and another voice speaks alone in 40 % of the gaps. Cue uses the default decision above; Silero VAD v6 (MIT) uses 0.65 / 0.5, on the same streams.
+Where Focus runs in front of Cue below, it is alkove-focus-1-preview, the Focus of Alkove 0.4: these figures were measured before 0.5, and Cue is the same file in 0.5.
+
+24 test streams of one minute, run behind alkove-focus-1-preview. In each one, a voice between -45 and -25 dBFS speaks over noise or music, and another voice speaks alone in 40 % of the gaps. Cue uses the default decision above; Silero VAD v6 (MIT) uses 0.65 / 0.5, on the same streams.
 
 | | Cue | Silero VAD v6 |
 |---|---|---|
@@ -97,7 +97,7 @@ With `focus`, Cue runs on the cleaned audio, as in a live input. With `cue` alon
 | Open during the speaker's silences | 6.4 % | 5.9 % |
 | Speech onset | 10 ms after Silero | |
 
-Alone behind alkove-focus: no false start on noise for either; 0.1 false start per minute on music (Silero 0.4); open 50 % of the time on TV voices (Silero 81 %).
+Alone behind alkove-focus-1-preview: no false start on noise for either; 0.1 false start per minute on music (Silero 0.4); open 50 % of the time on TV voices (Silero 81 %).
 
 Speech from Common Voice French dev (CC0) and LibriTTS-R dev-clean (CC BY 4.0); noise and music from MUSAN (CC BY 4.0).
 
@@ -113,7 +113,7 @@ The agent input reads the end of turn head every 0.1 s of each pause and gives `
 | LiveKit turn detector v1 (LiveKit Cloud) | 14.2 % | 6.0 % | 400 ms |
 | Silence alone | 55.6 % | 20.2 % | 871 ms |
 
-The same turns through the SDK's chain, Focus then Cue, as an agent input decides them; a turn is cut off when the user still had words to say:
+The same turns through the SDK's chain, alkove-focus-1-preview then Cue, as an agent input decides them; a turn is cut off when the user still had words to say:
 
 | | Turns cut off | Median latency | 90th percentile |
 |---|---|---|---|
@@ -127,7 +127,7 @@ At the same share of turns cut off, Cue answers about 250 ms sooner than a silen
 ## Limitations
 
 - 16 kHz only.
-- It reacts to any voice: behind alkove-focus with a print, the other voices are already gone.
+- It reacts to any voice: behind Focus with a print, the other voices are already gone, and `onlyMyVoice` tells only the phrases in the print's voice.
 
 Out of scope: telling who is speaking (use Focus with a print first), the end of a turn from the meaning of the words (the end of turn head hears the voice, not the words), and detecting sounds other than speech.
 

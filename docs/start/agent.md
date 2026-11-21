@@ -5,10 +5,6 @@ sidebar:
   order: 3
 ---
 
-:::caution[A near microphone, one person]
-The agent input keeps one voice: the person in front of the microphone. It is made for a phone, a headset or a laptop, not for a microphone in the middle of a room.
-:::
-
 ```ts
 import { createAgentInput } from 'alkove'
 
@@ -35,7 +31,7 @@ input.on('speechstart', ({ start }) => ui.listening(true))
 input.on('speechend', ({ start, end }) => ui.listening(false))
 ```
 
-Times are in seconds from the start of the input. Tune how fast speech opens and closes with `speech` (`startSecs`, `stopSecs`, `confidence`, `exitConfidence`); see [`SpeechParams`](/docs/reference/interfaces/speechparams/).
+Times are in seconds from the start of the input.
 
 ## When the user is done: `turnend`
 
@@ -52,11 +48,11 @@ Cue has a second head that hears the end of a turn in the voice: a finished sent
 | `minPause` | 0.3 s | no turn ends on a shorter pause |
 | `maxPause` | 1.5 s | the turn ends after this much silence anyway |
 
-`turn: false` turns them off. The head listens to the sound, not to the words: it does not know that "my number is" asks for more.
+The head listens to the sound, not to the words: it does not know that "my number is" asks for more.
 
 ## When the user cuts in: `interrupt`
 
-With `farEnd`, speech that starts while your agent talks comes in three steps:
+Once the SDK knows when your agent talks (`farEnd` or `farEndActive()`, [below](#your-agents-voice-farend)), speech that starts while it talks comes in three steps:
 
 ```ts
 input.on('interruptstart', () => (player.volume = 0.3)) // the user talks over the agent: lower it
@@ -64,7 +60,7 @@ input.on('interrupt', () => player.stop()) // speech spanning 0.7 s: a real inte
 input.on('interruptcancel', () => (player.volume = 1)) // it stopped before: "mm", "yeah", the agent goes on
 ```
 
-`interrupt: { minDuration: 0.7 }` sets how long the speech must span to stop the agent, its short gaps included (two "mm" half a second apart count as one): most "mm" and "yeah" are shorter. A backchannel is not a turn of its own: it gives no `turnend`. `interrupt: false` turns them off. Without `farEnd`, the SDK cannot know the agent talks, and none of them come.
+`interrupt` comes once the speech spans 0.7 s, its short gaps included (two "mm" half a second apart count as one): most "mm" and "yeah" are shorter. A backchannel is not a turn of its own: it gives no `turnend`. Until the SDK knows when the agent talks, none of them come.
 
 ## Voices far from the microphone: `near`
 
@@ -77,11 +73,24 @@ Without a voiceprint, Focus keeps the closest voice. When the user is silent, th
 
 - The session's voice is learned from its phrases: the median of the last ones within the gap of the loudest. Until it has heard two phrases, nothing is far.
 - A far voice right after the user ends the phrase on the user's last near frame. The user right after a far voice starts a phrase where their voice comes near.
-- `near: { gapDb: 12 }` lets more through, `8` keeps more out. The quiet phrases a person says, a "yeah" or an aside, are the first ones a smaller gap takes.
 - A gain control that follows the voice brings a far voice back up. The SDK opens the microphone without the browser's (`autoGainControl: false`): do the same if you pass your own stream.
-- It cannot tell apart two voices at the same distance, or a loud speaker beside the microphone. That takes a voiceprint.
+- It cannot tell apart two voices at the same distance, or a loud speaker beside the microphone. That takes a voiceprint, and `onlyMyVoice` below.
 
-`levels: true`, implied by `near`, gives each phrase its `level` on `speechend` and `utterance`: `voiceDb`, Focus's output before the leveling (`null` for a held phrase where no near voice was heard); `noiseDb`, the microphone's noise floor; `refDb`, the session's voice, `null` until it is known. They are dBFS: compare them within a session, not between devices.
+Every phrase, with or without `near`, carries its `level` on `speechend` and `utterance`: `voiceDb`, Focus's output before the leveling (`null` for a held phrase where no near voice was heard); `noiseDb`, the microphone's noise floor; `refDb`, the session's voice, `null` until it is known. They are dBFS: compare them within a session, not between devices.
+
+## Only the user's phrases: `onlyMyVoice`
+
+```ts
+const input = await createAgentInput({ voiceprint: saved, onlyMyVoice: true })
+input.on('diag', (d) => d.code === 'speech.other-voice' && console.log('not the user', d.voice))
+```
+
+With a print, Focus already keeps only the user's voice. `onlyMyVoice: true` also makes sure every phrase the app hears is theirs: a phrase is told, and can end a turn or interrupt the agent, only once Timbre has heard the print's voice in it.
+
+- Timbre checks a phrase once 0.6 s of it was heard, so `speechstart` and the phrase's other events come then, with their own times. A phrase that ends sooner is checked at its end; one under 0.3 s passes as it is.
+- Another voice's phrase gives no `speechstart`, `utterance` or `turnend`, but a diag `speech.other-voice` with its `start` and `voice`, its likeness to the print. For the user's turn it counts as a pause.
+- A phrase told, then heard whole at its next pause, that turns out to be another voice's comes as `speechcancel` and the same diag.
+- It checks against the input's `voiceprint`, or the print the input learns once it is ready ([below](#your-agents-voice-farend)), or else the voice of the last wake word (`wake`). Until there is one, phrases pass as they are.
 
 ## Mute and hold to talk
 
@@ -98,25 +107,42 @@ talk.onpointerup = () => input.release() // its utterance, once Focus has given 
 
 ## Your agent's voice: `farEnd`
 
-When your agent talks through the speakers, tell the SDK, so that its voice never teaches the user's voiceprint:
+When your agent talks through the speakers, tell the SDK:
 
 ```ts
-const input = await createAgentInput({ learn: true, farEnd: 'manual' })
+const input = await createAgentInput()
 tts.onstart = () => input.farEndActive(true)
 tts.onend = () => input.farEndActive(false)
 ```
 
-`farEnd` can also be the `MediaStreamTrack` or the `AudioNode` that plays your agent's voice; the SDK then hears it by itself. `learn` requires `farEnd`: without it, `createAgentInput` throws. Echo cancellation comes from the browser: when the SDK opens the microphone, it asks for it.
+`farEnd` can instead be the `MediaStreamTrack` or the `AudioNode` that plays your agent's voice; the SDK then hears it by itself. Echo cancellation comes from the browser: when the SDK opens the microphone, it asks for it.
 
-With `learn: true`, the print is learned while the user talks (about 6 s of their voice), then Focus keeps only them, even if someone louder walks by. Store the print from the `voiceprint` event and pass it back as `voiceprint` next time. See [Voiceprints](/docs/guides/voiceprints/).
+Once the SDK knows when the agent talks (`farEnd` given, or the first `farEndActive()` call), the input learns the user's print while the user talks, never while the agent does; before that it learns nothing, since the agent's own voice would teach the print. Focus takes the user's voice from their first 1.5 s of speech and keeps only them, even if someone louder walks by, and the print is ready after about 6 s of it. A `voiceprint` given is where learning starts. Store the print from the `voiceprint` event and pass it back as `voiceprint` next time. See [Voiceprints](/docs/guides/voiceprints/).
+
+With a print, Timbre also watches for a user far from the microphone: when Focus keeps removing the voice of the print, the raw microphone passes for the rest of the session.
 
 ## A track as well
 
-The agent input has no output track by default. Pass `withTrack: true` to also get `input.track`, for example to record what the agent heard or to send it over WebRTC.
+The agent input makes its output track the first time you read `input.track`, for example to record what the agent heard or to send it over WebRTC.
+
+## A wake word in front of the agent: `wake`
+
+```ts
+const input = await createAgentInput({ wake: { words: ['Hey Nova'], lang: 'en' } })
+input.on('wake', ({ word, start }) => openRequestAt(start))
+input.on('diag', (d) => d.code === 'wake.far' && console.log('far:', d.far, d.gapDb))
+```
+
+Spot listens for the words on the raw microphone, after a pause by default (`context: 'pause'`). A typed word needs `lang` (one language or several) and is compiled when the input starts; a compiled word or its JSON needs none. Each `wake` event carries the word's `audio`, as on a wake listener, and each wake word sets up the request that follows:
+
+- **Whose voice.** Without a `voiceprint`, the voice that said the word becomes Focus's print, made again 4 s after the word's start from the word and the request (diag `wake.print`). The next wake word makes it anew, and its audio starts Focus's sample.
+- **Near or far.** Focus's output is compared with the microphone over the word. When Focus kept 10 dB less of the word than the microphone, the user is too far for Focus, and the raw microphone passes until the next wake word (diag `wake.far`, with `far` and `gapDb`).
+
+`wake` reads the raw microphone, before Focus: a user too far for Focus still wakes the agent. To listen for words inside the conversation, behind Focus, use `input.spot()`.
 
 ## Listen for a word on the same microphone
 
-A wake word in front of an agent does not need a second input. `input.spot()` reads Focus's output in the same worker:
+Words behind Focus do not need a second input either. `input.spot()` reads Focus's output in the same worker:
 
 ```ts
 const word = await Spot.compile('Hey Nova', { lang: 'en' })

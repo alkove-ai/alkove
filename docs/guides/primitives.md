@@ -31,7 +31,7 @@ The options ([`ProcessOptions`](/docs/reference/interfaces/processoptions/)):
 - `focus`: `true`, or `{ voiceprint, strength }`.
 - `cue`: `true`, or speech parameters (see below).
 - `spot`: `{ words, context }`.
-- `normalize`: level the output on speech (`false` by default here; the inputs default to `true`).
+- `normalize`: level the output on speech (`false` by default here; the inputs always do).
 - `trace`: per-step rows, see the end of this page.
 - `onProgress` and `signal`: progress and cancellation.
 
@@ -61,10 +61,10 @@ await Alkove.process(file, { focus: { voiceprint: print, strength: 0.8 } })
 ```
 
 - Without a print, Focus keeps the closest voice, and stays on it: its state carries over the whole stream, pauses included.
-- With a print, it keeps only that voice. See [voiceprints](/docs/guides/voiceprints/).
+- With a print, it keeps only that voice, even while another voice talks at the same time. A few seconds of that person alone at 16 kHz given as the `voiceprint` tell Focus their voice from the start; from a print alone, Focus takes its own sample from the recording, where Timbre hears the print's voice clearly. See [voiceprints](/docs/guides/voiceprints/).
 - `strength` mixes Focus with the input: 1 (the default) is Focus alone, 0 the input alone.
 
-With `focus` on, Cue runs too: speech segments come with it.
+With `focus` on, Cue and Timbre run too: speech segments come with it.
 
 The `diag` list reports `focus.print` (a print taken, with why).
 
@@ -76,7 +76,7 @@ Cue gives the probability that someone speaks, every 30 ms (480 samples). A smal
 const r = await Alkove.process(file, { cue: { stopSecs: 0.9 } })
 ```
 
-The speech parameters ([`SpeechParams`](/docs/reference/interfaces/speechparams/)), the same as the inputs' `speech` option:
+The speech parameters ([`SpeechParams`](/docs/reference/interfaces/speechparams/)), the ones the inputs run with by default:
 
 | Field | Default | |
 |---|---|---|
@@ -109,7 +109,7 @@ timbre.verify(a, b) // { same, score }
 await timbre.identify(pcmC, { a, b }) // { who, score } or null
 ```
 
-`embed` makes a [`Voiceprint`](/docs/reference/classes/voiceprint/) from 16 kHz speech (at least 280 samples; 1.5 s or more advised). `verify` and `identify` take a `level`. All of it is in [voiceprints](/docs/guides/voiceprints/).
+`embed` makes a [`Voiceprint`](/docs/reference/classes/voiceprint/) from 16 kHz speech (at least 1,400 samples, 88 ms; 1.5 s or more advised). `verify` and `identify` take a `level`. All of it is in [voiceprints](/docs/guides/voiceprints/).
 
 ## Lex
 
@@ -145,7 +145,7 @@ Plot them to see why a word did not fire or where Focus cut. The real-time input
 Each primitive downloads its model the first time. To do it on a settings screen instead:
 
 ```ts
-await Alkove.preload('call') // Focus and Cue
+await Alkove.preload('call') // Focus, Cue and Timbre
 await Alkove.preload('wake', { typedWords: true, voiceprint: true }) // Spot, Lex, Timbre
 await Alkove.cached('call') // true when everything is here: works offline
 ```

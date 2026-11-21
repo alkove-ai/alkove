@@ -45,7 +45,7 @@ A compiled word is plain JSON: store it, ship it with your app, compile it on a 
 Every word has two thresholds, one for anywhere in speech and a lower one for after a pause. Where they come from:
 
 - **Compiled** (`Spot.compile`): a default per language, set from typed words on the published Spot. Good enough to try any word right away.
-- **Enrolled** (`Spot.enroll`): the user says the word a few times (3 by default), and the thresholds are set from these takes and from what is heard between them. The word is then tuned to their voice and their microphone.
+- **Enrolled** (`Spot.enroll`): the user says the word three times, and the thresholds are set from these takes and from what is heard between them. The word is then tuned to their voice and their microphone.
 
 ```ts
 const enrollment = Spot.enroll('Camille', { lang: 'fr' })
@@ -53,7 +53,7 @@ enrollment.on('take', (take) => showTake(take))
 const { word, voiceprint } = await enrollment.done
 ```
 
-Enrolling also gives a voiceprint of the user, ready for `onlyMyVoice`. See [Wake words](/docs/guides/wake-words/).
+Enrolling also gives a voiceprint of the user, ready for a wake listener's `voiceprint`. See [Wake words](/docs/guides/wake-words/).
 
 ## Where a word counts
 
@@ -72,10 +72,11 @@ Each `wake` event says which one fired (`context: 'pause'` or `'anywhere'`), wit
 | API | Spot reads | Default `context` |
 |---|---|---|
 | [`createWakeListener({ words })`](/docs/start/wake-word/) | the raw microphone | `'pause'` |
+| [`createAgentInput({ wake: { words } })`](/docs/start/agent/#a-wake-word-in-front-of-the-agent-wake) | the raw microphone, beside Focus | `'pause'` |
 | `input.spot(words)` on a call or agent input | Focus's output, in the same worker | `'anywhere'` |
 | `Alkove.process(file, { spot: { words } })` | Focus's output with `focus`, the raw audio without | `'anywhere'` |
 
-A wake listener runs Spot alone, the lightest way to listen all day. With `onlyMyVoice: print`, a detection counts only if [Timbre](/docs/models/timbre/) recognizes the user's voice in the word.
+A wake listener runs Spot alone, the lightest way to listen all day. With a `voiceprint`, a detection counts only if [Timbre](/docs/models/timbre/) recognizes the user's voice in the word.
 
 On a call or agent input, `input.spot()` reads the cleaned audio: no second microphone, no second Focus, and with a print the other voices are already gone. A word enrolled on the raw microphone keeps thresholds measured there; to listen behind Focus, enroll it on the input with `input.enrollWord()`.
 

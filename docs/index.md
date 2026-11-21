@@ -16,10 +16,7 @@ pc.addTrack(input.track) // only the user's voice goes out
 
 ## Read this first
 
-:::caution[A near microphone, one person]
-Alkove is made for **a microphone close to one person**: a phone, a headset, a laptop in front of you. It keeps the closest voice (or the voice of a print) and removes the others. On a room microphone in the middle of a meeting table, it removes the other participants too.
-:::
-
+- **One voice: the user's.** Focus keeps the voice of the user's print (given by the app, learned while they talk, or taken from a wake word) and removes noise, music and every other voice, even one talking at the same time. Without a print, it keeps the closest voice.
 - **16 kHz voice.** The models work at 16 kHz. The output track runs at the rate of your `AudioContext` (usually 48 kHz), but it carries speech up to 8 kHz: HD voice, not full band.
 - **Latency.** A call input adds about 150 ms, of which 100 ms is the gate opening ahead of each sentence. An agent input, without a gate, adds about 50 ms. `input.latency` gives the real figure, in milliseconds, updated as it moves.
 - **It never leaves you without sound.** When the models are still loading, fail to load or the device is too slow, the raw microphone goes out at the same delay and the SDK tries again. `input.mode` tells you which path is live and why.
@@ -28,11 +25,11 @@ Alkove is made for **a microphone close to one person**: a phone, a headset, a l
 
 | Model | What it does | Used by |
 |---|---|---|
-| [Focus](/docs/models/focus/) | Keeps the closest voice, or one person's voice given their print, and removes noise, music and other voices | call and agent inputs, `Alkove.process` |
+| [Focus](/docs/models/focus/) | Keeps its user's voice, from their print and a few seconds of their voice, or the closest voice without a print, and removes noise, music and other voices | call and agent inputs, `Alkove.process` |
 | [Cue](/docs/models/cue/) | Tells when someone speaks, every 30 ms | call and agent inputs (speech events, gate, utterances) |
 | [Spot](/docs/models/spot/) | Hears any word you type, in 7 languages, with no training | wake listener, `input.spot()` |
 | [Lex](/docs/models/lex/) | Turns a written word into its likely pronunciations | `Spot.compile` for typed words |
-| [Timbre](/docs/models/timbre/) | Makes voiceprints and compares them | `learn`, `onlyMyVoice`, `Timbre` |
+| [Timbre](/docs/models/timbre/) | Makes voiceprints and compares them; tells Focus where its user's voice is | with Focus, learning, `onlyMyVoice`, `wake`, `Timbre` |
 
 The models are not in the npm package. They are downloaded once, checked by sha256 and cached; you can [host them yourself](/docs/guides/self-hosting/). See the [model pages](/docs/models/) for what each one can and cannot do.
 
@@ -44,7 +41,7 @@ Each use has one function. Start from the one that matches your app.
 |---|---|---|
 | A call between people (WebRTC) | `createCallInput` | [A call](/docs/start/call/) |
 | A voice agent (speech to text, LLM) | `createAgentInput` | [A voice agent](/docs/start/agent/) |
-| A wake word, or commands | `createWakeListener` and `Spot` | [A wake word](/docs/start/wake-word/) |
+| A wake word, or commands | `createWakeListener` and `Spot`, or `wake` on an agent input | [A wake word](/docs/start/wake-word/) |
 | Processing recordings | `Alkove.process`, `Alkove.stream` | [Files](/docs/start/files/) |
 | Your own pipeline | `Timbre`, `Lex`, `Spot`, `Voiceprint` | [Primitives](/docs/guides/primitives/) |
 | A voice agent on a server | `pip install alkove`, or a plugin | [Python](/docs/start/python/), [LiveKit Agents](/docs/guides/livekit/), [Pipecat](/docs/guides/pipecat/) |
@@ -57,7 +54,7 @@ A call or agent input can also listen for words behind Focus with `input.spot()`
 ## How it runs
 
 - An AudioWorklet resamples the microphone to 16 kHz and keeps a short queue. It never runs a model.
-- A real-time worker runs Focus, Cue and Spot frame by frame. A background worker runs Timbre and Lex. Both share one compiled engine, and there is one engine per page whatever the number of inputs.
+- A real-time worker runs Focus, Cue and Spot frame by frame, and the Timbre that reads the microphone beside Focus. A background worker learns and checks prints with Timbre, and runs Lex. Both share one compiled engine, and there is one engine per page whatever the number of inputs.
 - The audio path never goes through your main thread. Only what you ask for comes back to it: events, and the PCM of an agent input.
 - The engine is Alkove's own (141 KB), bundled in the package: the same result to the bit in every browser. It needs WebAssembly SIMD but no special headers: no COOP / COEP, no `SharedArrayBuffer`.
 

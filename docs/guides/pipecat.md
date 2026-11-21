@@ -5,10 +5,6 @@ sidebar:
   order: 4
 ---
 
-:::caution[One person, near the microphone]
-Focus keeps one voice: the closest one, or the voice of a print. It is made for a caller on a phone, a headset or a laptop, not for a microphone in the middle of a room.
-:::
-
 `pipecat-alkove` puts Alkove in a [Pipecat](https://github.com/pipecat-ai/pipecat) bot: `AlkoveFilter` keeps the user's voice (Focus), `AlkoveVADAnalyzer` finds where they speak (Cue). Both run on the bot's CPU, with no server and no key. Pipecat's docs list it as a community integration: [audio filter](https://docs.pipecat.ai/api-reference/server/services/audio-filters/alkove) and [VAD](https://docs.pipecat.ai/api-reference/server/services/vad/alkove-vad).
 
 ## Install
@@ -17,7 +13,7 @@ Focus keeps one voice: the closest one, or the voice of a print. It is made for 
 pip install pipecat-alkove
 ```
 
-The models (Focus 1.1 MB, Cue 1.2 MB) are downloaded once into the cache, checked by their sha256: the analyzer loads them when it is created, as Silero's does, the filter when the transport starts. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder.
+The models (Focus 2.3 MB with Timbre 0.97 MB, which Focus loads with it, and Cue 1.2 MB) are downloaded once into the cache, checked by their sha256: the analyzer loads them when it is created, as Silero's does, the filter when the transport starts. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder, which then holds `alkove-timbre-1.alk` too.
 
 ## Use
 
@@ -33,7 +29,7 @@ Give the analyzer to your user aggregator (`LLMUserAggregatorParams(vad_analyzer
 
 ## AlkoveFilter
 
-- It keeps the closest voice; with `voiceprint=` (an `alkove.Voiceprint` or its 192 numbers), the voice of that print. `strength=` and `normalize=` work as in the web library. It works at the transport's input rate.
+- It keeps the closest voice; with `voiceprint=` (an `alkove.Voiceprint`, or a few seconds of the user alone at 16 kHz), the voice of that print, even while someone else talks at the same time: Focus takes a sample of that voice from the recording, or from the stream by itself. `strength=` and `normalize=` work as in the web library. It works at the transport's input rate.
 - `FilterEnableFrame(False)` gives the raw microphone back at the same delay; `FilterUpdateSettingsFrame(settings={"strength": 0.5})` and `{"voiceprint": ...}` change it while it runs.
 - It returns the samples that are ready: a little less than the input at the start (Focus's 16 ms), then about the input's size. The chain is the one the web library's inputs run.
 
@@ -44,7 +40,7 @@ from alkove import Models, Timbre
 
 models = Models.load(["focus", "cue", "timbre"])
 me = Timbre(models).embed(pcm)
-f = AlkoveFilter(models=models, voiceprint=me)  # an alkove.Voiceprint or its 192 numbers
+f = AlkoveFilter(models=models, voiceprint=me)  # an alkove.Voiceprint, or a few seconds of the user alone at 16 kHz
 ```
 
 ## AlkoveVADAnalyzer

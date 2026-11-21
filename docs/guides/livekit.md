@@ -5,17 +5,13 @@ sidebar:
   order: 3
 ---
 
-:::caution[One person, near the microphone]
-Focus keeps one voice: the closest one, or the voice of a print. It is made for a caller on a phone, a headset or a laptop, not for a microphone in the middle of a room.
-:::
-
 `livekit-plugins-alkove` puts Alkove in a [LiveKit Agents](https://docs.livekit.io/agents/) session: Focus keeps the user's voice before anything listens to it, Cue says when they speak and when their turn ends. All run on the agent's CPU, with no server and no key.
 
 ## Install
 
 ```sh
 pip install livekit-plugins-alkove
-python my_agent.py download-files     # Focus and Cue into the cache, checked by their sha256
+python my_agent.py download-files     # Focus, Timbre and Cue into the cache, checked by their sha256
 ```
 
 Run `download-files` where the agent runs, as for any LiveKit plugin with models: at run time the plugin reads them from the cache and never downloads on the session's event loop. Without them, `alkove.Focus()` raises `AlkoveError` (`models.fetch`) and says so.
@@ -44,7 +40,7 @@ async def entrypoint(ctx):
 
 ## Focus
 
-- It keeps the closest voice; with `voiceprint=` (an `alkove.Voiceprint` or its 192 numbers), the voice of that print, even when someone else speaks louder. `strength=` and `normalize=` work as in the web library.
+- It keeps the closest voice; with `voiceprint=` (an `alkove.Voiceprint`, or a few seconds of the user alone at 16 kHz), the voice of that print, even when someone else talks at the same time or louder: Focus takes a sample of that voice from the recording, or from the stream by itself. `strength=` and `normalize=` work as in the web library.
 - It works at the session's sample rate (24 kHz by default) and gives each frame back at the size it came in, about 37 ms behind: whole 10 ms frames, as LiveKit's gain control needs. The chain is the one the web library's inputs run.
 - It starts a fresh stream on another track and when it is enabled again.
 - In `console` mode LiveKit reads the microphone itself, without `RoomIO`: Focus is not applied there, Cue is. Test Focus in a room (`dev`).
@@ -87,6 +83,6 @@ session = AgentSession(
 - Behind `alkove.Focus`, Focus runs twice: once on the track, once in the detector.
 - LiveKit has no slot for an interruption detector of another provider. Its VAD mode with `min_duration=0.7` is the rule Alkove's web library applies: with Cue as the VAD, a "mm" or a "yeah" shorter than that lets the agent go on.
 
-The models are loaded once per process and shared by every session. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder.
+The models are loaded once per process and shared by every session. Pass `models=alkove.Models.load(["focus", "cue"], dir=...)` to read them from your own folder; Focus loads Timbre with it, so the folder holds `alkove-timbre-1.alk` too.
 
 Tested with livekit-agents 1.8.10. The plugin is maintained by Alkove, not by the LiveKit team: [source](https://github.com/alkove-ai/alkove/tree/main/integrations/livekit).

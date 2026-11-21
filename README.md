@@ -41,11 +41,11 @@
 
 ## Why Alkove
 
-- **The other voices stay out.** On meetings recorded on headset microphones (AMI), words from other people reaching the transcript drop from 17 per minute to 0.5. Denoisers let 19 or more through.
+- **The other voices stay out.** On meetings recorded on headset microphones (AMI), words from other people reaching the transcript drop from 17 per minute to 2.3. Denoisers let 19 or more through.
 - **Far voices stay out without a voiceprint.** With `near`, a colleague across the room or a video on another device opens no turn: it goes by loudness against the user's own voice, nothing biometric.
 - **Any word is a wake word.** Type it in one of 7 languages: no training, no recording session. 80 % recall at one false alarm per hour.
 - **Fewer false barge-ins.** Behind Focus, Cue starts on music 4× less often than Silero VAD.
-- **Small enough for a phone.** Five models under 8 MB together, Focus at 1.1 MB, an engine of 141 KB (brotli).
+- **Small enough for a phone.** Five models in 9.1 MB together, Focus at 2.3 MB, an engine of 185 KB (brotli).
 - **Open.** Code and weights under Apache-2.0, the engine is Alkove's own, in Rust. Every number above comes with its datasets and protocol in [`bench/`](./bench).
 
 ## Quick start
@@ -174,11 +174,11 @@ Python on its own: `pip install alkove`, see [the Python package](./python).
 
 | Model | What it does | Size |
 |---|---|---|
-| [Focus](https://alkove.ai/docs/models/focus/) | Keeps the closest voice, or one person's voice from their print, and removes noise, music and other voices | 1.1 MB |
+| [Focus](https://alkove.ai/docs/models/focus/) | Keeps the closest voice, or one person's voice from their print, and removes noise, music and other voices | 2.3 MB |
 | [Cue](https://alkove.ai/docs/models/cue/) | Tells when someone speaks, every 30 ms, and when their turn ends | 1.2 MB |
 | [Spot](https://alkove.ai/docs/models/spot/) | Hears any word you type, in 7 languages, with no training | 2.8 MB |
 | [Lex](https://alkove.ai/docs/models/lex/) | Turns a written word into its likely pronunciations | 1.8 MB |
-| [Timbre](https://alkove.ai/docs/models/timbre/) | Makes voiceprints and compares them | 0.74 MB |
+| [Timbre](https://alkove.ai/docs/models/timbre/) | Makes voiceprints and compares them | 0.97 MB |
 
 Weights on [Hugging Face](https://huggingface.co/alkove-ai), downloaded once, checked by sha256 and cached. In production, [host them yourself](https://alkove.ai/docs/guides/self-hosting/).
 

@@ -5,11 +5,9 @@ sidebar:
   order: 6
 ---
 
-A voiceprint is a small vector that stands for one voice, made by Timbre from 16 kHz speech. With a print, Focus keeps only that person, even when someone else is louder or closer; a wake listener ignores other voices; and you can ask whether two recordings are the same voice.
+A voiceprint is a small vector that stands for one voice, made by Timbre from 16 kHz speech. With a print, Focus keeps only that person, even when someone else talks at the same time, louder or at the same distance; an input tells the app only that person's phrases (`onlyMyVoice`); a wake listener ignores other voices; and you can ask whether two recordings are the same voice.
 
-:::caution[Not a security check]
-Timbre tells voices apart at about 3 % equal error rate on public speech. That makes a good filter for "is this my user?", not authentication or access control.
-:::
+An input gets its print in one of four ways: you give it one (`voiceprint`), it learns one while the user talks, a wake word makes one (`wake`), or you make one yourself from audio (`Timbre.embed`, an enrollment screen).
 
 ## Make a print from audio
 
@@ -21,31 +19,38 @@ const { raw } = await Alkove.process(file) // any file, decoded to 16 kHz mono
 const print = await timbre.embed(raw)
 ```
 
-`embed` takes 16 kHz mono samples, cuts them into 1.5 s windows that overlap by half, and averages them (from 10 windows on, leaving out the 10 % least alike). Give it at least 1.5 s of the person alone; a few seconds more make a print that judges better. The print remembers how many seconds of voice it holds.
-
-Pass `{ source: 'focus' }` when the audio came out of Focus (for example `r.audio` of `Alkove.process` with `focus: true`), `'raw'` (the default) for the microphone as is.
+`embed` takes 16 kHz mono samples, cuts them into 1.5 s windows that overlap by half, and averages them (from 10 windows on, leaving out the 10 % least alike). It refuses audio under 1,400 samples (88 ms); give it at least 1.5 s of the person alone, and a few seconds more make a print that judges better. The print remembers how many seconds of voice it holds.
 
 In a browser, Timbre runs in the SDK's background worker; in Node, on your thread.
 
 ## Learn it while the user talks
 
-No enrollment screen is needed: a call or agent input learns the print from the user's own speech.
+No enrollment screen is needed: a call input learns the print from the user's own speech, and an agent input does once the SDK knows when the agent talks.
 
 ```ts
 import { createCallInput } from 'alkove'
 
-const input = await createCallInput({ learn: true, farEnd: remoteTrack })
+const input = await createCallInput({ farEnd: remoteTrack })
 input.on('learn', ({ progress }) => meter.set(progress)) // 0 to 1
 input.on('voiceprint', (print) => save(print))
 ```
 
-The SDK takes 1.5 s windows of what Focus keeps while the user speaks, one every 1.5 s, then one every 10 s once it has 40. A window only counts when the far end has been silent for 2 s, so the other person's voice (or your agent's) does not get into the print. The print is ready after 4 windows, about 6 s of voice. From then on, a window joins only if it matches the print, and the print keeps its last 200 windows.
+The SDK takes 1.5 s windows of what Focus keeps while the user speaks, one every 1.5 s, then one every 10 s once it has 40. A window only counts when the far end has been silent for 2 s, so the other person's voice (or your agent's) does not get into the print. Focus takes the user's voice from the first window, 1.5 s into their speech, and the input's mode becomes `focus+print`. The print is ready after 4 windows, about 6 s of voice. From then on, a window joins only if it matches the print, and the print keeps its last 200 windows.
 
-A `voiceprint` event fires when the print is first ready, then each time it moves enough to matter. Focus switches to it at the next pause, and the input's mode becomes `focus+print`. `input.voiceprint` is the latest learned print.
+A `voiceprint` event fires when the print is first ready, then each time it moves enough to matter. Focus switches to it at once. `input.voiceprint` is the latest learned print.
 
-`farEnd` is the remote track on a call, your TTS on an agent (`'manual'` with `input.farEndActive(true / false)`). An agent input refuses `learn` without it (`TypeError`); a call input accepts it with a `learn.no-far-end` diag. The diags `print.learn`, `print.reject` and `print.restart` show each window's fate.
+`farEnd` is the remote track on a call, your TTS on an agent, as a track or an audio node; without one, `input.farEndActive(true / false)` tells the SDK. An agent input learns from the start with `farEnd`, else from the first `farEndActive()` call, and never before: its own voice would teach the print. The diags `print.learn`, `print.reject` and `print.restart` show each window's fate.
 
-Pass a stored print along with `learn: true` and the learning goes on from it.
+Pass a stored print as `voiceprint` and the learning goes on from it.
+
+## From a wake word
+
+```ts
+const input = await createAgentInput({ wake: { words: ['Hey Nova'], lang: 'en' } })
+input.on('diag', (d) => d.code === 'wake.print' && console.log('print from', d.seconds, 's of voice'))
+```
+
+On an agent input with `wake`, the voice that says the wake word becomes Focus's print, made from the word and what the input already heard of the request, then made again 4 s after the word's start, from the word and the request. Each wake word makes it anew: the person who says it is the one Focus keeps for the request. A `voiceprint` given to the input wins: the wake words then leave it as it is. A print from a wake word is not sent as a `voiceprint` event; to keep one, let the input learn it (above) or enroll the word (`Spot.enroll` gives a print too).
 
 ## An enrollment screen
 
@@ -81,7 +86,7 @@ input.on('voiceprint', (p) => localStorage.setItem('print', JSON.stringify(p)))
 
 const saved = localStorage.getItem('print')
 const print = saved ? Voiceprint.fromJSON(saved) : null // null: learn it again
-const input = await createCallInput({ voiceprint: print, learn: true, farEnd: remoteTrack })
+const input = await createCallInput({ voiceprint: print, farEnd: remoteTrack })
 ```
 
 Wherever the SDK takes a print, it takes a `Voiceprint`, its JSON object or the JSON string.
@@ -94,6 +99,8 @@ const match = await timbre.identify(heardPcm, { alice, bob }) // { who, score } 
 ```
 
 `verify(a, b)` compares a known print `a` with the voice heard `b`. It is synchronous. The answer uses a threshold chosen from how many seconds each side holds: a long print against a short window is judged differently from two long prints. The table covers prints of 1.5 to 24 s and voices heard for 0.6 to 3 s; beyond that, the nearest value holds.
+
+Timbre tells voices apart at about 2 % equal error rate on public speech: a good filter for "is this my user?", not authentication or access control.
 
 Three levels ([`Level`](/docs/reference/type-aliases/level/)), measured on public speech:
 
@@ -112,15 +119,20 @@ const input = await createCallInput({ voiceprint: print })
 input.setVoiceprint(otherPrint) // switch people
 input.forgetVoiceprint() // back to the closest voice
 const r = await Alkove.process(file, { focus: { voiceprint: print } })
+const fromVoice = await createAgentInput({ voiceprint: recording }) // a few seconds of the user at 16 kHz
 ```
 
-Focus starts from a fresh state for each new print, at the next pause (1 s of silence). The `mode` event says `focus+print` while a print is in use. Without a print, Focus keeps the closest voice.
+Focus takes each new print at once, at the next 16 ms step. The `mode` event says `focus+print` while a print is in use. Without a print, Focus keeps the closest voice.
 
-The same print works for `onlyMyVoice` on a wake listener: see [wake words](/docs/guides/wake-words/).
+Beside the print, Focus reads a few seconds of that person's voice, its sample, which lets it keep them while someone else talks at the same time. The sample comes by itself, from the 1.5 s windows where Timbre hears the print's voice clearly, and from the wake word's audio. A print of another person drops the sample of the previous one. A recording of the user given as the `voiceprint` gives both at once: the SDK makes the print with Timbre and Focus reads the recording as its sample from the first word. It is a few seconds of the user at 16 kHz: a `Float32Array` on the web, an array in Python, `[Float]` on iOS, a `FloatArray` on Android (in `voiceprint` everywhere, and `setVoiceprint`), a number array in React Native. In Python, on Android and on iOS, a print is a `Voiceprint` and any array a recording, whatever its length. The app then holds audio of its user, not only a print: store it with the same care. See [Focus](/docs/models/focus/#where-focus-gets-its-users-voice).
+
+The same print works as a wake listener's `voiceprint`: see [wake words](/docs/guides/wake-words/).
 
 ## When prints expire
 
-A print belongs to the Timbre model that made it; its JSON names that model. When an SDK version ships a new Timbre, old prints mean nothing to it: `Voiceprint.fromJSON` returns `null`, and an input ignores the print with a `voiceprint.reset` diag, whether it came at creation, through `setVoiceprint` or as `onlyMyVoice`. Learn the print again (about 6 s of the user's voice with `learn: true`). The [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md) says when a version changes Timbre.
+A print belongs to the Timbre model that made it; its JSON names that model. When an SDK version ships a new Timbre, old prints mean nothing to it: `Voiceprint.fromJSON` returns `null`, and an input ignores the print with a `voiceprint.reset` diag, whether it came at creation or through `setVoiceprint`. In Python, Kotlin and Swift, comparing or merging an old print throws `voiceprint.outdated` ("Made by another Timbre: learn the print again."). Learn the print again (about 6 s of the user's voice on an input that learns). The [changelog](https://github.com/alkove-ai/alkove/blob/main/CHANGELOG.md) says when a version changes Timbre.
+
+0.5 is such a version: alkove-timbre-1 replaces alkove-timbre-1-preview, and every print made with 0.4 or earlier must be learned again. See [moving from 0.4 to 0.5](/docs/guides/migration/).
 
 :::note[Biometric data]
 A print that recognizes a person is biometric data in many laws, the GDPR among them. Ask before you learn or keep one, and let the user delete it. See [privacy](/docs/guides/privacy/).

@@ -34,7 +34,7 @@ Nothing else leaves the page: no request about usage, errors, devices or version
 ## What never leaves the device
 
 - **Sound.** The microphone is read in an AudioWorklet and processed in workers of your page. The output goes where your app sends it: the track you add to a call, the `audio` and `utterance` events you forward to your speech-to-text.
-- **Voiceprints.** Made, learned and compared on the device. A print exists in memory until your app stores it.
+- **Voiceprints.** Made, learned and compared on the device. A print exists in memory until your app stores it. The few seconds of the user's voice Focus reads beside the print, its sample, stay in the running input's memory and go with it: the SDK never hands them out or stores them.
 - **Words.** A compiled or enrolled word is text, phonemes and thresholds. It holds no sound. When you enroll a word, the takes' voiceprint comes back apart from the word, never inside it.
 - **Recordings you ask for.** `input.record(seconds)` and `input.recent()` (with `keepRecent`) give you WAV blobs for debugging. They stay in the page unless you send them.
 
@@ -44,7 +44,7 @@ In a browser, one Cache Storage cache named `alkove` holds the model files and t
 
 The SDK writes nothing else: no `localStorage`, no IndexedDB, no cookies. Prints and words are stored only if your app stores them.
 
-In Node, the SDK stores nothing: it reads the models from `modelDir` or downloads them.
+In Node, the SDK stores nothing: it reads the models from the folder given as `modelBaseUrl`, or downloads them.
 
 To check what is already cached, use `Alkove.cached(usage)`. To clear it, delete the `alkove` cache like any other (`caches.delete('alkove')`).
 
@@ -56,7 +56,7 @@ When the SDK opens the microphone itself, it asks for echo cancellation and turn
 
 A voiceprint recognizes a person by their voice. In the EU, under the GDPR, that makes it biometric data of a special category when you use it to identify someone, and other laws treat it the same way. In practice:
 
-- **Ask first.** Say what the print is for and get the user's consent before you learn one. `learn` is off by default: turn it on after consent.
+- **Ask first.** Say what the print is for and get the user's consent before you store one. Inputs learn a print in memory while they run (a call input always, an agent input once it knows when the agent talks): it goes with the input unless your app keeps it from the `voiceprint` event.
 - **Keep it on the device** when you can. The SDK never needs it anywhere else.
 - **Let the user delete it.** `input.forgetVoiceprint()` drops it from the running input; remove it from your own storage too.
 - **Say how long you keep it.** A print learned with an old SDK may expire on its own when Timbre changes (see [voiceprints](/docs/guides/voiceprints/)), but that is not a retention policy.

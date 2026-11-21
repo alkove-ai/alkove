@@ -37,13 +37,13 @@ The hooks come with the `alkove` package, under `alkove/react`, for React 18 and
 | `status` | `'off'` before the input opens or after it closed, then the input's own: `'starting'`, `'running'`, `'blocked'`, `'interrupted'` |
 | `mode` | `'focus'`, `'focus+print'`, `'spot'`, `'spot+print'` or `'raw'`; `null` while closed |
 | `error` | what kept the input from opening, an [`AlkoveError`](/docs/guides/errors/) such as `mic.denied` or `page.insecure`; `null` otherwise |
-| `track` | the output track, for `RTCPeerConnection.addTrack` or LiveKit; follows `trackchange`, which a bound input (`bind()`) does not send: it swaps the sender's track itself |
+| `track` | the output track, for `RTCPeerConnection.addTrack` or LiveKit; follows `trackchange`, which a bound input (`bind()`) does not send: it swaps the sender's track itself. An agent input makes its track only once you read this field |
 | `input` | the input itself once open, for `listen()`, `hold()`, `record()`, `bind()`… |
 | `resume` | to call in a click when `status` is `'blocked'`: the browser kept the audio suspended until a user gesture |
 
 ## When the options change
 
-`strength` and `voiceprint` apply to the running input. Any other option closes the input and opens a new one: `deviceId` to switch microphones, `near`, `turn`, the words of a wake listener. Options are compared by content, so an object written inline in the component reopens nothing.
+`voiceprint`, and a call's `strength`, apply to the running input. Any other option closes the input and opens a new one: `deviceId` to switch microphones, `near`, `turn`, `onlyMyVoice`, the words of a wake listener or of an agent's `wake`. Options are compared by content, so an object written inline in the component reopens nothing.
 
 ## Strict mode and Next.js
 

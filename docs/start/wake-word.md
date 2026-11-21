@@ -5,10 +5,6 @@ sidebar:
   order: 4
 ---
 
-:::caution[A near microphone, one person]
-The wake listener is made for a microphone close to the person who says the word: a phone, a headset, a laptop. To ignore other voices, give it the user's voiceprint with `onlyMyVoice`.
-:::
-
 ```ts
 import { createWakeListener, Spot } from 'alkove'
 
@@ -43,17 +39,17 @@ enrollment.on('warning', (w) => ui.warn(w.message))
 const { word, voiceprint } = await enrollment.done
 ```
 
-`takes` changes the count (3 by default) and `enrollment.cancel()` stops it. Warnings such as `word.takes-differ` (said differently each time) or `word.no-margin` (other speech scores as high as the word) tell the user to try again or to pick another word. `done` also gives a `voiceprint` made from the takes, for `onlyMyVoice`.
+`enrollment.cancel()` stops it. Warnings such as `word.takes-differ` (said differently each time) or `word.no-margin` (other speech scores as high as the word) tell the user to try again or to pick another word. `done` also gives a `voiceprint` made from the takes, for the wake listener's `voiceprint`.
 
 ## Only the user's voice
 
 ```ts
-const wake = await createWakeListener({ words: [word], onlyMyVoice: voiceprint })
+const wake = await createWakeListener({ words: [word], voiceprint })
 wake.on('wake', ({ word, voice }) => console.log(word, 'said by the user', voice))
 wake.on('diag', (d) => d.code === 'wake.other-voice' && console.log('someone else said it'))
 ```
 
-With `onlyMyVoice`, Timbre checks the voice of each detection against the print. The `wake` event comes 0.5 s later and carries `voice`, the similarity score; a detection in another voice becomes a `diag` `wake.other-voice` instead. The TV saying the word does nothing.
+With a `voiceprint` (a print, or a 16 kHz recording of the user), Timbre checks the voice of each detection against it. The `wake` event comes 0.5 s later and carries `voice`, the similarity score; a detection in another voice becomes a `diag` `wake.other-voice` instead. The TV saying the word does nothing.
 
 ## Where the word counts
 
@@ -80,7 +76,12 @@ wake.on('heard', ({ speech, scores }) => meter.set(speech))
 
 ## A word on a call or an agent
 
-The wake listener runs on the raw microphone. If your app already has a call or agent input, do not open a second one: `input.spot([word])` listens behind Focus on the same microphone, in the same worker. A word enrolled for that path comes from `input.enrollWord()`. See [Wake words](/docs/guides/wake-words/).
+The wake listener runs on the raw microphone. If your app already has a call or agent input, do not open a second one:
+
+- In front of an agent, `createAgentInput({ wake: { words, lang } })` hears the words on the raw microphone too, and each wake word gives Focus the voice that said it for the request that follows. See [a wake word in front of the agent](/docs/start/agent/#a-wake-word-in-front-of-the-agent-wake).
+- `input.spot([word])` listens behind Focus on the same microphone, in the same worker, for words inside the conversation. A word enrolled for that path comes from `input.enrollWord()`.
+
+See [Wake words](/docs/guides/wake-words/).
 
 ## Next
 
