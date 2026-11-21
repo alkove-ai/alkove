@@ -165,7 +165,7 @@ jobs:
           working-directory: python
           args: --profile python --out dist
           manylinux: auto
-      - run: pip install python/dist/*.whl "livekit-agents==1.8.10" "pipecat-ai==1.15.0" "wyoming[zeroconf]==1.10.2" pyyaml pytest
+      - run: pip install python/dist/*.whl "livekit-agents==1.8.13" "pipecat-ai==1.16.0" "wyoming[zeroconf]==1.10.2" pyyaml pytest
       - run: pip install --no-deps -e integrations/livekit -e integrations/pipecat -e integrations/wyoming -e integrations/esphome
       - uses: actions/cache@v4
         with:
