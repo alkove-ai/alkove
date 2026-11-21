@@ -2,7 +2,7 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
-## 0.5.0 (unreleased)
+## 0.5.0 (2026-11-21)
 
 Focus and Timbre leave the preview: `alkove-focus-1` and `alkove-timbre-1` are the models every SDK runs, on npm, PyPI, Android, Swift and React Native alike. A minor version before 1.0, so it breaks: prints made by the previous Timbre must be learned again, and the API drops the options the SDK now decides by itself. Spot, Cue and Lex stay `-1-preview`, unchanged. The [migration guide](https://alkove.ai/docs/guides/migration/) lists what to change.
 
