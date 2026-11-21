@@ -7,5 +7,5 @@ from .models import models
 from .turn import AlkoveTurnAnalyzer, AlkoveTurnParams, AlkoveUserTurnStartStrategy
 from .vad import AlkoveVADAnalyzer
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 __all__ = ["AlkoveFilter", "AlkoveTurnAnalyzer", "AlkoveTurnParams", "AlkoveUserTurnStartStrategy", "AlkoveVADAnalyzer", "Models", "models", "__version__"]
