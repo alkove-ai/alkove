@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<h3 align="center">Listens to one voice. Answers to any name.</h3>
+<h3 align="center">On-device voice models and SDK</h3>
 
 <p align="center">
   Voice isolation, wake words, voice activity and voiceprints, on the device.<br>
