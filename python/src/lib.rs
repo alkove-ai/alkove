@@ -159,7 +159,7 @@ struct Chain {
 #[pymethods]
 impl Chain {
     #[new]
-    #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None))]
+    #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None, timbre=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         focus: &Model,
@@ -174,10 +174,14 @@ impl Chain {
         near: Option<f64>,
         turn: Option<&Bound<'_, PyAny>>,
         interrupt: Option<&Bound<'_, PyAny>>,
+        timbre: Option<&Model>,
     ) -> PyResult<Self> {
-        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels, near };
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, sample: None, speech: speech(speech_params), sleep, levels, near };
         let turns = turns(turn, interrupt, &opts.speech)?;
-        let inner = alkove_core::Chain::new(&focus.inner, &cue.inner, opts).map_err(error)?;
+        let mut inner = alkove_core::Chain::new(&focus.inner, &cue.inner, opts).map_err(error)?;
+        if let Some(t) = timbre {
+            inner.attach_timbre(&t.inner).map_err(error)?;
+        }
         Ok(Chain { inner, events: Vec::with_capacity(16), turns, turned: Vec::new(), far: FarClock::default() })
     }
 
@@ -214,6 +218,12 @@ impl Chain {
     fn set_print(&mut self, print: Option<&[u8]>) -> PyResult<()> {
         let p = print.map(floats).transpose()?;
         self.inner.set_print(p.as_deref()).map_err(error)
+    }
+
+    #[pyo3(signature = (sample=None))]
+    fn set_sample(&mut self, sample: Option<&[u8]>) -> PyResult<bool> {
+        let s = sample.map(floats).transpose()?;
+        Ok(self.inner.set_sample(s.as_deref()))
     }
 
     fn set_strength(&mut self, s: f64) {
@@ -301,8 +311,8 @@ impl CueTurns {
     }
 }
 
-fn models(focus: Option<&Model>, cue: Option<&Model>, spot: Option<&Model>) -> Models {
-    Models { focus: focus.map(|m| m.inner.clone()), cue: cue.map(|m| m.inner.clone()), spot: spot.map(|m| m.inner.clone()) }
+fn models(focus: Option<&Model>, cue: Option<&Model>, spot: Option<&Model>, timbre: Option<&Model>) -> Models {
+    Models { focus: focus.map(|m| m.inner.clone()), cue: cue.map(|m| m.inner.clone()), spot: spot.map(|m| m.inner.clone()), timbre: timbre.map(|m| m.inner.clone()) }
 }
 
 fn options(o: &Bound<'_, PyDict>) -> PyResult<ProcessOptions> {
@@ -319,7 +329,7 @@ struct Live {
 #[pymethods]
 impl Live {
     #[new]
-    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None))]
+    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None, timbre=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         focus: &Model,
@@ -335,10 +345,14 @@ impl Live {
         near: Option<f64>,
         turn: Option<&Bound<'_, PyAny>>,
         interrupt: Option<&Bound<'_, PyAny>>,
+        timbre: Option<&Model>,
     ) -> PyResult<Self> {
-        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, speech: speech(speech_params), sleep, levels, near };
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, sample: None, speech: speech(speech_params), sleep, levels, near };
         let turns = turns(turn, interrupt, &opts.speech)?;
         let mut inner = alkove_core::Live::new(&focus.inner, &cue.inner, rate, opts).map_err(error)?;
+        if let Some(t) = timbre {
+            inner.attach_timbre(&t.inner).map_err(error)?;
+        }
         inner.set_turns(turns);
         Ok(Live { inner, events: Vec::new() })
     }
@@ -368,6 +382,12 @@ impl Live {
     fn set_print(&mut self, print: Option<&[u8]>) -> PyResult<()> {
         let p = print.map(floats).transpose()?;
         self.inner.chain_mut().set_print(p.as_deref()).map_err(error)
+    }
+
+    #[pyo3(signature = (sample=None))]
+    fn set_sample(&mut self, sample: Option<&[u8]>) -> PyResult<bool> {
+        let s = sample.map(floats).transpose()?;
+        Ok(self.inner.chain_mut().set_sample(s.as_deref()))
     }
 
     fn set_strength(&mut self, s: f64) {
@@ -457,9 +477,9 @@ fn part(py: Python<'_>, mut p: Part) -> PyResult<(Bound<'_, PyByteArray>, Bound<
 #[pymethods]
 impl Processor {
     #[new]
-    #[pyo3(signature = (focus_model, cue_model, spot_model, options))]
-    fn new(focus_model: Option<&Model>, cue_model: Option<&Model>, spot_model: Option<&Model>, options: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let inner = alkove_core::Processor::new(&models(focus_model, cue_model, spot_model), self::options(options)?).map_err(error)?;
+    #[pyo3(signature = (focus_model, cue_model, spot_model, options, timbre_model=None))]
+    fn new(focus_model: Option<&Model>, cue_model: Option<&Model>, spot_model: Option<&Model>, options: &Bound<'_, PyDict>, timbre_model: Option<&Model>) -> PyResult<Self> {
+        let inner = alkove_core::Processor::new(&models(focus_model, cue_model, spot_model, timbre_model), self::options(options)?).map_err(error)?;
         Ok(Processor { inner })
     }
 
@@ -479,7 +499,7 @@ impl Processor {
 
 /// A whole recording at 16 kHz.
 #[pyfunction]
-#[pyo3(signature = (focus_model, cue_model, spot_model, pcm, options))]
+#[pyo3(signature = (focus_model, cue_model, spot_model, pcm, options, timbre_model=None))]
 fn process<'py>(
     py: Python<'py>,
     focus_model: Option<&Model>,
@@ -487,10 +507,11 @@ fn process<'py>(
     spot_model: Option<&Model>,
     pcm: &[u8],
     options: &Bound<'_, PyDict>,
+    timbre_model: Option<&Model>,
 ) -> PyResult<(Bound<'py, PyByteArray>, Bound<'py, PyAny>)> {
     let pcm = floats(pcm)?;
     let opts = self::options(options)?;
-    let m = models(focus_model, cue_model, spot_model);
+    let m = models(focus_model, cue_model, spot_model, timbre_model);
     let p = py.detach(|| fp::exact(|| alkove_core::process(&m, &pcm, opts))).map_err(error)?;
     part(py, p)
 }

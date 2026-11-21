@@ -56,7 +56,11 @@ def test_options_change_something(models):
     pcm = mix()
     plain = alkove.process(models, pcm, focus=True).audio
     assert np.abs(alkove.process(models, pcm, focus=True, strength=0).audio - plain).max() > 0.05
-    assert np.abs(alkove.process(models, pcm, focus=True, voiceprint=np.fromfile(FIXTURES / "enroll.timbre.f32", "<f4")[:192]).audio - plain).max() > 0.01
+    with wave.open(str(FIXTURES / "enroll.wav")) as w:
+        vp = alkove.Timbre(models).embed(np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")[:48000])
+    printed = alkove.process(models, pcm, focus=True, voiceprint=vp).audio
+    assert np.abs(printed - plain).max() > 0.01
+    assert np.array_equal(alkove.process(models, pcm, voiceprint=vp).audio, printed)
     quiet = pcm.astype(np.float32) / 32768 * 0.05
     rms = lambda x: float(np.sqrt(np.mean(x[32000:] ** 2)))
     assert rms(alkove.process(models, quiet, focus=True, normalize=True).audio) > 3 * rms(alkove.process(models, quiet, focus=True).audio)
@@ -66,6 +70,21 @@ def test_options_change_something(models):
     t = alkove.process(models, pcm, focus=True, trace=True).trace
     assert len(t["focus"]) >= len(pcm) // 256 and len(t["cue"]) >= len(pcm) // 480 - 4
     assert alkove.process(models, pcm, focus=True, cue=False).speech == []
+
+
+def test_a_recording_as_the_voiceprint_is_its_print_and_the_sample(models):
+    with wave.open(str(FIXTURES / "enroll.wav")) as w:
+        voice = (np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")[:48000] / 32768).astype(np.float32)
+    x = mix()
+    vp = alkove.Timbre(models).embed(voice)
+    given = np.asarray(alkove.process(models, x, focus=True, voiceprint=vp, _sample=voice).audio)
+    assert np.array_equal(np.asarray(alkove.process(models, x, voiceprint=voice).audio), given)
+    with pytest.raises(TypeError):
+        alkove.process(models, x, voiceprint=vp.to_json())
+    a, b = alkove.Chain(models, voiceprint=voice), alkove.Chain(models)
+    b.set_voiceprint(voice)
+    hops = [x[i : i + 256] for i in range(0, len(x) - 255, 256)]
+    assert np.array_equal(np.concatenate([a.step(h)[0] for h in hops]), np.concatenate([b.step(h)[0] for h in hops]))
 
 
 def test_chain_hop_by_hop(models):
@@ -80,8 +99,8 @@ def test_chain_hop_by_hop(models):
     assert {e["type"] for e in events} >= {"speechstart", "speechend"}
     with pytest.raises(ValueError):
         c.step(pcm[:100])
-    with pytest.raises(ValueError):
-        c.set_voiceprint(np.zeros(193, np.float32))
+    with pytest.raises(ValueError, match="audio.too-short"):
+        c.set_voiceprint(np.zeros(192, np.float32))
 
 
 def test_levels_and_near_give_the_webs_events(models):
@@ -98,14 +117,15 @@ def test_levels_and_near_give_the_webs_events(models):
             events += c.step(pcm[i : i + 256])[1]
         return events
 
-    ends = [e for e in run(levels=True) if e["type"] == "speechend"]
-    assert [e["voiceDb"] for e in ends] == [-19.2, -18.3, -40.2, -18.4]
-    assert [e["refDb"] for e in ends] == [None, None, -18.7, -18.7]
+    ends = [e for e in run() if e["type"] == "speechend"]
+    assert [e["voiceDb"] for e in ends] == [-18.6, -18.1, -38.9, -18.1]
+    assert [e["refDb"] for e in ends] == [None, None, -18.6, -18.6]
     near = run(near=True)
     far = [e["data"] for e in near if e.get("code") == "speech.far"]
-    assert [(f["start"], f["voiceDb"], f["refDb"]) for f in far] == [(16.814, -40.2, -18.7)]
+    assert [(f["start"], f["voiceDb"], f["refDb"]) for f in far] == [(16.814, -38.9, -18.6)]
     assert [e["start"] for e in near if e["type"] == "speechstart"] == [2.264, 9.524, 24.074]
-    assert alkove.NEAR_GAP_DB == 10.0
+    with pytest.raises(TypeError):
+        alkove.Chain(models, near=12)
 
 
 def test_listen_and_hold_make_the_phrases(models):
@@ -123,7 +143,7 @@ def test_listen_and_hold_make_the_phrases(models):
             c.set_listen(False)
         events += [e for e in c.step(pcm[i : i + 256])[1] if e["type"].startswith("speech")]
     assert events[0] == {"type": "speechstart", "start": 10 * 256 / 16000}
-    assert events[1] == {"type": "speechend", "start": 10 * 256 / 16000, "end": 20 * 256 / 16000}
+    assert events[1] == {"type": "speechend", "start": 10 * 256 / 16000, "end": 20 * 256 / 16000, "voiceDb": None, "noiseDb": -120.0, "refDb": None}
     assert [e["type"] for e in events[2:]] == ["speechstart", "speechcancel"]
 
 
@@ -154,7 +174,7 @@ def test_speech_over_the_far_end_interrupts_it_or_is_a_backchannel(models):
 
 
 def test_a_hold_in_a_silence_has_no_voice_level(models):
-    c = alkove.Chain(models, levels=True)
+    c = alkove.Chain(models)
     silence = np.zeros(256, np.float32)
     events = []
     for k in range(60):

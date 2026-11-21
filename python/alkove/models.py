@@ -59,6 +59,9 @@ def fetch(names: Iterable[str] = NAMES, *, cache: Optional[Union[str, os.PathLik
     """Downloads the models into the cache once, checked by their sha256, and gives their paths. Nothing goes on the network afterwards; `download=False` only reads the cache."""
     root = Path(cache) if cache is not None else cache_dir()
     paths = {}
+    names = list(names)
+    if "focus" in names and "timbre" not in names:  # Focus takes its user's voice through Timbre
+        names.append("timbre")
     for name in names:
         m = _spec(name)
         path = root / m["sha256"] / m["file"]
@@ -105,6 +108,9 @@ class Models:
         """`files` gives a path or the bytes of a model, `dir` a folder holding the .alk files, else they come from Hugging Face (`fetch`)."""
         files = dict(files or {})
         loaded = {}
+        names = list(names)
+        if "focus" in names and "timbre" not in names:  # Focus takes its user's voice through Timbre
+            names.append("timbre")
         for name in names:
             src = files.get(name)
             if src is None and dir is not None:

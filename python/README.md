@@ -45,7 +45,8 @@ Options, the same as the web SDK's `Alkove.process`:
 
 | | |
 |---|---|
-| `focus=True` | keep the closest voice; with `voiceprint=` (192 numbers) the voice of that print |
+| `focus=True` | keep the closest voice |
+| `voiceprint=` | keep that voice, Focus on without `focus=True`: an `alkove.Voiceprint`, or a few seconds of the user alone at 16 kHz (its print, and Focus's sample) |
 | `strength=` | 0 gives the raw mic back, 1 Focus's output (default) |
 | `cue=` | `None` (default): speech found behind Focus; `True`: Cue on its own without Focus; `False`: no speech |
 | `speech=alkove.SpeechParams(...)` | `confidence`, `exit_confidence`, `start_secs`, `stop_secs` |
@@ -78,7 +79,7 @@ models = alkove.Models.load(["timbre", "focus", "cue"])
 timbre = alkove.Timbre(models)
 me = timbre.embed(pcm)                                   # 1.5 s of voice or more
 same, score = alkove.Timbre.verify(me, timbre.embed(other))
-p = alkove.Processor(models, focus=True, voiceprint=me)  # Focus keeps that voice, not just the closest one
+p = alkove.Processor(models, voiceprint=me)              # Focus keeps that voice, not just the closest one
 ```
 
 `alkove.VoiceprintLearner(models).offer(pcm)` learns a print from the user's speech, window by window, as the web SDK's inputs do: a window joins only if it sounds like the others. A print is bound to this version's Timbre: `alkove.Voiceprint.from_json` gives None for another one.
@@ -96,7 +97,7 @@ r.speech   # [Speech(start, end)]
 ```python
 chain = alkove.Chain(models, gate=True)          # 256 samples at 16 kHz per step
 out, events = chain.step(hop)                     # events: speechstart, speechend, idle, diag
-chain.set_voiceprint(embedding)                   # applied at the next silence
+chain.set_voiceprint(me)                          # a Voiceprint or a recording, applied at the next hop
 ```
 
 `alkove.Resampler(48000, 16000)` and `alkove.resample(pcm, 44100, 16000)` convert rates the way the core does.

@@ -30,7 +30,7 @@ def test_windows_and_prints(timbre):
     for c in clips():
         for k in range(6):
             start = math.floor(r() * len(c) * 0.5)
-            n = [280, 4000, 24000, 24001, 36000, len(c) - start][k]
+            n = [1400, 4000, 24000, 24001, 36000, len(c) - start][k]
             pcm = c[start : start + n]
             out.append(timbre.windows(f32(pcm)))
             for source in ("raw", "focus"):

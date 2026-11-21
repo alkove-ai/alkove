@@ -98,6 +98,7 @@ def floats(x):
 
 
 PRINT = np.fromfile(FIXTURES / "enroll.timbre.f32", dtype="<f4")[:192]
+VOICEPRINT = alkove.Voiceprint({"source": "raw", "centers": [{"embedding": PRINT, "id": PRINT, "seconds": 3}]})
 SPEECH = alkove.SpeechParams()
 
 
@@ -145,7 +146,7 @@ def test_chain(models, name, seed, seconds, opts, dense, rate):
 
 PROCESSES = [
     ("focus and cue", 5, dict(focus=True, cue=True), 16000),
-    ("focus with a print, normalize, trace, other speech settings", 6, dict(focus=True, voiceprint=PRINT, strength=0.7, cue=True, speech=alkove.SpeechParams(confidence=0.4, start_secs=0.1), normalize=True, trace=True), 16000),
+    ("focus with a print, normalize, trace, other speech settings", 6, dict(focus=True, voiceprint=VOICEPRINT, strength=0.7, cue=True, speech=alkove.SpeechParams(confidence=0.4, start_secs=0.1), normalize=True, trace=True), 16000),
     ("focus without speech", 7, dict(focus=True, cue=False), 16000),
     ("cue alone, traced", 8, dict(cue=True, speech=alkove.SpeechParams(stop_secs=1), trace=True), 16000),
     ("nothing chosen", 9, dict(), 16000),

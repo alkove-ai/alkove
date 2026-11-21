@@ -14,12 +14,10 @@ from .errors import AlkoveError
 from .models import MANIFEST, Models, cache_dir, fetch
 
 __version__ = _alkove.VERSION
-__all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "InterruptParams", "Lex", "Listener", "Live", "MANIFEST", "Models", "NEAR_GAP_DB", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Timbre", "TurnParams", "Turns", "Voiceprint", "VoiceprintLearner", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
+__all__ = ["AlkoveError", "Chain", "Enroller", "Heard", "InterruptParams", "Lex", "Listener", "Live", "MANIFEST", "Models", "Part", "Processor", "RATE", "Resampler", "Speech", "SpeechParams", "SpeechTracker", "Timbre", "TurnParams", "Turns", "Voiceprint", "VoiceprintLearner", "Word", "cache_dir", "compile", "fetch", "process", "resample", "to_int16"]
 
 RATE = 16000
 """The models' rate, and the rate of every output, in Hz."""
-NEAR_GAP_DB: float = _alkove.NEAR_GAP_DB
-"""`near=True`'s gap: a voice this many dB under the session's main voice is far."""
 WHY = ("silence", "forced", "wake")
 
 
@@ -182,10 +180,6 @@ class Voiceprint:
         return f"Voiceprint({self._data['source']}, {[c['seconds'] for c in self._data['centers']]} s)"
 
 
-def _print(v: Any) -> Any:
-    return v.embedding if isinstance(v, Voiceprint) else v
-
-
 def _samples(pcm: Any) -> bytes:
     a = np.asarray(pcm)
     if a.dtype == np.int16:
@@ -228,10 +222,10 @@ def _events(records: Iterable[tuple]) -> List[dict]:
     return out
 
 
-def _near(near: Union[bool, float]) -> Optional[float]:
-    if near is True:
-        return NEAR_GAP_DB
-    return None if near is False or near is None else float(near)
+def _near(near: bool) -> Optional[float]:
+    if not isinstance(near, (bool, np.bool_)):
+        raise TypeError("near is True or False")
+    return _alkove.NEAR_GAP_DB if near else None
 
 
 def _part(raw: tuple) -> Part:
@@ -239,10 +233,20 @@ def _part(raw: tuple) -> Part:
     return Part(p["start"], _audio(audio), [Speech(x["start"], x["end"]) for x in p["speech"]], p["diag"], p.get("trace"), p["wakes"])
 
 
-def _options(focus: bool, voiceprint: Any, strength: float, cue: Optional[bool], speech: Optional[SpeechParams], normalize: bool, trace: bool, rate: float, words: Optional[Iterable], context: str) -> dict:
+def _voice(models: Models, voiceprint: Any) -> Tuple[Optional["Voiceprint"], Any]:
+    """A `Voiceprint` as it is; a recording of the user at 16 kHz gives the print Timbre makes of it, and itself as Focus's sample."""
+    if voiceprint is None or isinstance(voiceprint, Voiceprint):
+        return voiceprint, None
+    if isinstance(voiceprint, (str, dict)):
+        raise TypeError("voiceprint: a Voiceprint (Voiceprint.from_json reads a stored one) or a recording of the user at 16 kHz")
+    _needs(models, "timbre")
+    return Timbre(models).embed(voiceprint), voiceprint
+
+
+def _options(focus: bool, voiceprint: Optional["Voiceprint"], strength: float, cue: Optional[bool], speech: Optional[SpeechParams], normalize: bool, trace: bool, rate: float, words: Optional[Iterable], context: str, sample: Any = None) -> dict:
     ws = [Word.of(w).to_json() for w in words or ()]
     return {
-        "focus": {"print": np.asarray(_print(voiceprint), dtype=np.float32).tolist() if voiceprint is not None else None, "strength": strength} if focus else None,
+        "focus": {"print": voiceprint.embedding.tolist() if voiceprint is not None else None, "strength": strength, "sample": np.asarray(sample, dtype=np.float32).reshape(-1).tolist() if sample is not None else None} if focus or voiceprint is not None else None,
         "cue": cue,
         "speech": (speech or SpeechParams())._dict(),
         "normalize": normalize,
@@ -259,7 +263,7 @@ def _needs(models: Models, *names: str) -> None:
 
 
 class Processor:
-    """Focus, Cue and Spot over audio pushed in blocks of any size, as real time feeds them: the output comes back aligned with the input, at 16 kHz."""
+    """Focus, Cue and Spot over audio pushed in blocks of any size, as real time feeds them: the output comes back aligned with the input, at 16 kHz. The options are those of `process`."""
 
     def __init__(
         self,
@@ -275,10 +279,12 @@ class Processor:
         rate: int = RATE,
         words: Optional[Iterable] = None,
         context: str = "anywhere",
+        _sample: Any = None,
     ):
-        opts = _options(focus, voiceprint, strength, cue, speech, normalize, trace, rate, words, context)
+        voiceprint, sample = _voice(models, voiceprint)
+        opts = _options(focus, voiceprint, strength, cue, speech, normalize, trace, rate, words, context, sample if _sample is None else _sample)
         _check(models, opts)
-        self._p = _alkove.Processor(models.get("focus"), models.get("cue"), models.get("spot"), opts)
+        self._p = _alkove.Processor(models.get("focus"), models.get("cue"), models.get("spot"), opts, models.get("timbre"))
 
     def push(self, pcm: Any) -> Part:
         """Float32 samples (or int16) at the rate given, any length."""
@@ -312,14 +318,16 @@ def process(
     trace: bool = False,
     words: Optional[Iterable] = None,
     context: str = "anywhere",
+    _sample: Any = None,  # the lab's benches: a sample apart from the print
 ) -> Part:
-    """A whole recording, as real time would go through it: the audio as long as the input at 16 kHz, the speech, the wakes, the diag."""
-    opts = _options(focus, voiceprint, strength, cue, speech, normalize, trace, RATE, words, context)
+    """A whole recording, as real time would go through it: the audio as long as the input at 16 kHz, the speech, the wakes, the diag. `voiceprint`, a `Voiceprint` or a few seconds of the user alone at 16 kHz (its print, and Focus's sample from the first word), runs Focus without `focus=True`."""
+    voiceprint, sample = _voice(models, voiceprint)
+    opts = _options(focus, voiceprint, strength, cue, speech, normalize, trace, RATE, words, context, sample if _sample is None else _sample)
     _check(models, opts)
     x = _samples(pcm)
     if rate != RATE:
         x = bytes(_alkove.resample(x, float(rate), float(RATE)))
-    return _part(_alkove.process(models.get("focus"), models.get("cue"), models.get("spot"), x, opts))
+    return _part(_alkove.process(models.get("focus"), models.get("cue"), models.get("spot"), x, opts, models.get("timbre")))
 
 
 class Lex:
@@ -342,9 +350,9 @@ class Lex:
         out = [[{"ipa": p["ipa"], "p": p["p"]} for p in ps] for ps in self._l.phonemize(texts, lang)]
         return out[0] if isinstance(text, str) else out
 
-    def compile(self, text: str, lang: Union[str, Sequence[str]], *, chain: Optional[str] = None) -> Word:
+    def compile(self, text: str, lang: Union[str, Sequence[str]]) -> Word:
         """`compile` with this Lex: a typed word in one or more of its languages."""
-        return compile(text, lang, lex=self, chain=chain)
+        return compile(text, lang, lex=self)
 
     @staticmethod
     def distance(a: str, b: str) -> float:
@@ -352,13 +360,13 @@ class Lex:
         return _alkove.distance(a, b)
 
 
-def compile(text: str, lang: Union[str, Sequence[str]] = (), *, lex: Optional[Lex] = None, chain: Optional[str] = None) -> Word:
+def compile(text: str, lang: Union[str, Sequence[str]] = (), *, lex: Optional[Lex] = None) -> Word:
     """A typed word in one or more languages (needs `lex`), or phonemes between slashes like "/kamij/" (does not)."""
     langs = [lang] if isinstance(lang, str) else list(lang)
     for l in langs:
         if l not in Lex.langs:
             raise AlkoveError("lang.unsupported", f"No {l}: {', '.join(Lex.langs)} only.")
-    r = _alkove.compile(None if lex is None else lex._l, text, langs, chain)
+    r = _alkove.compile(None if lex is None else lex._l, text, langs)
     return Word(r["word"], r["warnings"])
 
 
@@ -426,21 +434,23 @@ class Chain:
         models: Models,
         *,
         gate: bool = False,
-        normalize: bool = True,
+        normalize: bool = False,
         strength: float = 1.0,
         voiceprint: Any = None,
         speech: Optional[SpeechParams] = None,
-        sleep: bool = True,
-        levels: bool = False,
-        near: Union[bool, float] = False,
+        near: bool = False,
         turn: Union[bool, TurnParams] = False,
         interrupt: Union[bool, InterruptParams] = False,
     ):
-        """`levels`: each speechend carries its level (`voiceDb`, Focus's output before the leveling; `noiseDb`, the mic's floor; `refDb`, the session's main voice, None until heard twice). `near`: a voice that far under the session's (True: `NEAR_GAP_DB`, or a gap in dB) is no speech, but a diag `speech.far`.
+        """`voiceprint`: a `Voiceprint`, or a recording of the user at 16 kHz (its print and Focus's sample). Each speechend carries its level (`voiceDb`, Focus's output before the leveling; `noiseDb`, the mic's floor; `refDb`, the session's main voice, None until heard twice). `near`: a voice 10 dB under the session's main one is no speech, but a diag `speech.far`.
         `turn` (True or `TurnParams`): `turn` every 0.1 s of a pause (`pause`, `probability` of the turn's end, `hesitation`, `at`), then `turnend` (`start`, `end`, `probability`, `hesitation`, `at`). `interrupt` (True or `InterruptParams`): `interruptstart`, `interrupt`, `interruptcancel` for speech that starts while `far_end_active`."""
         _needs(models, "focus", "cue")
-        print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
-        self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_, levels, _near(near), _opt(turn), _opt(interrupt))
+        self._models = models
+        voiceprint, sample = _voice(models, voiceprint)
+        print_ = _samples(voiceprint.embedding) if voiceprint is not None else None
+        self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep=True, speech_params=(speech or SpeechParams())._tuple(), print=print_, levels=True, near=_near(near), turn=_opt(turn), interrupt=_opt(interrupt), timbre=models.get("timbre"))
+        if sample is not None:
+            self._c.set_sample(_samples(sample))
 
     def step(self, hop: Any) -> Tuple[np.ndarray, List[dict]]:
         """One hop in, one hop out, and the events it gave (speech, idle, diag, then turns and interruptions)."""
@@ -451,9 +461,12 @@ class Chain:
         """The far end (the agent's voice) starts or stops: speech that starts while it speaks may interrupt it."""
         self._c.far_end_active(on)
 
-    def set_voiceprint(self, embedding: Any) -> None:
-        """Applied at the next silence, from a fresh state; None goes back to the closest voice."""
-        self._c.set_print(_samples(_print(embedding)) if embedding is not None else None)
+    def set_voiceprint(self, voiceprint: Any) -> None:
+        """A `Voiceprint`, or a recording of the user at 16 kHz (its print and Focus's sample), applied at the next hop; None goes back to the closest voice."""
+        voiceprint, sample = _voice(self._models, voiceprint)
+        self._c.set_print(_samples(voiceprint.embedding) if voiceprint is not None else None)
+        if sample is not None:
+            self._c.set_sample(_samples(sample))
 
     def set_strength(self, s: float) -> None:
         """How much of Focus goes out, 0 to 1, the rest being the raw mic: 0.8 is 80 % Focus."""
@@ -487,7 +500,7 @@ class Chain:
 
     @property
     def sleeping(self) -> bool:
-        """Focus and Cue paused in a silence (`sleep`): after 2 s of quiet, until the mic rises 9 dB over its noise floor."""
+        """Focus and Cue paused in a silence: after 2 s of quiet, until the mic rises 9 dB over its noise floor."""
         return self._c.sleeping
 
     @property
@@ -540,18 +553,20 @@ class Live:
         strength: float = 1.0,
         voiceprint: Any = None,
         speech: Optional[SpeechParams] = None,
-        sleep: bool = True,
-        levels: bool = False,
-        near: Union[bool, float] = False,
+        near: bool = False,
         turn: Union[bool, TurnParams] = False,
         interrupt: Union[bool, InterruptParams] = False,
     ):
-        """`levels`, `near`, `turn` and `interrupt` as for `Chain`."""
+        """`voiceprint`, `near`, `turn` and `interrupt` as for `Chain`; each speechend carries its level."""
         _needs(models, "focus", "cue")
-        print_ = _samples(_print(voiceprint)) if voiceprint is not None else None
+        self._models = models
+        voiceprint, sample = _voice(models, voiceprint)
+        print_ = _samples(voiceprint.embedding) if voiceprint is not None else None
         self.rate = rate
         """The stream's rate, in and out, in Hz."""
-        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep, (speech or SpeechParams())._tuple(), print_, levels, _near(near), _opt(turn), _opt(interrupt))
+        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep=True, speech_params=(speech or SpeechParams())._tuple(), print=print_, levels=True, near=_near(near), turn=_opt(turn), interrupt=_opt(interrupt), timbre=models.get("timbre"))
+        if sample is not None:
+            self._l.set_sample(_samples(sample))
 
     def push(self, pcm: Any) -> Tuple[np.ndarray, List[dict]]:
         """Samples in (float32, or int16), the ones ready out, and the events (speech, idle, diag, then turns and interruptions), in seconds from the stream's start."""
@@ -562,9 +577,12 @@ class Live:
         """The far end (the agent's voice) starts or stops: speech that starts while it speaks may interrupt it."""
         self._l.far_end_active(on)
 
-    def set_voiceprint(self, embedding: Any) -> None:
-        """Applied at the next silence, from a fresh state; None goes back to the closest voice."""
-        self._l.set_print(_samples(_print(embedding)) if embedding is not None else None)
+    def set_voiceprint(self, voiceprint: Any) -> None:
+        """As `Chain.set_voiceprint`."""
+        voiceprint, sample = _voice(self._models, voiceprint)
+        self._l.set_print(_samples(voiceprint.embedding) if voiceprint is not None else None)
+        if sample is not None:
+            self._l.set_sample(_samples(sample))
 
     def set_strength(self, s: float) -> None:
         """How much of Focus goes out, 0 to 1, the rest being the raw mic: 0.8 is 80 % Focus."""
@@ -636,9 +654,9 @@ class Timbre:
         _needs(models, "timbre")
         self._t = _alkove.Timbre(models.get("timbre"))
 
-    def embed(self, pcm: Any, *, source: str = "raw") -> Voiceprint:
-        """Windows of 1.5 s, half overlapping, their mean without the 10 % least alike; `source` says the audio was raw or Focus's output."""
-        return Voiceprint(self._t.embed(_samples(pcm), source))
+    def embed(self, pcm: Any) -> Voiceprint:
+        """Windows of 1.5 s, half overlapping, their mean without the 10 % least alike."""
+        return Voiceprint(self._t.embed(_samples(pcm), "raw"))
 
     @staticmethod
     def verify(a: Voiceprint, b: Voiceprint, *, level: str = "balanced") -> Tuple[bool, float]:
@@ -656,10 +674,10 @@ class Timbre:
 class VoiceprintLearner:
     """A print learned from the user's speech, as the inputs of the web SDK learn it: a window joins only if it sounds like the others."""
 
-    def __init__(self, models: Models, *, voiceprint: Optional[Voiceprint] = None, source: str = "raw"):
+    def __init__(self, models: Models, *, voiceprint: Optional[Voiceprint] = None):
         _needs(models, "timbre")
         self._t = _alkove.Timbre(models.get("timbre"))
-        self._l = _alkove.Learner(source, voiceprint._data if voiceprint is not None else None)
+        self._l = _alkove.Learner("raw", voiceprint._data if voiceprint is not None else None)
 
     def offer(self, pcm: Any) -> dict:
         """Speech of any length, cut into 1.5 s windows, quiet ones skipped: {accepted, rejected, restarted, progress, ready}."""
