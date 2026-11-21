@@ -85,6 +85,7 @@ pub enum Dtype {
     F32,
     I8,
     Q4,
+    F16,
 }
 
 fn f16(h: u16) -> f32 {
@@ -106,6 +107,7 @@ pub fn weight(r: &mut Reader, blobs: &[u8]) -> Result<Vec<f32>, Error> {
         0 => Dtype::F32,
         1 => Dtype::I8,
         2 => Dtype::Q4,
+        3 => Dtype::F16,
         _ => return Err(Error::Format("unknown weight type")),
     };
     let len = r.usize()?;
@@ -114,6 +116,7 @@ pub fn weight(r: &mut Reader, blobs: &[u8]) -> Result<Vec<f32>, Error> {
     let f32s = |off: usize, n: usize| -> Result<Vec<f32>, Error> { Ok(bytes(off, size(&[4, n])?)?.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect()) };
     match dtype {
         Dtype::F32 => f32s(off, len),
+        Dtype::F16 => Ok(bytes(off, size(&[2, len])?)?.as_chunks::<2>().0.iter().map(|b| f16(u16::from_le_bytes(*b))).collect()),
         Dtype::I8 => {
             let channels = r.usize()?;
             let inner = r.usize()?;
@@ -169,5 +172,16 @@ mod tests {
         }
         assert_eq!(super::f16(0x7c00), f32::INFINITY);
         assert!(super::f16(0x7e00).is_nan());
+    }
+
+    #[test]
+    fn f16_weight() {
+        let words: Vec<u8> = [3u32, 3, 16].iter().flat_map(|w| w.to_le_bytes()).collect();
+        let mut blobs = vec![0u8; 16];
+        blobs.extend([0x3c00u16, 0xc000, 0x3555].iter().flat_map(|h| h.to_le_bytes()));
+        let got = super::weight(&mut super::Reader::new(&words), &blobs).unwrap();
+        assert_eq!(got, vec![1.0, -2.0, 0.333_251_95]);
+        let short: Vec<u8> = [3u32, 4, 16].iter().flat_map(|w| w.to_le_bytes()).collect();
+        assert!(super::weight(&mut super::Reader::new(&short), &blobs).is_err());
     }
 }

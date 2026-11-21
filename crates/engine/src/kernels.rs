@@ -722,23 +722,24 @@ unsafe fn gather(a: *mut f32, g: &Gather, w: &[Vec<f32>]) {
 }
 
 // b packed into panels in the scratch for each batch, then the matrix kernel as for weights
-unsafe fn matmul(a: *mut f32, mm: &Matmul) {
+unsafe fn matmul(a: *mut f32, mm: &Matmul, t: usize) {
     let (x, y, o) = (&mm.a, &mm.b, &mm.out);
-    let panels = mm.n.div_ceil(gemm::PANEL);
-    let packed = view_mut(a.add(mm.scratch), panels * gemm::PANEL * mm.k);
+    let (m, k, n) = (mm.m.at(t), mm.k.at(t), mm.n.at(t));
+    let panels = n.div_ceil(gemm::PANEL);
+    let packed = view_mut(a.add(mm.scratch), panels * gemm::PANEL * k);
     for b0 in 0..mm.batch[0] {
         for b1 in 0..mm.batch[1] {
             let (xa, yb, ob) = (x[0] + b0 * x[1] + b1 * x[2], y[0] + b0 * y[1] + b1 * y[2], o[0] + b0 * o[1] + b1 * o[2]);
             for q in 0..panels {
-                for kk in 0..mm.k {
+                for kk in 0..k {
                     for l in 0..gemm::PANEL {
                         let j = q * gemm::PANEL + l;
-                        packed[(q * mm.k + kk) * gemm::PANEL + l] = if j < mm.n { *a.add(yb + kk * y[3] + j * y[4]) } else { 0.0 };
+                        packed[(q * k + kk) * gemm::PANEL + l] = if j < n { *a.add(yb + kk * y[3] + j * y[4]) } else { 0.0 };
                     }
                 }
             }
-            let rows = gemm::Rows { rows: |i: usize| Row { p: a.add(xa + i * x[3]), s: x[4] as isize }, k: mm.k };
-            gemm::run(&rows, mm.m, packed, mm.k, mm.n, |i, j, v| *a.add(ob + i * o[3] + j) = v);
+            let rows = gemm::Rows { rows: |i: usize| Row { p: a.add(xa + i * x[3]), s: x[4] as isize }, k };
+            gemm::run(&rows, m, packed, k, n, |i, j, v| *a.add(ob + i * o[3] + j) = v);
         }
     }
 }
@@ -926,6 +927,6 @@ pub unsafe fn exec(a: *mut f32, op: &Op, w: &[Vec<f32>], t: usize) {
         Op::Irfft { x, s, si, n, fft, plan, out, scratch } => irfft(a, *x, *s, *si, *n, &w[*fft], plan, *out, *scratch),
         Op::Where { dims: d, c, a: x, b: y, out } => each(dims(d, t), |i| *a.offset(at(out, i)) = if load(a, c, i, w) != 0.0 { load(a, x, i, w) } else { load(a, y, i, w) }),
         Op::Gather(g) => gather(a, g, w),
-        Op::Matmul(m) => matmul(a, m),
+        Op::Matmul(m) => matmul(a, m, t),
     }
 }

@@ -236,9 +236,9 @@ pub struct Gather {
 #[derive(Debug)]
 pub struct Matmul {
     pub batch: [usize; 2],
-    pub m: usize,
-    pub k: usize,
-    pub n: usize,
+    pub m: Dim,
+    pub k: Dim,
+    pub n: Dim,
     pub a: [usize; 5],
     pub b: [usize; 5],
     pub out: [usize; 5],
@@ -772,7 +772,8 @@ pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], ffts:
         }
         MATMUL => {
             let batch = [r.usize()?, r.usize()?];
-            let (m, k, n) = (r.usize()?, r.usize()?, r.usize()?);
+            let (md, kd, nd) = (Dim(r.u32()?), Dim(r.u32()?), Dim(r.u32()?));
+            let (m, k, n) = (c.at(md), c.at(kd), c.at(nd));
             let mut five = || -> Result<[usize; 5], Error> { Ok([r.usize()?, r.usize()?, r.usize()?, r.usize()?, r.usize()?]) };
             let (a, b, out) = (five()?, five()?, five()?);
             let scratch = r.usize()?;
@@ -785,7 +786,7 @@ pub fn decode(code: u32, words: &[u8], arena: usize, weights: &[Vec<f32>], ffts:
             }
             apart(so, &[Some(sa), Some(sb), Some(ss)])?;
             apart(ss, &[Some(sa), Some(sb)])?;
-            Op::Matmul(Matmul { batch, m, k, n, a, b, out, scratch })
+            Op::Matmul(Matmul { batch, m: md, k: kd, n: nd, a, b, out, scratch })
         }
         _ => return Err(Error::Format("unknown instruction")),
     };
