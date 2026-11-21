@@ -32,11 +32,14 @@ const TIMING_HOPS = 125
 
 export interface RealtimeOptions {
   pipeline: 'call' | 'agent' | 'wake' | 'enroll'
-  enroll?: { word: WordJSON; takes: number }
+  enroll?: { word: WordJSON; takes?: number }
   verify?: boolean
-  chain?: ChainOptions & { levels?: boolean; near?: boolean | { gapDb?: number } }
+  onlyMyVoice?: boolean
+  chain?: ChainOptions & { levels?: boolean; near?: boolean }
   words?: WordJSON[]
   context?: Context
+  // an agent's wake words: Spot on the raw mic, each word decides far for what follows
+  wake?: boolean
   learn?: boolean
   keepRecent?: number
   trace?: boolean
@@ -69,21 +72,22 @@ function emitTo(r: Realtime, e: Record<string, unknown>): void {
   if (typeof e.end === 'number') e.end += s
   if (typeof e.at === 'number') e.at += s
   const d = e.data as Record<string, unknown> | undefined
-  if (e.type === 'diag' && typeof d?.start === 'number' && typeof d.end === 'number') {
-    d.start += s
-    d.end += s
+  if (e.type === 'diag' && d) {
+    if (typeof d.start === 'number') d.start += s
+    if (typeof d.end === 'number') d.end += s
   }
   r.events.push(e)
 }
 
 const words = (list: WordJSON[]) => list.map((w) => wordOf(w).toJSON())
-const enrolling = (spec: { word: WordJSON; takes: number } | null | undefined) => (spec ? { word: wordOf(spec.word).toJSON(), takes: spec.takes } : null)
+const enrolling = (spec: { word: WordJSON; takes?: number } | null | undefined) => (spec ? { word: wordOf(spec.word).toJSON(), takes: spec.takes } : null)
 
 function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out: MessagePort | null): Realtime {
   const chained = opts.pipeline !== 'wake' && opts.pipeline !== 'enroll'
   const p = engine!.pipeline({
     chain: chained ? (opts.chain ?? {}) : null,
     verify: !!(opts.verify && bg),
+    onlyMyVoice: !!(opts.onlyMyVoice && bg && chained),
     learn: !!(opts.learn && bg),
     keepRecent: opts.keepRecent ?? 0,
     trace: !!opts.trace,
@@ -91,19 +95,28 @@ function realtime(id: number, opts: RealtimeOptions, bg: MessagePort | null, out
     output: opts.output ?? null,
     words: words(opts.words ?? []),
     context: opts.context ?? 'anywhere',
+    wake: !!opts.wake && chained,
     enroll: enrolling(opts.enroll),
     turn: opts.turn ?? false,
     interrupt: opts.interrupt ?? false,
   })
-  const r: Realtime = { id, port: null, closed: false, timer: setInterval(() => flush(r), EVENT_MS), opts, p, events: [], shift: 0, timing: { n: 0, sum: 0, max: 0, slow: 0 }, bg, out, recordId: null }
-  if (bg && opts.verify)
-    bg.addEventListener('message', (ev: MessageEvent) => {
-      if (ev.data.type !== 'verified' || r.closed) return
-      r.p.verified(ev.data.key, ev.data.same, ev.data.score)
-      drain(r)
-    })
+  const r: Realtime = { id, port: null, closed: false, timer: setInterval(() => flush(r), EVENT_MS), opts, p, events: [], shift: 0, timing: { n: 0, sum: 0, max: 0, slow: 0 }, bg: null, out, recordId: null }
+  if (bg) attach(r, bg)
   inputs.set(id, r)
   return r
+}
+
+// the background side: the prints it learned, and its answers on the voices it checked
+function attach(r: Realtime, bg: MessagePort): void {
+  r.bg = bg
+  bg.onmessage = (ev: MessageEvent) => {
+    if (r.closed) return
+    if (ev.data.type === 'print') r.p.set({ print: ev.data.embedding })
+    else if (ev.data.type === 'verified' && (r.opts.verify || r.opts.onlyMyVoice)) {
+      r.p.verified(ev.data.key, ev.data.same, ev.data.score)
+      drain(r)
+    }
+  }
 }
 
 // audio and utterances go to the app's own port when it gave one, else to the main thread
@@ -280,14 +293,20 @@ self.onmessage = async (e: MessageEvent) => {
         for (const [name, bytes] of Object.entries(m.models as Record<ModelName, ArrayBuffer>)) models.set(name as ModelName, new Uint8Array(bytes))
         post({ type: 'reply', id: m.id, result: true })
         break
-      case 'realtime': {
+      case 'realtime':
         dispose(m.input)
-        const r = realtime(m.input, m.opts, m.bg ?? null, m.out ?? null)
-        if (m.bg)
-          (m.bg as MessagePort).onmessage = (ev: MessageEvent) => {
-            if (ev.data.type === 'print' && !r.closed) r.p.set({ print: ev.data.embedding })
-          }
+        realtime(m.input, m.opts, m.bg ?? null, m.out ?? null)
         post({ type: 'reply', id: m.id, result: true })
+        break
+      // an agent's first farEndActive(): its windows go to the background from now on
+      case 'learn': {
+        const r = inputs.get(m.input)
+        if (!r) break
+        if (m.bg) {
+          r.bg?.close()
+          attach(r, m.bg)
+        }
+        if (r.bg) r.p.set({ learn: true })
         break
       }
       case 'worklet': {

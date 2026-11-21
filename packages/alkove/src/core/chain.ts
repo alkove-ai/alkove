@@ -15,6 +15,7 @@ export interface ChainOptions {
   normalize?: boolean
   strength?: number
   print?: ArrayLike<number> | null
+  sample?: ArrayLike<number> | null
   speech?: Partial<SpeechParams>
   sleep?: boolean
 }
@@ -67,7 +68,7 @@ export class Chain {
     this.ptr = 0
   }
 
-  // applied at the next silence, from a fresh state
+  // applied at the next hop, Focus's state kept
   setPrint(embedding: ArrayLike<number> | null): void {
     const x = this.alk.x
     if (!embedding) x.alk_chain_print(this.ptr, 0, 0)

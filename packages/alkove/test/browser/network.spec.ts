@@ -4,7 +4,7 @@ import { MODELS } from '../../src/manifest'
 import { expect, open, test } from './fixtures'
 
 // every request the page may make: the test page, its scripts, the package, the models, the fixtures
-const ALLOWED = [/^\/csp\.html$/, /^\/browser\/(csp|lib)\.js$/, /^\/dist\/[\w./-]+$/, /^\/models\/alkove-[a-z]+-1-preview\.alk$/, /^\/fixtures\/[\w.]+$/, /^\/favicon\.ico$/]
+const ALLOWED = [/^\/csp\.html$/, /^\/browser\/(csp|lib)\.js$/, /^\/dist\/[\w./-]+$/, /^\/models\/alkove-[a-z]+-1(-preview)?\.alk$/, /^\/fixtures\/[\w.]+$/, /^\/favicon\.ico$/]
 
 test.describe('network guarantee', () => {
   test('under the strict CSP, cache empty: every model and script from the page origin, no violation, no other request', async ({ page, origin, serverLog, browserName }) => {

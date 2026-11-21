@@ -59,7 +59,7 @@ describe('engine', () => {
       expect(maxDiff(got.embedding!.data, want.embedding!.data)).toBe(0)
       fresh.release()
     }
-    for (const n of [TIMBRE.min - 1, TIMBRE.window + 1]) expect(() => s.call({ audio: { data: noise(n), dims: [1, n] } })).toThrow(EngineError)
+    for (const n of [TIMBRE.min - 1, TIMBRE.max + 1]) expect(() => s.call({ audio: { data: noise(n), dims: [1, n] } })).toThrow(EngineError)
     s.release()
   })
 

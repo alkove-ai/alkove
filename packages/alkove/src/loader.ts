@@ -5,9 +5,9 @@ export type Source = ArrayBuffer | Uint8Array | URL | string
 
 export interface Config {
   models?: Partial<Record<ModelName | 'engine', Source>>
+  // in Node, a folder path or a file: URL too
   modelBaseUrl?: string | URL
   assetBaseUrl?: string | URL
-  modelDir?: string
 }
 
 export interface Progress {
@@ -167,14 +167,23 @@ export async function loadFile(file: ModelFile, onProgress?: (p: Progress) => vo
       const { readFile } = await import('node:fs/promises')
       return verified(file, new Uint8Array(await readFile(new URL(String(own)))))
     }
-    if (config.modelDir) {
+    const dir = folderOf(config.modelBaseUrl)
+    if (dir) {
       const { readFile } = await import('node:fs/promises')
       const { join } = await import('node:path')
-      return verified(file, new Uint8Array(await readFile(join(config.modelDir, file.file))))
+      return verified(file, new Uint8Array(await readFile(join(await dir, file.file))))
     }
     return fromSource(file, own ?? urlOf(file), onProgress)
   }
   return cached(file, () => fromSource(file, own ?? urlOf(file), onProgress))
+}
+
+// Node: modelBaseUrl as a folder, a path or a file: URL (a one-letter scheme is a Windows drive)
+function folderOf(base: string | URL | undefined): Promise<string> | null {
+  if (!base) return null
+  const s = String(base)
+  if (s.startsWith('file:')) return import('node:url').then((u) => u.fileURLToPath(s))
+  return /^[a-z][a-z0-9+.-]+:/i.test(s) ? null : Promise.resolve(s)
 }
 
 export function loadModel(name: ModelName, onProgress?: (p: Progress) => void): Promise<Uint8Array> {

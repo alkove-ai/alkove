@@ -25,6 +25,8 @@ test.describe('createCallInput', () => {
       const word = await lib.sdk.Spot.compile('amendement', { lang: 'fr' })
       const ctx = new AudioContext({ sampleRate: 48000 })
       const input = await lib.sdk.createCallInput({ audioContext: ctx })
+      // a far end that talks: no learned print, the output stays what Alkove.process gives without one
+      input.farEndActive(true)
       const log = lib.watch(input)
       const mic = await lib.record(ctx, got!.getAudioTracks()[0])
       const wakes: any[] = []
@@ -133,7 +135,7 @@ test.describe('createCallInput', () => {
     expect(r).toBe('AbortError')
   })
 
-  test('diags raised while the input is created reach the app: learn.no-far-end, mic.twice, mic.processed', async ({ page, origin, browserName }) => {
+  test('diags raised while the input is created reach the app: mic.twice, mic.processed', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
@@ -142,7 +144,7 @@ test.describe('createCallInput', () => {
       lib.sdk.Alkove.onDiag((d: any) => seen.push(d.code))
       const ctx = new AudioContext({ sampleRate: 48000 })
       const player = new lib.Player(ctx)
-      const a = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, learn: true })
+      const a = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx })
       a.on('diag', (d: any) => seen.push(d.code))
       const b = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx })
       b.on('diag', (d: any) => seen.push(d.code))
@@ -158,7 +160,6 @@ test.describe('createCallInput', () => {
       for (const i of inputs) i.dispose()
       return { seen, chrome: inputs.length === 3 }
     })
-    expect(r.seen).toContain('learn.no-far-end')
     expect(r.seen).toContain('mic.twice')
     if (r.chrome) expect(r.seen).toContain('mic.processed')
   })
@@ -192,7 +193,7 @@ test.describe('createCallInput', () => {
 
   test('on a played stream: speech, word and output where Alkove.process puts them, at the announced delay', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
-    const ref = await reference('speech.wav', { focus: true })
+    const ref = await reference('speech.wav', { focus: true, normalize: true })
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
       const lib = window.lib
@@ -201,7 +202,9 @@ test.describe('createCallInput', () => {
       const speech = await player.load('speech.wav')
       const mix = await player.load('mix.wav')
       const word = await lib.sdk.Spot.compile('amendement', { lang: 'fr' })
-      const input = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, normalize: false })
+      const input = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx })
+      // a far end that talks: no learned print, the output stays what Alkove.process gives without one
+      input.farEndActive(true)
       const log = lib.watch(input)
       const wakes: any[] = []
       input.spot([word]).on('wake', (w: any) => wakes.push(lib.plain(w)))
@@ -210,7 +213,7 @@ test.describe('createCallInput', () => {
       const recorded = input.record(mix.duration + 1.5)
       const whenMix = player.play(mix, { delay: 0.3 })
       const { left, right } = await lib.stereo(await recorded)
-      const proc = await lib.sdk.Alkove.process({ pcm: left, rate: 16000 }, { focus: true })
+      const proc = await lib.sdk.Alkove.process({ pcm: left, rate: 16000 }, { focus: true, normalize: true })
       await lib.until(() => ctx.currentTime > whenMix + mix.duration + 3, 30000, 'quiet after the first file')
       // then the clean voice, for the times and the delay: the worklet has paid back what it owed from the start (see the latency test)
       const recOut = await lib.record(ctx, input.track)
@@ -257,7 +260,7 @@ test.describe('createCallInput', () => {
 
   test('input.latency follows the real delay when the worklet starved (call.spot() mid-call blocks the worker)', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
-    const ref = await reference('speech.wav', { focus: true })
+    const ref = await reference('speech.wav', { focus: true, normalize: true })
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
       const lib = window.lib
@@ -265,7 +268,8 @@ test.describe('createCallInput', () => {
       const player = new lib.Player(ctx)
       const buf = await player.load('speech.wav')
       const word = await lib.sdk.Spot.compile('amendement', { lang: 'fr' })
-      const input = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, normalize: false })
+      const input = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx })
+      input.farEndActive(true)
       const log = lib.watch(input, ['diag'])
       await lib.until(() => input.mode === 'focus', 20000, 'focus mode')
       await lib.sleep(4000)
@@ -351,7 +355,7 @@ test.describe('createCallInput', () => {
     expect(r.modes).toEqual([{ mode: 'focus' }, { mode: 'raw', reason: 'overload' }, { mode: 'focus' }])
   })
 
-  test('normalize, speech, keepRecent, stats and trace each change something', async ({ page, origin, browserName }) => {
+  test('keepRecent and trace change something; the voice is leveled and stats counted without asking', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
@@ -360,44 +364,36 @@ test.describe('createCallInput', () => {
       const player = new lib.Player(ctx)
       const buf = await player.load('speech.wav')
       const base = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx })
-      const other = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, normalize: false, speech: { stopSecs: 2 }, keepRecent: 10, stats: true, trace: true })
-      const logs = [lib.watch(base, ['speechend', 'diag']), lib.watch(other, ['speechend', 'diag'])]
+      const other = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, keepRecent: 10, trace: true })
       const traces = { base: 0, other: 0 }
       base.on('trace', (t: any[]) => (traces.base += t.length))
       other.on('trace', (t: any[]) => (traces.other += t.length))
       await lib.until(() => base.mode === 'focus' && other.mode === 'focus', 20000, 'focus mode')
-      const recs = [base.record(buf.duration + 3), other.record(buf.duration + 3)]
+      const rec = base.record(buf.duration + 3)
       // a phone-like level, under the leveler's target
       player.play(buf, { delay: 0.2, gain: 0.25 })
-      const [a, b] = await Promise.all(recs.map(async (p) => (await lib.stereo(await p)).right))
+      const { left, right } = await lib.stereo(await rec)
       const recent = [await base.recent(), await other.recent()]
-      const stats = [await base.stats(), await other.stats()]
+      const stats = await base.stats()
       base.dispose()
       other.dispose()
-      const ends = logs.map((l: any[]) => l.filter((e) => e.type === 'speechend').map((e) => ({ end: e.v.end, at: e.now })))
-      return { rms: [lib.rms(a, 32000, 64000), lib.rms(b, 32000, 64000)], ends, recent: recent.map((x: Blob | null) => x?.size ?? null), stats, traces }
+      return { rms: [lib.rms(right, 32000, 64000), lib.rms(left, 32000, 64000)], recent: recent.map((x: Blob | null) => x?.size ?? null), stats, traces }
     })
-    // normalize (on by default): the quiet voice comes out louder
+    // leveled: the quiet voice comes out louder than the mic gave it
     expect(20 * Math.log10(r.rms[0] / r.rms[1])).toBeGreaterThan(3)
-    // speech.stopSecs: the same last speech frame, told 1.4 s later (2 s of quiet asked instead of 0.6)
-    expect(r.ends[0]).toHaveLength(1)
-    expect(r.ends[1]).toHaveLength(1)
-    expect(Math.abs(r.ends[1][0].end - r.ends[0][0].end)).toBeLessThan(0.05)
-    expect(r.ends[1][0].at - r.ends[0][0].at).toBeGreaterThan(1.2)
     // keepRecent: the last seconds as a stereo WAV; none without it
     expect(r.recent[0]).toBeNull()
     expect(r.recent[1]).toBeGreaterThan(44 + 4 * 16000 * 5)
-    // stats
-    expect(r.stats[0]).toBeNull()
-    expect(r.stats[1].seconds).toBeGreaterThan(5)
-    expect(r.stats[1].speechSeconds).toBeGreaterThan(1.5)
-    expect(r.stats[1].speechSeconds).toBeLessThan(r.stats[1].seconds)
+    // stats, counted without asking
+    expect(r.stats.seconds).toBeGreaterThan(5)
+    expect(r.stats.speechSeconds).toBeGreaterThan(1.5)
+    expect(r.stats.speechSeconds).toBeLessThan(r.stats.seconds)
     // trace
     expect(r.traces.base).toBe(0)
     expect(r.traces.other).toBeGreaterThan(20)
   })
 
-  test('strength 0 and setEnabled(false): the raw mic at the chain delay, mode raw "off", then back', async ({ page, origin, browserName }) => {
+  test('strength 0: the leveled mic; setEnabled(false): the raw mic at the chain delay, mode raw "off", then back', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
@@ -405,31 +401,31 @@ test.describe('createCallInput', () => {
       const ctx = new AudioContext({ sampleRate: 48000 })
       const player = new lib.Player(ctx)
       const buf = await player.load('mix.wav')
-      const weak = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, strength: 0, normalize: false })
-      const off = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, normalize: false })
+      const weak = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, strength: 0 })
+      const off = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx })
+      // a far end that talks: no learned print, the output stays what Alkove.process gives without one, and the mode focus
+      for (const i of [weak, off]) i.farEndActive(true)
       const modes = lib.watch(off, ['mode'])
       await lib.until(() => weak.mode === 'focus' && off.mode === 'focus', 20000, 'focus mode')
       const running = await off.setEnabled(false)
       const recs = [weak.record(buf.duration + 1), off.record(buf.duration + 1)]
       player.play(buf, { delay: 0.2 })
       const [a, b] = await Promise.all(recs.map(async (p) => lib.stereo(await p)))
+      const leveled = await lib.sdk.Alkove.process({ pcm: a.left, rate: 16000 }, { focus: { strength: 0 }, normalize: true })
       const back = await off.setEnabled(true)
       weak.dispose()
       off.dispose()
-      return { running, back, modes: modes.map((e: any) => e.v), weak: [lib.b64(a.left), lib.b64(a.right)], off: [lib.b64(b.left), lib.b64(b.right)] }
+      return { running, back, modes: modes.map((e: any) => e.v), weak: [lib.b64(leveled.audio), lib.b64(a.right)], off: [lib.b64(b.left), lib.b64(b.right)] }
     })
     expect(r.running).toBe(false)
     expect(r.back).toBe(true)
     expect(r.modes).toEqual([{ mode: 'focus' }, { mode: 'raw', reason: 'off' }, { mode: 'focus' }])
-    for (const [l, rt] of [r.weak, r.off]) {
-      const left = fromB64(l)
-      const right = fromB64(rt)
-      // in speech, where the gate is open: the mic itself, CHAIN samples later
-      expect(residualDb(left, right, 24000, 32000, CHAIN)).toBeLessThan(-30)
-    }
+    // in speech, where the gate is open, CHAIN samples later: strength 0, the mic as Alkove.process levels it; off, the mic itself
+    expect(residualDb(fromB64(r.weak[0]), fromB64(r.weak[1]), 24000, 32000, CHAIN)).toBeLessThan(-25)
+    expect(residualDb(fromB64(r.off[0]), fromB64(r.off[1]), 24000, 32000, CHAIN)).toBeLessThan(-30)
   })
 
-  test('voiceprint, learn and farEnd: focus+print, the print learned while the user talks, not while the far end talks', async ({ page, origin, browserName }) => {
+  test('voiceprint and farEnd: focus+print, the print learned while the user talks, not while the far end talks', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     test.slow()
     await open(page, origin)
@@ -455,13 +451,14 @@ test.describe('createCallInput', () => {
       src.loop = true
       src.connect(talking)
       src.start()
-      const me = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, learn: true, farEnd: quiet.stream.getAudioTracks()[0] })
-      const busy = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, learn: true, farEnd: talking.stream.getAudioTracks()[0] })
+      const me = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, farEnd: quiet.stream.getAudioTracks()[0] })
+      const busy = await lib.sdk.createCallInput({ stream: player.stream, audioContext: ctx, farEnd: talking.stream.getAudioTracks()[0] })
       const logs = [lib.watch(me, ['learn', 'voiceprint', 'mode']), lib.watch(busy, ['learn', 'voiceprint', 'mode'])]
       await lib.until(() => me.mode === 'focus' && busy.mode === 'focus', 20000, 'focus mode')
       await lib.sleep(2200)
       player.play(buf, { delay: 0.2, times: 4, gap: 0.5 })
-      await lib.until(() => me.mode === 'focus+print' || ctx.currentTime > player.end + 2, 60000, 'learned')
+      // the mode turns focus+print with the first window already: the learned print is the voiceprint event
+      await lib.until(() => logs[0].some((e: any) => e.type === 'voiceprint') || ctx.currentTime > player.end + 2, 60000, 'learned')
       await lib.sleep(500)
       const out = { printedMode, me: logs[0], busy: logs[1], print: me.voiceprint ? timbre.verify(me.voiceprint, print) : null }
       me.dispose()

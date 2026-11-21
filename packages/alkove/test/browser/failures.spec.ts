@@ -3,7 +3,7 @@ import type { ConsoleMessage } from '@playwright/test'
 import { MODELS } from '../../src/manifest'
 import { expect, fromB64, locate, open, test, wavPcm } from './fixtures'
 
-const FOCUS_FILE = 'alkove-focus-1-preview.alk'
+const FOCUS_FILE = MODELS.focus.file
 
 test.describe('failures', () => {
   test('models in 404: raw "failed", the raw mic at the same delay, new tries after 5 s then 10 s, focus once they are back', async ({ page, origin, serverLog, browserName }) => {
@@ -270,10 +270,11 @@ test.describe('failures', () => {
       return { before, after, wake, progress }
     })
     expect(r.before).toBe(false)
-    expect(r.after).toEqual({ call: true, print: false, wake: false })
-    expect(r.wake).toEqual({ plain: true, typed: true, print: false })
-    // Focus and Cue, in bytes
-    expect(r.progress.at(-1)).toEqual({ loaded: MODELS.focus.bytes + MODELS.cue.bytes, total: MODELS.focus.bytes + MODELS.cue.bytes })
+    // Focus comes with Timbre: a voiceprint asks for nothing more
+    expect(r.after).toEqual({ call: true, print: true, wake: false })
+    expect(r.wake).toEqual({ plain: true, typed: true, print: true })
+    const bytes = MODELS.focus.bytes + MODELS.cue.bytes + MODELS.timbre.bytes
+    expect(r.progress.at(-1)).toEqual({ loaded: bytes, total: bytes })
   })
 
   test('status "blocked" when the page has had no user gesture, "running" after resume() in a click (Safari)', async ({ page, origin, browserName }) => {

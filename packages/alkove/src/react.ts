@@ -21,7 +21,7 @@ export interface InputState<I> {
   resume: () => Promise<void>
 }
 
-type Live = { strength?: number; voiceprint?: Voiceprint | VoiceprintJSON | string | null }
+type Live = { strength?: number; voiceprint?: Voiceprint | VoiceprintJSON | string | Float32Array | null }
 type Input = AgentInput | CallInput | WakeListener
 type Opened = Input & { setStrength(s: number): void; setVoiceprint(p: Live['voiceprint']): void }
 type Forwarded = Exclude<keyof InputEvents, 'diag'>
@@ -98,7 +98,6 @@ function useInput<O extends object, I extends Input>(create: (o: O) => Promise<I
         setInput(i)
         setStatus(i.status)
         setMode(i.mode)
-        setTrack(i.track)
       },
       (e: unknown) => {
         if (abort.signal.aborted) return
@@ -143,18 +142,29 @@ function useInput<O extends object, I extends Input>(create: (o: O) => Promise<I
     await current.current?.resume()
   }, [])
 
-  return { input, status, mode, error, track, resume }
+  // read when the app reads it: an agent makes its track on the first access
+  return {
+    input,
+    status,
+    mode,
+    error,
+    get track() {
+      return track ?? input?.track ?? null
+    },
+    resume,
+  }
 }
 
-const LIVE = ['strength', 'voiceprint'] as const
+const CALL = ['strength', 'voiceprint'] as const
+const AGENT = ['voiceprint'] as const
 const NONE = [] as const
 
 export function useAgentInput(options: Omit<AgentOptions, 'signal'> & HookOptions = {}): InputState<AgentInput> {
-  return useInput(createAgentInput, options, LIVE)
+  return useInput(createAgentInput, options, AGENT)
 }
 
 export function useCallInput(options: Omit<CallOptions, 'signal'> & HookOptions = {}): InputState<CallInput> {
-  return useInput(createCallInput, options, LIVE)
+  return useInput(createCallInput, options, CALL)
 }
 
 export function useWakeListener(options: Omit<WakeOptions, 'signal'> & HookOptions): InputState<WakeListener> {

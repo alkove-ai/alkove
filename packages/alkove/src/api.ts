@@ -1,14 +1,14 @@
 import { Lex as LexCore, type Pronunciation } from './core/lex'
-import { type CompileOptions, type Word, type WordJSON, wordOf } from './core/spot/spot'
+import { type Chain, type CompileOptions, type Word, type WordJSON, wordOf } from './core/spot/spot'
 import { Enrollment, type EnrollTarget } from './recipes/enroll'
 import { type CommonOptions, createEnrollInput } from './recipes/input'
-import { type Center, type Level, Timbre as TimbreCore, Voiceprint, type VoiceprintJSON } from './core/timbre'
+import { type Center, type Level, type Source, Timbre as TimbreCore, Voiceprint, type VoiceprintJSON } from './core/timbre'
 import { Resampler } from './dsp/resample'
 import { decodeWav, encodeWav } from './dsp/wav'
 import { AlkoveError } from './errors'
 import { configure, isCached, onDiag, type Progress } from './loader'
 import { ENGINE_WASM, type Lang, type ModelName, MODELS, RATE } from './manifest'
-import type { ProcessOptions, ProcessPart, ProcessResult } from './process'
+import { type ProcessOptions, type ProcessPart, type ProcessResult, withVoice } from './process'
 import { micPermission, supported } from './recipes/mic'
 import type { CallName } from './runtime/calls'
 import { Host } from './runtime/host'
@@ -46,8 +46,8 @@ export interface UsageOptions {
 }
 
 function modelsFor(usage: Usage, o: UsageOptions = {}): ModelName[] {
-  const m: ModelName[] = usage === 'wake' ? ['spot'] : ['focus', 'cue']
-  if (o.voiceprint) m.push('timbre')
+  const m: ModelName[] = usage === 'wake' ? ['spot'] : ['focus', 'cue', 'timbre']
+  if (o.voiceprint && !m.includes('timbre')) m.push('timbre')
   if (o.typedWords) m.push('lex')
   return m
 }
@@ -111,6 +111,7 @@ export const Alkove = {
 
   // a file, faster than real time, in the background worker: the same output as the real time for the same 16 kHz audio
   async process(input: ProcessInput, opts: ProcessOptions = {}): Promise<ProcessResult> {
+    opts = await withVoice(opts)
     const pcm = await decode(input)
     opts.signal?.throwIfAborted()
     const b = await backend(modelsOf(opts))
@@ -126,7 +127,7 @@ export const Alkove = {
 
 function modelsOf(opts: ProcessOptions): ModelName[] {
   const names: ModelName[] = []
-  if (opts.focus) names.push('focus', 'cue')
+  if (opts.focus) names.push('focus', 'cue', 'timbre')
   else if (opts.cue) names.push('cue')
   if (opts.spot?.words.length) names.push('spot')
   return names
@@ -146,6 +147,7 @@ export type StreamSource = AsyncIterable<Float32Array> | ReadableStream<Float32A
 
 // long files (an hour) without keeping them in memory: blocks in, parts out, the same as process() on the whole
 async function* stream(source: StreamSource, opts: ProcessOptions & { rate?: number } = {}): AsyncGenerator<ProcessPart> {
+  opts = await withVoice(opts)
   const b = await backend(modelsOf(opts))
   const id = ++ids
   const release = b.hold()
@@ -202,8 +204,8 @@ export class Timbre {
   }
 
   // 1.5 s or more advised: windows of 1.5 s, mean without the 10 % least alike
-  async embed(pcm: Float32Array, opts: { source?: 'raw' | 'focus' } = {}): Promise<Voiceprint> {
-    return Voiceprint.fromJSON(await this.b.call<VoiceprintJSON>('embed', [pcm, opts.source ?? 'raw']))!
+  async embed(pcm: Float32Array): Promise<Voiceprint> {
+    return embedAs(pcm, 'raw', this.b)
   }
 
   verify(a: Voiceprint, b: Voiceprint, opts: { level?: Level } = {}): { same: boolean; score: number } {
@@ -237,24 +239,34 @@ export class Lex {
   }
 }
 
+// the print of the takes of a word, labelled with the audio it came from (the enrollments')
+export async function embedAs(pcm: Float32Array, source: Source, b?: Backend): Promise<Voiceprint> {
+  return Voiceprint.fromJSON(await (b ?? (await backend(['timbre']))).call<VoiceprintJSON>('embed', [pcm, source]))!
+}
+
+// a word for the raw mic, or for Focus's output (enrollWord)
+export async function compileWord(text: string, lang: CompileOptions['lang'], chain?: Chain): Promise<Word> {
+  for (const l of [lang ?? []].flat()) if (!LexCore.langs.includes(l)) throw new AlkoveError('lang.unsupported', `No ${l}: ${LexCore.langs.join(', ')} only.`)
+  const typed = /^\s*\/.+\/\s*$/.test(text)
+  const b = await backend(typed ? [] : ['lex'])
+  return wordOf(await b.call<WordJSON>('compile', [text, { lang, chain }]))
+}
+
 export const Spot = {
   // a typed word (Lex), or phonemes between slashes (no Lex)
-  async compile(text: string, opts: CompileOptions = {}): Promise<Word> {
-    for (const l of [opts.lang ?? []].flat()) if (!LexCore.langs.includes(l)) throw new AlkoveError('lang.unsupported', `No ${l}: ${LexCore.langs.join(', ')} only.`)
-    const typed = /^\s*\/.+\/\s*$/.test(text)
-    const b = await backend(typed ? [] : ['lex'])
-    return wordOf(await b.call<WordJSON>('compile', [text, { lang: opts.lang, chain: opts.chain }]))
+  compile(text: string, opts: CompileOptions = {}): Promise<Word> {
+    return compileWord(text, opts.lang)
   },
 
-  // the user says the word `takes` times: thresholds set from these takes and from what is heard between them
-  enroll(text: string, opts: CompileOptions & CommonOptions & { takes?: number } = {}): Enrollment {
+  // the user says the word three times: thresholds set from these takes and from what is heard between them
+  enroll(text: string, opts: CompileOptions & CommonOptions = {}): Enrollment {
     return new Enrollment({
       compile: () => Spot.compile(text, opts),
       open: async (word) => {
-        const input = await createEnrollInput(opts, word, opts.takes ?? 3)
+        const input = await createEnrollInput(opts, word)
         return { on: input.on.bind(input) as EnrollTarget['on'], stop: () => input.dispose(), source: 'raw' }
       },
-      embed: async (pcm, source) => (await Timbre.create()).embed(pcm, { source }),
+      embed: (pcm, source) => embedAs(pcm, source),
     })
   },
 }

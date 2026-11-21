@@ -6,7 +6,7 @@ Playwright, in Chromium, Firefox and WebKit, on the built package (`dist/`).
 pnpm build              # the tests run what dist/ holds
 npx playwright install chromium firefox webkit   # once
 pnpm test:browser       # all three browsers
-pnpm test:browser --project webkit -g onlyMyVoice
+pnpm test:browser --project webkit -g voiceprint
 ```
 
 The suite starts and stops its own server (`global-setup.ts`, `server.ts`, `node:http` on a free port of 127.0.0.1). It copies `dist/` first (another build may run meanwhile) and serves that copy, the models of `.cache/models/`, `test/fixtures/` and `pages/`. One worker: the real-time tests need the CPU they are promised.
@@ -18,10 +18,10 @@ Every test runs behind a route guard that fails it on any request outside the te
 | File | Covers |
 |---|---|
 | `process.spec.ts` | `Alkove.process` in the background worker against Node (speech, words, audio); Blob, ArrayBuffer, AudioBuffer, PCM at any rate; every process option reaches the worker and changes something; `Alkove.stream` from a `ReadableStream`; `Lex`, `Timbre`, `VoiceprintLearner` |
-| `call.spec.ts` | `createCallInput` on `getUserMedia` with Chromium's fake microphone (constraints, speech and word times, every loop, `input.record()` against `Alkove.process`, output track); on a played stream (times, `record()` against `Alkove.process` to −30 dB, output delay = `latency` once the MediaStream hops are taken off); `deviceId`; `normalize`, `speech`, `keepRecent`, `stats`, `trace`, `strength`, `setEnabled`, `voiceprint`, `learn`, `farEnd`; the overload fallback (Firefox); a `warn` nobody listens to in the console |
-| `agent.spec.ts` | `createAgentInput`: `ready`, `audio` and `utterance` in the asked format, rate and size, `withTrack`, `output.port`, `agent.spot()`, `learn` without `farEnd`, `wake` |
-| `wake.spec.ts` | `createWakeListener`: the word and its audio where Node finds it, `context`, `heard`, `onlyMyVoice` (same voice wakes, another gives `wake.other-voice`) |
-| `enroll.spec.ts` | `Spot.enroll` (`takes`, thresholds, print, `cancel()`, the word then heard), `call.enrollWord` then `call.spot()`, `word.chain` warning |
+| `call.spec.ts` | `createCallInput` on `getUserMedia` with Chromium's fake microphone (constraints, speech and word times, every loop, `input.record()` against `Alkove.process`, output track); on a played stream (times, `record()` against `Alkove.process` to −30 dB, output delay = `latency` once the MediaStream hops are taken off); `deviceId`; the leveling, `keepRecent`, `stats()`, `trace`, `strength`, `setEnabled`, `voiceprint`, the learned print and `farEnd`; the overload fallback (Firefox); a `warn` nobody listens to in the console |
+| `agent.spec.ts` | `createAgentInput`: `ready`, `audio` and `utterance` in the asked format, rate and size, the track made on first access, `output.port`, `agent.spot()`, `wake`, the print learned from the first `farEndActive()` |
+| `wake.spec.ts` | `createWakeListener`: the word and its audio where Node finds it, `context`, `heard`, `voiceprint` (same voice wakes, another gives `wake.other-voice`) |
+| `enroll.spec.ts` | `Spot.enroll` (three takes, thresholds, print, `cancel()`, the word then heard), `call.enrollWord` then `call.spot()`, `word.chain` warning |
 | `network.spec.ts` | the strict CSP of the CSP guide on an empty cache, every model and script from the page origin, no violation, the policy really applied; the default Hugging Face host caught by the guard |
 | `failures.spec.ts` | models in 404 (raw `failed`, raw mic at the same delay, new tries after 5 s then 10 s, back to focus; `ready` rejected then resolved, the browser's noise suppression on the SDK's own mic while raw); changed bytes (`models.hash`); `Alkove.supported()`, no AudioWorklet, no SIMD; `preload` and `cached`; `status` `blocked` then `resume()` in a click (WebKit); the packaged wasm found by default |
 

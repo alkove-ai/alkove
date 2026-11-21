@@ -37,7 +37,7 @@ export interface AlkExports {
   alk_lex_free(l: number): void
   alk_lex_phonemize(l: number): number
   alk_compile(l: number): number
-  alk_processor(focus: number, cue: number, spot: number): number
+  alk_processor(focus: number, cue: number, spot: number, timbre: number): number
   alk_processor_free(p: number): void
   alk_processor_push(p: number, pcm: number, len: number): number
   alk_processor_end(p: number): number
@@ -69,6 +69,7 @@ export interface AlkExports {
   alk_pipeline_step(p: number, farQuietMs: number): number
   alk_pipeline_raw(p: number): void
   alk_pipeline_spot(p: number, m: number): void
+  alk_pipeline_timbre(p: number, m: number): number
   alk_pipeline_outs(p: number): number
   alk_pipeline_pending(p: number): number
   alk_pipeline_verified(p: number, key: number, same: number, score: number): void

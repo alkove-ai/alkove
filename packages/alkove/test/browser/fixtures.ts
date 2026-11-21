@@ -88,7 +88,7 @@ export function nodeAlkove(): Promise<any> {
   return (node ??= (async () => {
     const dist = process.env.ALKOVE_DIST!
     const m = await import(pathToFileURL(join(dist, 'index.js')).href)
-    m.Alkove.configure({ modelDir: join(pkg, '.cache/models') })
+    m.Alkove.configure({ modelBaseUrl: join(pkg, '.cache/models') })
     return m
   })())
 }

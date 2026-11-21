@@ -69,7 +69,6 @@ export const wordOf = (w: Word | WordJSON | string): Word => {
 
 export interface CompileOptions {
   lang?: Lang | Lang[]
-  chain?: Chain
 }
 
 // one time the user said the word while enrolling it: its best score, whether it counts, where, and the pronunciation that won

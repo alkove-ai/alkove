@@ -189,11 +189,11 @@ export class NativeProcessor {
 
   constructor(
     private alk: Alk,
-    models: { focus?: Model; cue?: Model; spot?: Model },
+    models: { focus?: Model; cue?: Model; spot?: Model; timbre?: Model },
     options: Value,
   ) {
     send(alk, options)
-    this.ptr = alk.x.alk_processor(models.focus?.ptr ?? 0, models.cue?.ptr ?? 0, models.spot?.ptr ?? 0)
+    this.ptr = alk.x.alk_processor(models.focus?.ptr ?? 0, models.cue?.ptr ?? 0, models.spot?.ptr ?? 0, models.timbre?.ptr ?? 0)
     if (!this.ptr) alk.fail('processor')
   }
 
@@ -409,6 +409,11 @@ export class NativePipeline {
 
   spot(model: Model): void {
     this.alk.x.alk_pipeline_spot(live(this.ptr), model.ptr)
+  }
+
+  // Timbre for the chain (the far pass, the sample Focus takes from the stream), before the first hop
+  timbre(model: Model): void {
+    if (this.alk.x.alk_pipeline_timbre(live(this.ptr), model.ptr) < 0) this.alk.fail('pipeline.timbre')
   }
 
   raw(hop: Float32Array): void {

@@ -21,6 +21,8 @@ async function main(argv: string[]): Promise<void> {
     return
   }
   const wanted = (names.length ? names : Object.keys(MODELS)) as ModelName[]
+  // Focus takes its user's voice through Timbre: it comes along
+  if (wanted.includes('focus') && !wanted.includes('timbre')) wanted.push('timbre')
   for (const n of wanted) if (!(n in MODELS)) throw new Error(`unknown model ${n}`)
   await mkdir(dir, { recursive: true })
   configure({})

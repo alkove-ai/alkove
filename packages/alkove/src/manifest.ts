@@ -44,7 +44,8 @@ export const modelId = (m: ModelName) => `${MODELS[m].name}@${MODELS[m].sha256.s
 export const TIMBRE = {
   model: modelId('timbre'),
   window: 24000,
-  min: 280,
+  min: 1400,
+  max: 32000,
   dim: 192,
 }
 

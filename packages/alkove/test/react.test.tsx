@@ -9,7 +9,8 @@ class Fake {
   handlers = new Map<string, Set<(v: unknown) => void>>()
   status = 'running'
   mode = 'focus'
-  track = { id: 'out' } as unknown as MediaStreamTrack
+  out = { id: 'out' } as unknown as MediaStreamTrack
+  reads = 0
   disposed = false
   strength: number[] = []
   prints: unknown[] = []
@@ -17,6 +18,11 @@ class Fake {
 
   constructor(readonly opts: Record<string, unknown>) {
     Fake.all.push(this)
+  }
+
+  get track() {
+    this.reads++
+    return this.out
   }
 
   on(type: string, fn: (v: unknown) => void) {
@@ -161,26 +167,25 @@ describe('alkove/react', () => {
     expect(alive()).toEqual([result.current.input])
   })
 
-  it('an inline options object reopens nothing; a structural option reopens, strength and voiceprint apply live', async () => {
+  it('an inline options object reopens nothing; a structural option reopens, the voiceprint applies live', async () => {
     const print = { alkove: 'voiceprint', embedding: [1, 2] }
-    const { rerender } = renderHook((p: { near: boolean; strength: number; print: object }) => useAgentInput({ near: p.near, speech: { stopSecs: 0.8 }, strength: p.strength, voiceprint: p.print as never }), {
-      initialProps: { near: true, strength: 1, print },
+    const { rerender } = renderHook((p: { near: boolean; print: object }) => useAgentInput({ near: p.near, turn: { maxPause: 1.2 }, voiceprint: p.print as never }), {
+      initialProps: { near: true, print },
     })
     await flush()
-    rerender({ near: true, strength: 1, print: { ...print, embedding: [1, 2] } })
+    rerender({ near: true, print: { ...print, embedding: [1, 2] } })
     await flush()
     expect(Fake.all).toHaveLength(1)
     expect(Fake.all[0]!.prints).toEqual([])
-    rerender({ near: true, strength: 0.5, print: { ...print, embedding: [3] } })
+    rerender({ near: true, print: { ...print, embedding: [3] } })
     await flush()
     expect(Fake.all).toHaveLength(1)
-    expect(Fake.all[0]!.strength).toEqual([0.5])
     expect(Fake.all[0]!.prints).toEqual([{ ...print, embedding: [3] }])
-    rerender({ near: false, strength: 0.5, print })
+    rerender({ near: false, print })
     await flush()
     expect(Fake.all).toHaveLength(2)
     expect(Fake.all[0]!.disposed).toBe(true)
-    expect(Fake.all[1]!.opts).toMatchObject({ near: false, strength: 0.5, voiceprint: print })
+    expect(Fake.all[1]!.opts).toMatchObject({ near: false, turn: { maxPause: 1.2 }, voiceprint: print })
   })
 
   it('a failed opening gives the error and status off', async () => {
@@ -252,12 +257,15 @@ describe('alkove/react', () => {
     expect(Fake.all[1]!.prints).toEqual([])
   })
 
-  it('strength removed goes back to the default', async () => {
+  it("a call's strength applies live, and removed goes back to the default", async () => {
     const { rerender } = renderHook((p: { strength?: number }) => useCallInput({ strength: p.strength }), { initialProps: { strength: 0.3 } as { strength?: number } })
+    await flush()
+    rerender({ strength: 0.5 })
     await flush()
     rerender({})
     await flush()
-    expect(Fake.all[0]!.strength).toEqual([1])
+    expect(Fake.all).toHaveLength(1)
+    expect(Fake.all[0]!.strength).toEqual([0.5, 1])
   })
 
   it('switched off after a failed opening: the error goes', async () => {
@@ -267,6 +275,16 @@ describe('alkove/react', () => {
     expect(result.current.error).toBe(fail)
     rerender({ enabled: false })
     expect(result.current.error).toBeNull()
+  })
+
+  it("an agent's track is asked of the input only once the app reads it", async () => {
+    const { result } = renderHook(() => useAgentInput())
+    await flush()
+    const f = Fake.all[0]!
+    expect(result.current.status).toBe('running')
+    expect(f.reads).toBe(0)
+    expect(result.current.track).toBe(f.out)
+    expect(f.reads).toBe(1)
   })
 
   it('trackchange gives the new track', async () => {

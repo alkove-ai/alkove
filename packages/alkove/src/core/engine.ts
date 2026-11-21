@@ -68,7 +68,7 @@ export class WasmEngine implements Engine {
 
   processor(options: { focus: unknown; cue: boolean | null; spot: unknown }): NativeProcessor {
     const focus = !!options.focus
-    const models = { focus: focus ? this.model('focus') : undefined, cue: focus || options.cue ? this.model('cue') : undefined, spot: options.spot ? this.model('spot') : undefined }
+    const models = { focus: focus ? this.model('focus') : undefined, cue: focus || options.cue ? this.model('cue') : undefined, spot: options.spot ? this.model('spot') : undefined, timbre: focus ? this.model('timbre') : undefined }
     return new NativeProcessor(this.alk, models, options as Value)
   }
 
@@ -98,7 +98,9 @@ export class WasmEngine implements Engine {
   pipeline(options: { chain: unknown; words?: unknown[]; enroll?: unknown; [k: string]: unknown }): NativePipeline {
     const chain = !!options.chain
     const spot = !!options.words?.length || !!options.enroll
-    return new NativePipeline(this.alk, { focus: chain ? this.model('focus') : undefined, cue: chain ? this.model('cue') : undefined, spot: spot ? this.model('spot') : undefined }, options as Value)
+    const p = new NativePipeline(this.alk, { focus: chain ? this.model('focus') : undefined, cue: chain ? this.model('cue') : undefined, spot: spot ? this.model('spot') : undefined }, options as Value)
+    if (chain) p.timbre(this.model('timbre'))
+    return p
   }
 
   coach(reference: Value): NativeCoach {

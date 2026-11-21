@@ -5,13 +5,13 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { Alkove, Spot, Timbre, Voiceprint } from '../src/index'
 import { WasmEngine } from '../src/core/engine'
-import { processPcm } from '../src/process'
+import { processPcm, type ProcessOptions } from '../src/process'
 import { engineWasm, loadEngine, maxDiff, modelBytes, wav } from './helpers'
 
 let engine: WasmEngine
 beforeAll(async () => {
   engine = new WasmEngine(await loadEngine(), modelBytes)
-  Alkove.configure({ modelDir: join(import.meta.dirname, '../.cache/models'), models: { engine: new Uint8Array(engineWasm()) } })
+  Alkove.configure({ modelBaseUrl: join(import.meta.dirname, '../.cache/models'), models: { engine: new Uint8Array(engineWasm()) } })
 })
 
 const rms = (x: Float32Array) => Math.sqrt(x.reduce((s, v) => s + v * v, 0) / x.length)
@@ -46,6 +46,18 @@ describe('every option does something', () => {
     const a = processPcm(engine, mix(), { focus: true }).audio
     const b = processPcm(engine, mix(), { focus: { voiceprint: print } }).audio
     expect(maxDiff(a, b)).toBeGreaterThan(0.01)
+  })
+
+  it('focus.voiceprint as a recording: its print, and itself as the sample', async () => {
+    const pcm = mix()
+    const voice = wav('enroll.wav').subarray(0, 48000)
+    const print = await (await Timbre.create()).embed(voice)
+    // the sample given apart: the private path the lab's benches take
+    const given = await Alkove.process({ pcm, rate: 16000 }, { focus: { voiceprint: print, sample: voice } as ProcessOptions['focus'] })
+    const recorded = await Alkove.process({ pcm, rate: 16000 }, { focus: { voiceprint: voice } })
+    expect(maxDiff(recorded.audio, given.audio)).toBe(0)
+    const plain = await Alkove.process({ pcm, rate: 16000 }, { focus: { voiceprint: print } })
+    expect(maxDiff(recorded.audio, plain.audio)).toBeGreaterThan(1e-3)
   })
 
   it('cue params: a longer stopSecs joins segments, a higher confidence finds less speech', () => {

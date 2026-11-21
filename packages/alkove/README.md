@@ -19,23 +19,23 @@ ESM only, no runtime dependency (the engine, Alkove's own, is bundled). Works wi
 ```ts
 import { createCallInput } from 'alkove'
 
-const input = await createCallInput({ learn: true, farEnd: remoteTrack })
+const input = await createCallInput({ farEnd: remoteTrack })
 pc.addTrack(input.track)
 input.bind(pc.getSenders()[0]) // the SDK swaps in the raw mic if the audio clock stalls
 input.on('voiceprint', (p) => localStorage.setItem('print', JSON.stringify(p.toJSON())))
 ```
 
-Out goes the user's voice only, gated between sentences, at a steady level. With `learn: true`, the user's print is learned while they talk (about 6 s of their voice), then only their voice goes out.
+Out goes the user's voice only, gated between sentences, at a steady level. The user's print is learned while they talk (about 6 s of their voice), never while the far end does, then only their voice goes out.
 
 ## A voice agent (speech to text, LLM)
 
 ```ts
 import { createAgentInput } from 'alkove'
 
-const input = await createAgentInput({ farEnd: 'manual', output: { format: 's16', rate: 24000 } })
+const input = await createAgentInput({ output: { format: 's16', rate: 24000 } })
 input.on('audio', (pcm) => ws.send(pcm)) // continuous, 32 ms packets
 input.on('utterance', ({ pcm }) => transcribe(pcm)) // one segment per sentence, 300 ms of pre-roll included
-input.farEndActive(true) // the agent starts speaking; false when it stops
+input.farEndActive(true) // the agent starts speaking; false when it stops. From the first call, the user's print learns
 ```
 
 Nothing is cut: `audio` is continuous, `speechstart` / `speechend` tell where the user speaks.
@@ -54,7 +54,7 @@ const wake = await createWakeListener({ words: [word] })
 wake.on('wake', ({ word, start, audio }) => …)
 ```
 
-Any word, typed in one of 7 languages (fr, en, es, it, pt, ca, ro). By default it counts only after a pause (far fewer false alarms; "Bon, Camille, on y va ?" does not wake it, use `context: 'both'` for that). Enrolling the word (the user says it 3 times) sets its thresholds on their voice. `onlyMyVoice: print` ignores other voices.
+Any word, typed in one of 7 languages (fr, en, es, it, pt, ca, ro). By default it counts only after a pause (far fewer false alarms; "Bon, Camille, on y va ?" does not wake it, use `context: 'both'` for that). Enrolling the word (the user says it 3 times) sets its thresholds on their voice. `voiceprint: print` ignores other voices.
 
 ## React
 

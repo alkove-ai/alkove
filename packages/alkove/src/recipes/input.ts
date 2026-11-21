@@ -1,4 +1,4 @@
-import type { InterruptOptions, SpeechParams, TurnOptions } from '../core/cue'
+import type { TurnOptions } from '../core/cue'
 import type { Take } from '../core/spot/spot'
 import { type Context, type WakeEvent, type Word, type WordJSON, wordOf } from '../core/spot/spot'
 import type { Warning } from '../core/lex'
@@ -7,7 +7,7 @@ import { AlkoveError, type Diag } from '../errors'
 import { Emitter } from '../events'
 import { onDiag } from '../loader'
 import { FOCUS, type Lang, RATE } from '../manifest'
-import { printOf } from '../process'
+import { printOf, voiceOf, type VoiceprintInput } from '../process'
 import { type OutputOptions, Packer } from '../realtime/packer'
 import type { RealtimeOptions } from '../realtime/worker'
 import { Host, scriptUrl, type WorkerLink } from '../runtime/host'
@@ -54,22 +54,15 @@ export interface CommonOptions {
   track?: MediaStreamTrack
   audioContext?: AudioContext
   deviceId?: string
-  followDefault?: boolean
   signal?: AbortSignal
-  trace?: boolean
-  keepRecent?: number
 }
 
 export interface FocusOptions extends CommonOptions {
-  voiceprint?: Voiceprint | VoiceprintJSON | string | null
-  learn?: boolean
-  farEnd?: MediaStreamTrack | AudioNode | 'manual'
-  strength?: number
-  normalize?: boolean
-  stats?: boolean
-  speech?: Partial<SpeechParams>
-  levels?: boolean
-  near?: boolean | { gapDb?: number }
+  voiceprint?: VoiceprintInput
+  farEnd?: MediaStreamTrack | AudioNode
+  near?: boolean
+  trace?: boolean
+  keepRecent?: number
 }
 
 const RETRY_MS = 5000
@@ -104,12 +97,17 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   private _status: Status = 'starting'
   private _latency = 0
   private _voiceprint: Voiceprint | null = null
+  // the recording given as the voiceprint, Focus's sample
+  protected sample: Float32Array | null = null
   private retryMs = RETRY_MS
   private retryTimer: ReturnType<typeof setTimeout> | undefined
   private started = 0
   private counted = false
   private enabled = true
   private printed = false
+  // the print learns while the models run: always on a call, on an agent once the SDK knows when the agent speaks
+  protected learning = false
+  private farCalled = false
   private sender: RTCRtpSender | null = null
   private stalled = false
   protected spotWords: { words: WordJSON[]; context: Context } | null = null
@@ -175,6 +173,11 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   }
 
   get track(): MediaStreamTrack | null {
+    return this.currentTrack()
+  }
+
+  // the track the app gets, without making an agent's
+  protected currentTrack(): MediaStreamTrack | null {
     if (this.stalled) return this.stream.getAudioTracks()[0] ?? null
     return this.dest?.stream.getAudioTracks()[0] ?? null
   }
@@ -204,7 +207,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
   private async opening(): Promise<void> {
     // first, so diags raised while opening (mic.waiting) reach the input too
     this.offs.push(onDiag((d) => this.diag(d)))
-    if (this.opts.voiceprint && !printOf(this.opts.voiceprint)) this.diag({ code: 'voiceprint.reset', level: 'warn', message: STALE_PRINT })
+    if (this.opts.voiceprint && !(this.opts.voiceprint instanceof Float32Array) && !printOf(this.opts.voiceprint)) this.diag({ code: 'voiceprint.reset', level: 'warn', message: STALE_PRINT })
     const s = supported()
     if (!s.secure) throw new AlkoveError('page.insecure', 'The microphone needs HTTPS (or localhost).')
     if (!s.worklet) throw new AlkoveError('browser.unsupported', 'No AudioWorklet in this browser (Safari 14.1 or later).')
@@ -232,7 +235,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     inputs.add(this)
     this.watchContext()
     this.watchTrack(track)
-    if (this.ownStream && o.followDefault !== false && !o.deviceId) this.followDefault()
+    if (this.ownStream && !o.deviceId) this.followDefault()
     void this.startModels()
     this.flushHeld()
   }
@@ -252,7 +255,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     this.source = ctx.createMediaStreamSource(this.stream)
     this.source.connect(this.node, 0, 0)
     const far = this.opts.farEnd
-    if (far && far !== 'manual') {
+    if (far) {
       this.farSource = far instanceof MediaStreamTrack ? ctx.createMediaStreamSource(new MediaStream([far])) : far
       this.farSource.connect(this.node, 0, 1)
     }
@@ -388,18 +391,15 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     // the input starts raw and loading: setMode saw no change
     this.followRaw()
     try {
+      await this.resolveVoice()
+      this.learning = this.learns()
       const host = Host.get()
-      const rt = await host.models('realtime', [...this.models(), ...(this.spotWords?.words.length ? (['spot'] as const) : [])])
+      const rt = await host.models('realtime', [...this.models(), ...(this.models().includes('focus') ? (['timbre'] as const) : []), ...(this.spotWords?.words.length ? (['spot'] as const) : [])])
       let bgPort: MessagePort | undefined
       if (this.wantsBackground()) {
         const bg = await host.models('background', ['timbre'])
-        const channel = new MessageChannel()
-        bg.post({ type: 'rt-port', input: this.id, port: channel.port2, ref: this.reference()?.toJSON() ?? null }, [channel.port2])
-        bgPort = channel.port1
-        this.bg = bg
-        this.offs.push(bg.listen((m) => m.input === this.id && m.type === 'event' && this.onEvent(m.event)))
-        const start = printOf(this.opts.voiceprint)
-        if (this.opts.learn) await bg.call('learner', [this.id, start?.toJSON() ?? null])
+        bgPort = this.toBackground(bg, this.reference())
+        if (this.learning) await bg.call('learner', [this.id, printOf(this.opts.voiceprint)?.toJSON() ?? null])
       }
       if (this.disposed) return
       this.rt = rt
@@ -421,6 +421,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       this.printed = !!printOf(this.opts.voiceprint)
       this.retryMs = RETRY_MS
       this.setMode(this.activeMode(), this.enabled ? undefined : 'off')
+      if (!this.learning && this.learns()) void this.startLearning()
     } catch (e) {
       if (this.disposed) return
       this.diag({ code: 'models.failed', level: 'warn', message: `Models not loaded, raw microphone; retry in ${this.retryMs / 1000} s.`, error: String((e as Error)?.message ?? e) })
@@ -439,7 +440,36 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
 
   // the background worker: Timbre for learning the print, or for checking the voice of a wake
   protected wantsBackground(): boolean {
-    return !!this.opts.learn
+    return this.learning
+  }
+
+  // a call learns the print; an agent once the SDK knows when the agent speaks: its track or node, or a first farEndActive()
+  protected learns(): boolean {
+    return this.kind === 'call' || (this.kind === 'agent' && (!!this.opts.farEnd || this.farCalled))
+  }
+
+  // the pipeline's line to the background worker, where the print learns and the voices are checked
+  private toBackground(bg: WorkerLink, ref: Voiceprint | null): MessagePort {
+    const channel = new MessageChannel()
+    bg.post({ type: 'rt-port', input: this.id, port: channel.port2, ref: ref?.toJSON() ?? null }, [channel.port2])
+    if (this.bg !== bg) this.offs.push(bg.listen((m) => m.input === this.id && m.type === 'event' && this.onEvent(m.event)))
+    this.bg = bg
+    return channel.port1
+  }
+
+  // learning from now on, in the pipeline already running: the next start of the models learns from the start
+  private async startLearning(): Promise<void> {
+    const rt = this.rt
+    if (this.learning || !rt || this.disposed) return
+    this.learning = true
+    try {
+      const port = this.bg ? undefined : this.toBackground(await Host.get().models('background', ['timbre']), null)
+      if (this.disposed || this.rt !== rt) return
+      rt.post({ type: 'learn', input: this.id, ...(port && { bg: port }) }, port ? [port] : [])
+      await this.bg!.call('learner', [this.id, printOf(this.opts.voiceprint)?.toJSON() ?? null])
+    } catch (e) {
+      if (!this.disposed) this.diag({ code: 'models.failed', level: 'warn', message: 'Timbre not loaded: the print does not learn.', error: String((e as Error)?.message ?? e) })
+    }
   }
 
   protected reference(): Voiceprint | null {
@@ -560,17 +590,32 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     this.rt?.post({ type: 'set', input: this.id, hold: false })
   }
 
-  setStrength(s: number): void {
-    this.rt?.post({ type: 'set', input: this.id, strength: s })
-    this.opts.strength = s
+  setVoiceprint(p: VoiceprintInput): void {
+    if (p instanceof Float32Array) {
+      void voiceOf(p).then(
+        (v) => this.applyPrint(v.print ?? null, v.sample),
+        (e: Error) => this.diag({ code: 'voiceprint.reset', level: 'warn', message: `A recording as the voiceprint: ${e.message}` }),
+      )
+      return
+    }
+    this.applyPrint(p)
   }
 
-  setVoiceprint(p: Voiceprint | VoiceprintJSON | string | null): void {
+  // a recording given as the voiceprint, before the models start: its print, and the recording as Focus's sample
+  protected async resolveVoice(): Promise<void> {
+    if (!(this.opts.voiceprint instanceof Float32Array)) return
+    const v = await voiceOf(this.opts.voiceprint)
+    this.opts.voiceprint = (v.print ?? null) as Voiceprint | null
+    this.sample = v.sample ?? null
+  }
+
+  private applyPrint(p: Voiceprint | VoiceprintJSON | string | null, sample?: Float32Array): void {
     const print = printOf(p)
     if (p && !print) this.diag({ code: 'voiceprint.reset', level: 'warn', message: 'This print comes from another Timbre: ignored, learn it again.' })
     this.opts.voiceprint = print
-    this.rt?.post({ type: 'set', input: this.id, print: print?.embedding ?? null })
-    if (this.opts.learn) void this.bg?.call('learner', [this.id, print?.toJSON() ?? null])
+    this.sample = sample ?? null
+    this.rt?.post({ type: 'set', input: this.id, print: print?.embedding ?? null, ...(sample && { sample }) })
+    if (this.learning) void this.bg?.call('learner', [this.id, print?.toJSON() ?? null])
   }
 
   forgetVoiceprint(): void {
@@ -579,9 +624,12 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     void this.bg?.call('forget', [this.id])
   }
 
-  // the app's own TTS starts or stops
+  // the app's own TTS starts or stops; the first call tells an agent when it speaks, and its print starts learning
   farEndActive(on: boolean): void {
     this.node?.port.postMessage({ type: 'far', on })
+    if (this.farCalled) return
+    this.farCalled = true
+    if (this.learns()) void this.startLearning()
   }
 
   async stats(): Promise<{ speechSeconds: number; seconds: number; noiseRemovedDb: number | null } | null> {
@@ -641,7 +689,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       if (stalled !== this.stalled) {
         this.stalled = stalled
         this.diag({ code: stalled ? 'audio.stalled' : 'audio.resumed', level: stalled ? 'warn' : 'info' })
-        const t = this.track
+        const t = this.currentTrack()
         if (t) {
           if (this.sender) void this.sender.replaceTrack(t)
           else this.emit('trackchange', t)
@@ -708,7 +756,6 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
 
   async setDevice(deviceId: string): Promise<void> {
     this.opts.deviceId = deviceId
-    this.opts.followDefault = false
     const want = this.browserWant
     await this.setStream(await openMic(deviceId, undefined, want), true)
     this.browserHas = want
@@ -719,7 +766,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     if (!md?.addEventListener) return
     let current = this.stream.getAudioTracks()[0]?.getSettings().groupId
     const on = async () => {
-      if (this.opts.followDefault === false || this.disposed) return
+      if (this.opts.deviceId || this.disposed) return
       const devices = await md.enumerateDevices().catch(() => [])
       const def = devices.find((d) => d.kind === 'audioinput' && d.deviceId === 'default')
       if (def && def.groupId && def.groupId !== current) {
@@ -737,7 +784,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
 
   // a new track or context (LiveKit's restart): the graph is built again
   async restart({ track, audioContext }: { track?: MediaStreamTrack; audioContext?: AudioContext } = {}): Promise<void> {
-    const before = this.track
+    const before = this.currentTrack()
     if (audioContext && audioContext !== this.ctx) {
       this.teardownGraph()
       if (this.ownCtx) void this.ctx.close().catch(() => {})
@@ -754,7 +801,7 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
       this.rt = null
       void this.startModels()
     } else if (track) await this.setStream(new MediaStream([track]))
-    const after = this.track
+    const after = this.currentTrack()
     if (after && after !== before) this.emit('trackchange', after)
   }
 
@@ -763,24 +810,23 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
     for (const n of [this.source, this.node, this.dest, this.farSource]) n?.disconnect()
   }
 
-  // words read in Focus's output, in the same worker: no second microphone, no second Focus; with a print Focus already keeps only that voice (onlyMyVoice)
-  spot(words: readonly (Word | WordJSON | string)[], opts: { context?: Context; onlyMyVoice?: boolean } = {}): SpotHandle {
+  // words read in Focus's output, in the same worker: no second microphone, no second Focus; with a print Focus already keeps only that voice
+  spot(words: readonly (Word | WordJSON | string)[], opts: { context?: Context } = {}): SpotHandle {
     if (this.kind === 'wake') throw new TypeError('spot() reads Focus: use the wake listener itself')
-    if (opts.onlyMyVoice && !printOf(this.opts.voiceprint) && !this.opts.learn) this.diag({ code: 'spot.no-print', level: 'warn', message: "onlyMyVoice relies on this input's print: give it a voiceprint (or learn: true), else the closest voice wakes it." })
     return new SpotHandle(this, words.map((w) => wordOf(w).toJSON()), opts.context ?? 'anywhere')
   }
 
   // a word enrolled on this call, read behind Focus like call.spot() reads it
-  enrollWord(text: string, opts: { lang?: Lang | Lang[]; takes?: number } = {}): Enrollment {
+  enrollWord(text: string, opts: { lang?: Lang | Lang[] } = {}): Enrollment {
     return new Enrollment({
-      compile: async () => (await import('../api')).Spot.compile(text, { lang: opts.lang, chain: 'focus' }),
+      compile: async () => (await import('../api')).compileWord(text, opts.lang, 'focus'),
       open: async (word) => {
         await this.running
         const rt = await Host.get().models('realtime', ['spot'])
-        rt.post({ type: 'set', input: this.id, enroll: { word, takes: opts.takes ?? 3 } })
+        rt.post({ type: 'set', input: this.id, enroll: { word } })
         return { on: this.on.bind(this) as EnrollTarget['on'], stop: () => rt.post({ type: 'set', input: this.id, enroll: null }), source: 'focus' }
       },
-      embed: async (pcm, source) => (await (await import('../api')).Timbre.create()).embed(pcm, { source }),
+      embed: async (pcm, source) => (await import('../api')).embedAs(pcm, source),
     })
   }
 
@@ -815,12 +861,13 @@ export abstract class AlkoveInput extends Emitter<InputEvents> {
 // ---- call: two humans, WebRTC
 
 export interface CallOptions extends FocusOptions {
-  keepAliveWhenHidden?: boolean
+  // phrases, turns and interruptions only in the print's voice: Timbre hears 0.6 s of each before it is told
+  onlyMyVoice?: boolean
+  strength?: number
 }
 
 class CallInput extends AlkoveInput {
   protected readonly kind = 'call' as const
-  private osc: OscillatorNode | null = null
 
   constructor(protected opts: CallOptions) {
     super(opts)
@@ -840,29 +887,49 @@ class CallInput extends AlkoveInput {
 
   protected chainOptions(): NonNullable<RealtimeOptions['chain']> {
     const print = printOf(this.opts.voiceprint)
-    return { gate: true, normalize: this.opts.normalize ?? true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, speech: this.opts.speech, levels: this.opts.levels, near: this.opts.near }
+    return { gate: true, normalize: true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, sample: this.sample, levels: true, near: !!this.opts.near }
+  }
+
+  protected wantsBackground(): boolean {
+    return this.learning || !!this.opts.onlyMyVoice
+  }
+
+  // the print Timbre checks the phrases against; while the print learns, the one being learned
+  protected reference(): Voiceprint | null {
+    return this.opts.onlyMyVoice && !this.learning ? printOf(this.opts.voiceprint) : null
   }
 
   protected realtimeOptions(): RealtimeOptions {
-    return { pipeline: 'call', chain: this.chainOptions(), learn: !!this.opts.learn, keepRecent: this.opts.keepRecent, trace: this.opts.trace, stats: this.opts.stats }
+    return { pipeline: 'call', chain: this.chainOptions(), learn: this.learning, onlyMyVoice: !!this.opts.onlyMyVoice, keepRecent: this.opts.keepRecent, trace: this.opts.trace, stats: true }
+  }
+
+  setStrength(s: number): void {
+    this.rt?.post({ type: 'set', input: this.id, strength: s })
+    this.opts.strength = s
   }
 
   async start(): Promise<this> {
-    if (this.opts.learn && !this.opts.farEnd) this.diag({ code: 'learn.no-far-end', level: 'warn', message: 'learn without farEnd: the other voice may get into the print.' })
     await this.open()
-    // Chrome freezes a hidden page after ~1 min without sound: a 30 Hz tone at -54 dBFS, which phone speakers can't play
-    if (this.opts.keepAliveWhenHidden !== false) {
-      this.osc = this.ctx.createOscillator()
-      this.osc.frequency.value = KEEP_ALIVE_HZ
-      const g = this.ctx.createGain()
-      g.gain.value = KEEP_ALIVE_GAIN
-      this.osc.connect(g).connect(this.ctx.destination)
-      this.osc.start()
-      this.offs.push(() => this.osc?.stop())
-    }
+    this.keepAlive()
     return this
   }
 
+  // Chrome freezes a hidden page after ~1 min without sound: a 30 Hz tone at -54 dBFS while the tab is hidden, which phone speakers can't play
+  private keepAlive(): void {
+    if (typeof document === 'undefined') return
+    const osc = this.ctx.createOscillator()
+    osc.frequency.value = KEEP_ALIVE_HZ
+    const g = this.ctx.createGain()
+    const hidden = () => void (g.gain.value = document.hidden ? KEEP_ALIVE_GAIN : 0)
+    hidden()
+    osc.connect(g).connect(this.ctx.destination)
+    osc.start()
+    document.addEventListener('visibilitychange', hidden)
+    this.offs.push(() => {
+      document.removeEventListener('visibilitychange', hidden)
+      osc.stop()
+    })
+  }
 }
 
 export class SpotHandle extends Emitter<{ wake: WakeEvent }> {
@@ -892,11 +959,12 @@ export function createCallInput(opts: CallOptions = {}): Promise<CallInput> {
 // ---- agent: voice → transcription / LLM
 
 export interface AgentOptions extends FocusOptions {
+  // phrases, turns and interruptions only in the print's voice: Timbre hears 0.6 s of each before it is told
+  onlyMyVoice?: boolean
   output?: Partial<OutputOptions> & { port?: MessagePort }
-  withTrack?: boolean
-  turn?: boolean | Partial<TurnOptions>
-  interrupt?: boolean | Partial<InterruptOptions>
-  wake?: never
+  turn?: Partial<TurnOptions>
+  // wake words heard on the raw mic (a typed word needs its lang); each one decides whether the mic passes for what follows, the user being far
+  wake?: { words: readonly (Word | WordJSON | string)[]; lang?: Lang | Lang[]; context?: Context }
 }
 
 class AgentInput extends AlkoveInput {
@@ -930,32 +998,62 @@ class AgentInput extends AlkoveInput {
     return ['focus', 'cue']
   }
 
+  // the track only once the app asks for it
+  private withTrack = false
+
+  get track(): MediaStreamTrack | null {
+    if (!this.withTrack) {
+      this.withTrack = true
+      if (this.node && !this.disposed) super.connectOutput()
+    }
+    return super.track
+  }
+
   protected connectOutput(): void {
-    if (this.opts.withTrack) return super.connectOutput()
+    if (this.withTrack) super.connectOutput()
     // the worklet only runs while something pulls it
     const mute = this.ctx.createGain()
     mute.gain.value = 0
     this.node.connect(mute).connect(this.ctx.destination)
   }
 
+  protected wantsBackground(): boolean {
+    return this.learning || !!this.opts.onlyMyVoice
+  }
+
+  // the print Timbre checks the phrases against; while the print learns, the one being learned
+  protected reference(): Voiceprint | null {
+    return this.opts.onlyMyVoice && !this.learning ? printOf(this.opts.voiceprint) : null
+  }
+
   protected realtimeOptions(): RealtimeOptions {
     const print = printOf(this.opts.voiceprint)
     return {
       pipeline: 'agent',
-      chain: { gate: false, normalize: this.opts.normalize ?? true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, speech: this.opts.speech, levels: this.opts.levels, near: this.opts.near },
-      learn: !!this.opts.learn,
+      onlyMyVoice: !!this.opts.onlyMyVoice,
+      chain: { gate: false, normalize: true, strength: 1, print: print?.embedding ?? null, sample: this.sample, levels: true, near: !!this.opts.near },
+      learn: this.learning,
       keepRecent: this.opts.keepRecent,
       trace: this.opts.trace,
-      stats: this.opts.stats,
+      stats: true,
       output: { ...this.output(), audio: true, utterance: true },
-      turn: this.opts.turn ?? true,
-      interrupt: this.opts.interrupt ?? true,
+      turn: { ...this.opts.turn },
+      interrupt: true,
+      wake: !!this.opts.wake,
     }
   }
 
   async start(): Promise<this> {
-    if (this.opts.learn && !this.opts.farEnd) throw new TypeError("createAgentInput: learn needs farEnd (the agent's voice would teach the print)")
-    if ((this.opts as { wake?: unknown }).wake) throw new TypeError('createAgentInput: wake is reserved, not in this preview (use createWakeListener)')
+    const wake = this.opts.wake
+    if (wake) {
+      if (!Array.isArray(wake.words)) throw new TypeError('createAgentInput: wake takes { words, lang, context }')
+      const { Spot } = await import('../api')
+      const typed = (w: Word | WordJSON | string) => typeof w === 'string' && !w.trimStart().startsWith('{')
+      if (wake.words.some(typed) && !wake.lang) throw new TypeError('createAgentInput: wake.lang is needed for a typed word')
+      const words = await Promise.all(wake.words.map(async (w) => (typed(w) ? await Spot.compile(w as string, { lang: wake.lang }) : wordOf(w)).toJSON()))
+      if (!words.length) throw new TypeError('createAgentInput: wake.words is empty')
+      this.spotWords = { words, context: wake.context ?? 'pause' }
+    }
     await this.open()
     return this
   }
@@ -971,7 +1069,8 @@ export interface WakeOptions extends CommonOptions {
   words: readonly (Word | WordJSON | string)[]
   context?: Context
   // only this voice wakes: Timbre on the word + 0.5 s once Spot heard it (+0.5 s of latency)
-  onlyMyVoice?: Voiceprint | VoiceprintJSON | string | null
+  voiceprint?: VoiceprintInput
+  trace?: boolean
 }
 
 class WakeListener extends AlkoveInput {
@@ -983,7 +1082,11 @@ class WakeListener extends AlkoveInput {
     this.words = opts.words.map((w) => wordOf(w).toJSON())
     if (!this.words.length) throw new TypeError('createWakeListener: no word')
     for (const w of this.words) if (w.chain === 'focus') this.diag({ code: 'word.chain', level: 'warn', message: `"${w.text}" was enrolled behind Focus: its thresholds are off on the raw microphone.` })
-    if (opts.onlyMyVoice && !this.reference()) this.diag({ code: 'voiceprint.reset', level: 'warn', message: `onlyMyVoice: ${STALE_PRINT}` })
+  }
+
+  // a recording as the voiceprint: the print Timbre makes of it
+  protected async resolveVoice(): Promise<void> {
+    if (this.opts.voiceprint instanceof Float32Array) this.opts.voiceprint = ((await voiceOf(this.opts.voiceprint)).print ?? null) as Voiceprint | null
   }
 
   protected models(): ('focus' | 'cue' | 'spot')[] {
@@ -1001,7 +1104,7 @@ class WakeListener extends AlkoveInput {
   }
 
   protected reference(): Voiceprint | null {
-    return printOf(this.opts.onlyMyVoice)
+    return printOf(this.opts.voiceprint)
   }
 
   protected realtimeOptions(): RealtimeOptions {
@@ -1024,9 +1127,8 @@ class EnrollInput extends AlkoveInput {
   protected readonly kind = 'wake' as const
 
   constructor(
-    protected opts: CommonOptions & FocusOptions,
+    protected opts: CommonOptions,
     private word: WordJSON,
-    private takes: number,
   ) {
     super(opts)
   }
@@ -1042,7 +1144,7 @@ class EnrollInput extends AlkoveInput {
   }
 
   protected realtimeOptions(): RealtimeOptions {
-    return { pipeline: 'enroll', enroll: { word: this.word, takes: this.takes } }
+    return { pipeline: 'enroll', enroll: { word: this.word } }
   }
 
   async start(): Promise<this> {
@@ -1051,8 +1153,8 @@ class EnrollInput extends AlkoveInput {
   }
 }
 
-export function createEnrollInput(opts: CommonOptions, word: WordJSON, takes: number): Promise<EnrollInput> {
-  return new EnrollInput(opts, word, takes).start()
+export function createEnrollInput(opts: CommonOptions, word: WordJSON): Promise<EnrollInput> {
+  return new EnrollInput(opts, word).start()
 }
 
 export type { AgentInput, CallInput, EnrollInput, WakeListener }

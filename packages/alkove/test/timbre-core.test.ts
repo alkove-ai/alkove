@@ -40,13 +40,13 @@ describe('Timbre, as the TypeScript ran it', () => {
     for (const c of clips())
       for (let k = 0; k < 6; k++) {
         const from = Math.floor(r() * c.length * 0.5)
-        const len = [280, 4000, 24000, 24001, 36000, c.length - from][k]!
+        const len = [1400, 4000, 24000, 24001, 36000, c.length - from][k]!
         const pcm = c.subarray(from, from + len)
         all.push(engine.timbre().windows(pcm))
         for (const source of ['raw', 'focus'] as const) all.push(engine.timbre().embed(pcm, source))
       }
     digest('timbre: windows and prints', all)
-    expect(() => engine.timbre().windows(new Float32Array(279))).toThrow('audio.too-short')
+    expect(() => engine.timbre().windows(new Float32Array(1399))).toThrow('audio.too-short')
   })
 })
 

@@ -8,7 +8,7 @@ import { encodeWav } from './dsp/wav'
 import { RATE } from './manifest'
 
 export interface ProcessOptions {
-  focus?: boolean | { voiceprint?: Voiceprint | VoiceprintJSON | string | null; strength?: number }
+  focus?: boolean | { voiceprint?: VoiceprintInput; strength?: number }
   cue?: boolean | Partial<SpeechParams>
   spot?: { words: readonly (Word | WordJSON | string)[]; context?: Context }
   normalize?: boolean
@@ -48,14 +48,17 @@ export interface ProcessPart {
   trace?: Trace
 }
 
+// the focus options on their way to the core: a recording given as the voiceprint becomes its print and this sample
+type FocusWire = { voiceprint?: VoiceprintInput; strength?: number; sample?: Float32Array }
+
 // the core's options for these: { focus, cue, speech, normalize, trace, rate, spot }
 export function coreOptions(opts: Omit<ProcessOptions, 'onProgress' | 'signal'>, rate = RATE) {
   const focus = opts.focus !== undefined && opts.focus !== false
-  const f = typeof opts.focus === 'object' ? opts.focus : {}
+  const f: FocusWire = typeof opts.focus === 'object' ? opts.focus : {}
   const print = printOf(f.voiceprint)?.embedding
   const words = opts.spot?.words.map(wordOf) ?? []
   return {
-    focus: focus ? { print: print ? Array.from(print) : null, strength: f.strength ?? 1 } : null,
+    focus: focus ? { print: print ? Array.from(print) : null, strength: f.strength ?? 1, ...(f.sample ? { sample: Array.from(f.sample) } : {}) } : null,
     // an object of settings turns Cue on, as true does
     cue: opts.cue === undefined || opts.cue === null ? null : opts.cue !== false,
     speech: { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) },
@@ -66,10 +69,28 @@ export function coreOptions(opts: Omit<ProcessOptions, 'onProgress' | 'signal'>,
   }
 }
 
-export function printOf(p: Voiceprint | VoiceprintJSON | string | null | undefined): Voiceprint | null {
-  if (!p) return null
+// a print, or a recording of the user at 16 kHz (voiceOf makes its print)
+export type VoiceprintInput = Voiceprint | VoiceprintJSON | string | Float32Array | null
+
+export function printOf(p: VoiceprintInput | undefined): Voiceprint | null {
+  if (!p || p instanceof Float32Array) return null
   if (p instanceof Voiceprint) return p
   return Voiceprint.fromJSON(p)
+}
+
+// a recording given as the voiceprint: the print Timbre makes of it, and the recording itself as Focus's sample
+export async function voiceOf(p: VoiceprintInput | undefined): Promise<{ print: Voiceprint | VoiceprintJSON | string | null | undefined; sample?: Float32Array }> {
+  if (!(p instanceof Float32Array)) return { print: p }
+  const { Timbre } = await import('./api')
+  return { print: await (await Timbre.create()).embed(p), sample: p }
+}
+
+// process() and stream() options, a recording as the voiceprint turned into a print and a sample
+export async function withVoice<T extends ProcessOptions>(opts: T): Promise<T> {
+  const f = opts.focus as FocusWire | boolean | undefined
+  if (typeof f !== 'object' || !(f.voiceprint instanceof Float32Array)) return opts
+  const v = await voiceOf(f.voiceprint)
+  return { ...opts, focus: { ...f, voiceprint: v.print, sample: f.sample ?? v.sample } }
 }
 
 // every chosen primitive over 16 kHz audio pushed in blocks, as real time feeds them, in the core; the output comes back aligned with the input

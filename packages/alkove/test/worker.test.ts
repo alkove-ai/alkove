@@ -97,7 +97,8 @@ async function run(file: string, s: Scenario) {
   const bg = worker(file, clock)
   await rt.send({ type: 'boot', module })
   await bg.send({ type: 'boot', module })
-  await rt.send({ type: 'models', id: 1, models: bytes([...s.models, 'spot']) })
+  // as the SDK does: Focus comes with Timbre
+  await rt.send({ type: 'models', id: 1, models: bytes([...s.models, 'spot', ...(s.models.includes('focus') ? (['timbre'] as ModelName[]) : [])]) })
   await bg.send({ type: 'models', id: 1, models: bytes(['timbre']) })
   const [rtSide, bgSide] = channel()
   const [appOut, workerOut] = channel()
@@ -172,12 +173,14 @@ function takes(): Float32Array {
 describe('the workers, before the core and on it', () => {
   let word: WordJSON
   let print: unknown
+  let other: unknown
   beforeAll(async () => {
     const { WasmEngine } = await import('../src/core/engine')
     const { Alk } = await import('../src/engine/alk')
     const engine = new WasmEngine(await Alk.create(module), modelBytes)
     word = engine.compile('amendement', ['fr']).word as unknown as WordJSON
     print = engine.timbre().embed(wav('enroll.wav'), 'raw')
+    other = engine.timbre().embed(noise(48000, 11, 0.1), 'raw')
   })
 
   const scenarios = (): Scenario[] => [
@@ -202,6 +205,34 @@ describe('the workers, before the core and on it', () => {
       models: ['focus', 'cue'],
       opts: { pipeline: 'agent', chain: { gate: false, normalize: true, strength: 1, print: null }, keepRecent: 0, turn: true, interrupt: { minDuration: 0.7 } },
       audio: speech(20),
+    },
+    {
+      name: 'an agent that only hears my voice: its phrases and turns told once Timbre heard them',
+      models: ['focus', 'cue'],
+      reference: print,
+      opts: {
+        pipeline: 'agent',
+        onlyMyVoice: true,
+        chain: { gate: false, normalize: true, strength: 1, print: (print as { centers: { embedding: number[] }[] }).centers[0]!.embedding },
+        keepRecent: 0,
+        turn: true,
+        output: { format: 's16', rate: 16000, chunkMs: 32, audio: false, utterance: true },
+      },
+      audio: speech(40),
+    },
+    {
+      name: 'an agent that only hears a voice that is not there: no phrase, no turn, a diag each time',
+      models: ['focus', 'cue'],
+      reference: other,
+      opts: {
+        pipeline: 'agent',
+        onlyMyVoice: true,
+        chain: { gate: false, normalize: true, strength: 1, print: (print as { centers: { embedding: number[] }[] }).centers[0]!.embedding },
+        keepRecent: 0,
+        turn: true,
+        output: { format: 's16', rate: 16000, chunkMs: 32, audio: false, utterance: true },
+      },
+      audio: speech(40),
     },
     {
       name: 'a wake listener on the raw mic, only for my voice',
@@ -232,9 +263,53 @@ describe('the workers, before the core and on it', () => {
       'a call that learns the print, traced, kept, with stats': expect.arrayContaining(['print.learn', 'learn', 'voiceprint', 'speechstart', 'speechend', 'trace', 'timing', 'focus.print']),
       'an agent: audio and utterances at 24 kHz in int16, raw hops on the way': expect.arrayContaining(['speechstart', 'speechend']),
       'an agent that hears the turns, interrupted at first': expect.arrayContaining(['speechstart', 'speechend', 'turn', 'turnend', 'interruptstart', 'interrupt']),
+      'an agent that only hears my voice: its phrases and turns told once Timbre heard them': expect.arrayContaining(['speechstart', 'speechend', 'turnend']),
+      'an agent that only hears a voice that is not there: no phrase, no turn, a diag each time': expect.arrayContaining(['speech.other-voice']),
       'a wake listener on the raw mic, only for my voice': expect.arrayContaining(['wake', 'heard', 'trace']),
       'enrolling a word on the raw mic': expect.arrayContaining(['take', 'enrolled']),
     })
+  }, 600_000)
+
+  it("an agent's first farEndActive(): the background joins the running pipeline, the print learns from then on", async () => {
+    const clock = { now: 0 }
+    const file = join(root, 'dist/alkove-worker.js')
+    const rt = worker(file, clock)
+    const bg = worker(file, clock)
+    await rt.send({ type: 'boot', module })
+    await bg.send({ type: 'boot', module })
+    await rt.send({ type: 'models', id: 1, models: bytes(['focus', 'cue', 'timbre']) })
+    await bg.send({ type: 'models', id: 1, models: bytes(['timbre']) })
+    await rt.send({ type: 'realtime', id: 2, input: 1, opts: { pipeline: 'agent', chain: { gate: false, normalize: true, strength: 1, print: null }, turn: true, interrupt: true }, bg: null, out: null })
+    const [worklet, workerHops] = channel()
+    await rt.send({ type: 'worklet', input: 1, port: workerHops })
+    const [rtSide, bgSide] = channel()
+    const audio = speech(40)
+    const hops = Math.floor(audio.length / HOP)
+    const at = 500
+    for (let k = 0; k < hops; k++) {
+      clock.now = (k + 1) * 16
+      if (k === at) {
+        await bg.send({ type: 'rt-port', input: 1, port: bgSide, ref: null })
+        await rt.send({ type: 'learn', input: 1, bg: rtSide })
+        await bg.send({ type: 'call', id: 3, method: 'learner', args: [1, null] })
+      }
+      const wire = new Float32Array(WIRE)
+      wire.set(audio.subarray(k * HOP, (k + 1) * HOP))
+      wire[HOP] = 3000
+      wire[HOP + 1] = 1
+      worklet.postMessage(wire.buffer)
+      workerHops.deliver()
+      while (bgSide.deliver() + rtSide.deliver()) {}
+      if (k % 6 === 5) rt.tick()
+    }
+    rt.tick()
+    const windows = rtSide.sent.filter((m) => (m as { type: string }).type === 'window') as { t: number }[]
+    expect(windows.length).toBeGreaterThan(5)
+    expect(Math.min(...windows.map((w) => w.t))).toBeGreaterThan(at * HOP)
+    const learned = bg.posted.filter((m) => (m as { type: string }).type === 'event').map((m) => (m as { event: { type: string; code?: string } }).event)
+    expect(learned.map((e) => e.code ?? e.type)).toEqual(expect.arrayContaining(['print.learn', 'learn']))
+    const events = rt.posted.filter((m) => (m as { type: string }).type === 'events').flatMap((m) => (m as { list: { code?: string; data?: { print?: boolean } }[] }).list)
+    expect(events.some((e) => e.code === 'focus.print' && e.data?.print)).toBe(true)
   }, 600_000)
 
   it('a print that comes back after its input closed is dropped', async () => {

@@ -49,7 +49,7 @@ test.describe('createAgentInput', () => {
     expect(r).toEqual({ mode: 'focus', again: 'resolved', browser: false, early: 'AlkoveError engine.failed' })
   })
 
-  test('audio packets and utterances in the format, rate and size asked; withTrack gives a track', async ({ page, origin, browserName }) => {
+  test('audio packets and utterances in the format, rate and size asked; the track made on its first access', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     const ref = await reference('speech.wav', { focus: true })
     await open(page, origin)
@@ -59,7 +59,7 @@ test.describe('createAgentInput', () => {
       const player = new lib.Player(ctx)
       const buf = await player.load('speech.wav')
       const plain = await lib.sdk.createAgentInput({ stream: player.stream, audioContext: ctx })
-      const asked = await lib.sdk.createAgentInput({ stream: player.stream, audioContext: ctx, output: { format: 's16', rate: 24000, chunkMs: 48 }, withTrack: true })
+      const asked = await lib.sdk.createAgentInput({ stream: player.stream, audioContext: ctx, output: { format: 's16', rate: 24000, chunkMs: 48 } })
       const got = [plain, asked].map((input) => {
         const g = { packets: [] as number[], utterances: [] as any[], speech: lib.watch(input, ['speechstart', 'speechend']), first: null as number | null, last: 0 }
         input.on('audio', (pcm: ArrayBuffer) => {
@@ -74,7 +74,7 @@ test.describe('createAgentInput', () => {
       let level = 0
       plain.on('utterance', (u: any) => (level = lib.rms(new Float32Array(u.pcm))))
       await lib.until(() => plain.mode === 'focus' && asked.mode === 'focus', 20000, 'focus mode')
-      const tracks = [plain.track, asked.track?.readyState ?? null]
+      const tracks = [asked.track?.readyState ?? null]
       const when = player.play(buf, { delay: 0.3 })
       const t0 = when - (ctx.currentTime - plain.now())
       await lib.until(() => ctx.currentTime > player.end + 1.2, 30000, 'played')
@@ -102,10 +102,10 @@ test.describe('createAgentInput', () => {
       expect(g.speech.map((e: any) => e.type)).toEqual(['speechstart', 'speechend'])
     }
     expect(r.level).toBeGreaterThan(0.01)
-    expect(r.tracks).toEqual([null, 'live'])
+    expect(r.tracks).toEqual(['live'])
   })
 
-  test('agent.spot() hears the word, output.port takes the packets off the main thread, learn needs farEnd, wake is reserved', async ({ page, origin, browserName }) => {
+  test('agent.spot() hears the word, output.port takes the packets off the main thread, wake is reserved', async ({ page, origin, browserName }) => {
     test.skip(browserName === 'firefox', SLOW_FIREFOX)
     const ref = await reference('speech.wav', { focus: true })
     await open(page, origin)
@@ -130,15 +130,11 @@ test.describe('createAgentInput', () => {
       const t0 = when - (ctx.currentTime - input.now())
       await lib.until(() => ctx.currentTime > player.end + 1.2, 30000, 'played')
       input.dispose()
-      const learn = await lib.sdk.createAgentInput({ stream: player.stream, audioContext: ctx, learn: true }).then(
-        (i: any) => (i.dispose(), 'resolved'),
-        (e: Error) => e.name,
-      )
       const wake = await lib.sdk.createAgentInput({ stream: player.stream, audioContext: ctx, wake: true }).then(
         (i: any) => (i.dispose(), 'resolved'),
         (e: Error) => e.name,
       )
-      return { t0, wakes, onMain, port: { audio: onPort.filter((t) => t === 'audio').length, utterance: onPort.filter((t) => t === 'utterance').length }, learn, wake }
+      return { t0, wakes, onMain, port: { audio: onPort.filter((t) => t === 'audio').length, utterance: onPort.filter((t) => t === 'utterance').length }, wake }
     })
     expect(r.wakes).toHaveLength(1)
     expect(r.wakes[0].word).toBe('amendement')
@@ -146,7 +142,40 @@ test.describe('createAgentInput', () => {
     expect(r.onMain).toBe(0)
     expect(r.port.audio).toBeGreaterThan(100)
     expect(r.port.utterance).toBe(1)
-    expect(r.learn).toBe('TypeError')
     expect(r.wake).toBe('TypeError')
+  })
+
+  test('the print learns nothing before the first farEndActive(), then learns while the agent is quiet', async ({ page, origin, browserName }) => {
+    test.skip(browserName === 'firefox', SLOW_FIREFOX)
+    test.slow()
+    await open(page, origin)
+    const r: any = await page.evaluate(async () => {
+      const lib = window.lib
+      const ctx = new AudioContext({ sampleRate: 48000 })
+      const player = new lib.Player(ctx)
+      const buf = await player.load('speech.wav')
+      const input = await lib.sdk.createAgentInput({ stream: player.stream, audioContext: ctx })
+      const log = lib.watch(input, ['learn', 'voiceprint', 'diag'])
+      await lib.until(() => input.mode === 'focus', 20000, 'focus mode')
+      player.play(buf, { delay: 0.2, times: 2, gap: 0.5 })
+      await lib.until(() => ctx.currentTime > player.end + 0.5, 30000, 'played before')
+      const before = log.length
+      // the agent says something, then is quiet for 2 s
+      input.farEndActive(true)
+      await lib.sleep(300)
+      input.farEndActive(false)
+      await lib.sleep(2200)
+      player.play(buf, { delay: 0.2, times: 4, gap: 0.5 })
+      await lib.until(() => log.some((e: any) => e.type === 'voiceprint') || ctx.currentTime > player.end + 2, 60000, 'learned')
+      const timbre = await lib.sdk.Timbre.create()
+      const same = input.voiceprint ? timbre.verify(input.voiceprint, await timbre.embed((await lib.fixture('enroll.wav')).pcm)).same : null
+      input.dispose()
+      return { before: log.slice(0, before), after: log.slice(before), same }
+    })
+    const learned = (l: any[]) => l.filter((e: any) => e.type === 'learn' || e.type === 'voiceprint' || (e.type === 'diag' && /^print\./.test(e.v.code)))
+    expect(learned(r.before)).toEqual([])
+    expect(r.after.some((e: any) => e.type === 'learn' && e.v.progress > 0)).toBe(true)
+    expect(r.after.some((e: any) => e.type === 'voiceprint')).toBe(true)
+    expect(r.same).toBe(true)
   })
 })

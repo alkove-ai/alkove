@@ -76,7 +76,7 @@ test.describe('createWakeListener', () => {
     expect(r.wakes[0] - r.t0 - ref.wakes[0].start).toBeLessThan(0.08)
   })
 
-  test('onlyMyVoice: the same voice wakes it (with its score), another does not (wake.other-voice)', async ({ page, origin }) => {
+  test('voiceprint: the same voice wakes it (with its score), another does not (wake.other-voice)', async ({ page, origin }) => {
     await open(page, origin)
     const r: any = await page.evaluate(async () => {
       const lib = window.lib
@@ -88,9 +88,9 @@ test.describe('createWakeListener', () => {
       const me = await timbre.embed((await lib.fixture('enroll.wav')).pcm)
       let s = 3
       const noise = await timbre.embed(new Float32Array(48000).map(() => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32 - 0.5) * 0.2))
-      const mine = await lib.sdk.createWakeListener({ stream: player.stream, audioContext: ctx, words: [word], context: 'anywhere', onlyMyVoice: me })
+      const mine = await lib.sdk.createWakeListener({ stream: player.stream, audioContext: ctx, words: [word], context: 'anywhere', voiceprint: me })
       // a print as stored JSON works the same
-      const other = await lib.sdk.createWakeListener({ stream: player.stream, audioContext: ctx, words: [word], context: 'anywhere', onlyMyVoice: JSON.stringify(noise.toJSON()) })
+      const other = await lib.sdk.createWakeListener({ stream: player.stream, audioContext: ctx, words: [word], context: 'anywhere', voiceprint: JSON.stringify(noise.toJSON()) })
       const logs = [lib.watch(mine, ['wake', 'mode', 'diag']), lib.watch(other, ['wake', 'mode', 'diag'])]
       await lib.until(() => mine.mode === 'spot+print' && other.mode === 'spot+print', 20000, 'spot+print mode')
       const when = player.play(buf, { delay: 0.3 })
