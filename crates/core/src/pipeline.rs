@@ -465,11 +465,7 @@ impl Pipeline {
             }
             None => {
                 let m = self.spot_model.clone().ok_or(Error::Missing("spot"))?;
-                let shift = if self.wake {
-                    -((self.hops * HOP as u64) as f64) / RATE
-                } else {
-                    self.chain.as_ref().map_or(0.0, |c| c.focus_lag() as f64 / RATE) - self.fed as f64 / RATE
-                };
+                let shift = if self.wake { -((self.hops * HOP as u64) as f64) / RATE } else { self.chain.as_ref().map_or(0.0, |c| c.focus_lag() as f64 / RATE) - self.fed as f64 / RATE };
                 self.spot = Some((Listener::new(&m, words, context)?, names, shift));
             }
         }
@@ -1172,7 +1168,7 @@ mod tests {
         let wav = |n: &str| {
             let b = std::fs::read(root.join("test/fixtures").join(n)).unwrap();
             let at = b.windows(4).position(|w| w == b"data").unwrap() + 8;
-            b[at..].chunks_exact(2).map(|s| i16::from_le_bytes([s[0], s[1]]) as f32 / 32768.0).collect::<Vec<f32>>()
+            b[at..].as_chunks::<2>().0.iter().map(|s| i16::from_le_bytes(*s) as f32 / 32768.0).collect::<Vec<f32>>()
         };
         let (enroll, speech) = (wav("enroll.wav"), wav("speech.wav"));
         let mut noise = 0x2545_f491u32;

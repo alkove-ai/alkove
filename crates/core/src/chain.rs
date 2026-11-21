@@ -712,12 +712,16 @@ mod tests {
             let print = crate::timbre::Timbre::new(&tm).unwrap().embed(&floats(&dir.join("enroll.f32")), "check").unwrap().embedding().to_vec();
             let mut c = Chain::new(&fm, &cm, ChainOptions { print: Some(print), ..ChainOptions::default() }).unwrap();
             c.attach_timbre(&tm).unwrap();
-            let wakes: Vec<(f64, f64)> = std::fs::read_to_string(dir.join("wake.txt")).unwrap().lines().filter_map(|l| {
-                let v: Vec<f64> = l.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-                (v.len() == 2).then(|| (v[0], v[1]))
-            }).collect();
+            let wakes: Vec<(f64, f64)> = std::fs::read_to_string(dir.join("wake.txt"))
+                .unwrap()
+                .lines()
+                .filter_map(|l| {
+                    let v: Vec<f64> = l.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                    (v.len() == 2).then(|| (v[0], v[1]))
+                })
+                .collect();
             let (mut events, mut next, mut out) = (Vec::new(), 0, String::new());
-            for hop in floats(&dir.join("in.f32")).chunks_exact(HOP) {
+            for hop in floats(&dir.join("in.f32")).as_chunks::<HOP>().0 {
                 events.clear();
                 c.step(hop, &mut events);
                 while next < wakes.len() && c.time() >= wakes[next].1 + 0.3 {

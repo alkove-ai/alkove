@@ -49,7 +49,17 @@ pub unsafe extern "C" fn alk_chain(
     print_len: usize,
 ) -> *mut ChainHandle {
     let speech = SpeechParams { confidence, exit_confidence, start_secs, stop_secs };
-    let opts = ChainOptions { gate: gate != 0, normalize: normalize != 0, strength, print: print(print_at, print_len).map(|p| p.to_vec()), sample: None, speech, sleep: sleep != 0, levels: false, near: None };
+    let opts = ChainOptions {
+        gate: gate != 0,
+        normalize: normalize != 0,
+        strength,
+        print: print(print_at, print_len).map(|p| p.to_vec()),
+        sample: None,
+        speech,
+        sleep: sleep != 0,
+        levels: false,
+        near: None,
+    };
     match Chain::new(&shared(focus), &shared(cue), opts) {
         Ok(chain) => Box::into_raw(Box::new(ChainHandle { chain, hop: vec![0.0; 256], events: Vec::with_capacity(16), records: Vec::with_capacity(64) })),
         Err(e) => {

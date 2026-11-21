@@ -11,7 +11,7 @@ fn wav(path: &str) -> Vec<f32> {
     while at + 8 <= b.len() {
         let n = u32::from_le_bytes(b[at + 4..at + 8].try_into().unwrap()) as usize;
         if &b[at..at + 4] == b"data" {
-            return b[at + 8..at + 8 + n].chunks_exact(2).map(|s| i16::from_le_bytes([s[0], s[1]]) as f32 / 32768.0).collect();
+            return b[at + 8..at + 8 + n].as_chunks::<2>().0.iter().map(|s| i16::from_le_bytes(*s) as f32 / 32768.0).collect();
         }
         at += 8 + n + n % 2;
     }
@@ -29,7 +29,7 @@ fn main() {
     let pcm = wav(&format!("{fx}/mix.wav"));
     let mut net = Session::new(load("alkove-focus-1.alk")).expect("session");
     let mut out = Vec::new();
-    for hop in pcm.chunks_exact(256) {
+    for hop in pcm.as_chunks::<256>().0 {
         net.input_mut("audio").unwrap().copy_from_slice(hop);
         net.run();
         out.extend_from_slice(net.output("audio_out").unwrap());

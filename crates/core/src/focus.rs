@@ -50,9 +50,10 @@ const READ_A_HOP: usize = 3;
 // the speech of a recording (20 ms frames within 35 dB of the loudest), its first 3 s at one level, repeated up to 3 s, mirrored by a hop at both ends as the lab's STFT does; with `narrow`, the faint noise a narrow stream gets
 fn sample_of(pcm: &[f32], narrow: bool) -> Option<Vec<f32>> {
     let power = |f: &[f32]| f.iter().map(|&v| v as f64 * v as f64).sum::<f64>() / f.len() as f64;
-    let top = pcm.chunks_exact(SPEECH_FRAME).map(power).fold(0.0, f64::max);
+    let frames = pcm.as_chunks::<SPEECH_FRAME>().0;
+    let top = frames.iter().map(|f| power(f)).fold(0.0, f64::max);
     let floor = top * crate::math::pow(10.0, -3.5);
-    let speech: Vec<f32> = pcm.chunks_exact(SPEECH_FRAME).filter(|f| power(f) > floor).take(SAMPLE / SPEECH_FRAME).flatten().copied().collect();
+    let speech: Vec<f32> = frames.iter().filter(|f| power(*f) > floor).take(SAMPLE / SPEECH_FRAME).flatten().copied().collect();
     if top <= 0.0 || speech.len() < SAMPLE_MIN {
         return None;
     }
@@ -77,12 +78,34 @@ impl Told {
         stream_io(&split, "audio", FOCUS.chunk, "user_out", FOCUS.chunk)?;
         let shape = |s: &Session, name: &str| s.plan().inputs().iter().chain(s.plan().outputs()).find(|io| io.name == name).map(|io| io.shape.clone());
         let (Some(k), Some(key)) = (shape(&split, "keys"), shape(&sample, "key")) else { return Err(Error::Model("focus: a split plan without keys or a sample plan without key")) };
-        let bad = k.len() != 4 || key.len() != 3 || key[..] != k[..3] || shape(&split, "values").map(|v| v.iter().product::<usize>()) != Some(k.iter().product()) || shape(&sample, "value") != Some(key.clone());
-        if bad || split.input_mut("print").map(|p| p.len()) != Some(FOCUS.print) || split.plan().state_len() < front_state || shape(&sample, "audio").map(|a| a.iter().product::<usize>()) != Some(FOCUS.chunk) {
+        let bad = k.len() != 4
+            || key.len() != 3
+            || key[..] != k[..3]
+            || shape(&split, "values").map(|v| v.iter().product::<usize>()) != Some(k.iter().product())
+            || shape(&sample, "value") != Some(key.clone());
+        if bad
+            || split.input_mut("print").map(|p| p.len()) != Some(FOCUS.print)
+            || split.plan().state_len() < front_state
+            || shape(&sample, "audio").map(|a| a.iter().product::<usize>()) != Some(FOCUS.chunk)
+        {
             return Err(Error::Model("focus: split and sample plans of other shapes"));
         }
         let (frames, state) = (k[3], vec![0.0; split.plan().state_len().max(sample.plan().state_len())]);
-        Ok(Some(Told { split, sample, on: false, moved: false, every: SAMPLE_FRAMES.div_ceil(frames), frames, rows: k[0] * k[1], dims: k[2], front: vec![0.0; front_state], state, reading: None, bank: Vec::new(), since: FADE }))
+        Ok(Some(Told {
+            split,
+            sample,
+            on: false,
+            moved: false,
+            every: SAMPLE_FRAMES.div_ceil(frames),
+            frames,
+            rows: k[0] * k[1],
+            dims: k[2],
+            front: vec![0.0; front_state],
+            state,
+            reading: None,
+            bank: Vec::new(),
+            since: FADE,
+        }))
     }
 
     // starts reading a sample; false: under a second of speech in it
@@ -261,7 +284,7 @@ mod tests {
             assert!(f.is_told());
             f.set_print(print.as_deref());
             let (mut out, mut y) = (vec![0.0f32; FOCUS.chunk], Vec::new());
-            for (k, hop) in x.chunks_exact(FOCUS.chunk).enumerate() {
+            for (k, hop) in x.as_chunks::<{ FOCUS.chunk }>().0.iter().enumerate() {
                 if told && again == Some(k) {
                     assert!(f.read_sample(&sample, false));
                 }

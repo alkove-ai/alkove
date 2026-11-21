@@ -144,7 +144,7 @@ impl FarPass {
             self.out[self.at] = o;
             self.at = (self.at + 1) % WIN;
             self.seen += 1;
-            if self.seen < WIN || (self.seen - WIN) % HOP != 0 || (self.tally.far() && !self.pool.on) {
+            if self.seen < WIN || !(self.seen - WIN).is_multiple_of(HOP) || (self.tally.far() && !self.pool.on) {
                 continue;
             }
             let Some(p) = print else { continue };
