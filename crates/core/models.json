@@ -5,7 +5,8 @@
       "name": "alkove-focus-1",
       "file": "alkove-focus-1.alk",
       "bytes": 2320032,
-      "sha256": "25028c1f9faf765ccab4076716b5e8a8e756cd7662babd2bc078951982df5ce4"
+      "sha256": "25028c1f9faf765ccab4076716b5e8a8e756cd7662babd2bc078951982df5ce4",
+      "revision": "69075e56ca39f9bc09bcf41c3f79288a2d753989"
     },
     "cue": {
       "name": "alkove-cue-1-preview",
@@ -25,7 +26,8 @@
       "name": "alkove-timbre-1",
       "file": "alkove-timbre-1.alk",
       "bytes": 970064,
-      "sha256": "fc94dfff533f1a4fb2abea172c1f5ff7a92cc00c6331275ea1a26e38f877b0e8"
+      "sha256": "fc94dfff533f1a4fb2abea172c1f5ff7a92cc00c6331275ea1a26e38f877b0e8",
+      "revision": "cb87ad720218e582f114d89b5a6936b9fd3f811a"
     },
     "lex": {
       "name": "alkove-lex-1-preview",
