@@ -4,7 +4,7 @@
 mod tables;
 mod spoken;
 
-pub use spoken::spoken;
+pub use spoken::{spoken, spoken_with, Nouns};
 
 use std::sync::OnceLock;
 

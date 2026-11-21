@@ -1,6 +1,17 @@
 //! Text as it is said, before Lex reads it word by word: numbers, ordinals, times, percentages, currencies, units and common abbreviations in words, for fr en es pt it ca ro de nl pl sv.
 
-use super::{is_letter, is_space};
+use std::collections::HashMap;
+
+use super::{is_letter, is_space, lower};
+
+/// Nouns whose gender is not the language's default, for numbers to agree with them: one « f word » or « n word » a line.
+pub struct Nouns(HashMap<String, char>);
+
+impl Nouns {
+    pub fn parse(text: &str) -> Nouns {
+        Nouns(text.lines().filter_map(|l| l.split_once(' ')).filter_map(|(g, w)| g.chars().next().map(|g| (w.to_string(), g))).collect())
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum G {
@@ -14,16 +25,22 @@ enum G {
 struct L<'a> {
     lang: &'a str,
     region: &'a str,
+    nouns: Option<&'a Nouns>,
 }
 
 const MAX: u64 = 999_999_999_999;
 
 pub fn spoken(text: &str, lang: &str) -> String {
+    spoken_with(text, lang, None)
+}
+
+/// `spoken` with the language's nouns, so that « 1 heure » is read « une heure »
+pub fn spoken_with(text: &str, lang: &str, nouns: Option<&Nouns>) -> String {
     let (lang, region) = lang.split_once('-').unwrap_or((lang, ""));
     if !["fr", "en", "es", "pt", "it", "ca", "ro", "de", "nl", "pl", "sv"].contains(&lang) {
         return text.to_string();
     }
-    let l = L { lang, region };
+    let l = L { lang, region, nouns };
     let c: Vec<char> = text.chars().collect();
     let mut out = String::new();
     let mut i = 0;
@@ -39,6 +56,11 @@ pub fn spoken(text: &str, lang: &str) -> String {
             if let Some((n, words)) = abbreviation(&c[i..], l) {
                 say(&mut out, words);
                 i += n;
+                continue;
+            }
+            if let Some((n, words)) = roman(&c, i, &before(&c, i), l) {
+                say(&mut out, &words);
+                i = n;
                 continue;
             }
         }
@@ -57,13 +79,13 @@ pub fn spoken(text: &str, lang: &str) -> String {
             }
         }
         if digit(&c, i) && (i == 0 || !(c[i - 1].is_ascii_digit() || is_letter(c[i - 1]))) {
-            if let Some((n, words)) = time(&c, i, l) {
+            if let Some((n, words)) = date(&c, i, l).or_else(|| dotted(&c, i, l)).or_else(|| time(&c, i, l)) {
                 say(&mut out, &words);
                 i = n;
                 continue;
             }
             if let Some((n, number)) = read_number(&c, i, l) {
-                let (n, words) = after_number(&c, n, &number, l);
+                let (n, words) = after_number(&c, n, &number, &before(&c, i), l);
                 say(&mut out, &words);
                 i = n;
                 continue;
@@ -74,6 +96,185 @@ pub fn spoken(text: &str, lang: &str) -> String {
     }
     let out = out.trim_end_matches('\u{1}');
     out.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+// the word before position i, across spaces
+fn before(c: &[char], i: usize) -> String {
+    let mut e = i;
+    while e > 0 && is_space(c[e - 1]) {
+        e -= 1;
+    }
+    let mut b = e;
+    while b > 0 && is_letter(c[b - 1]) {
+        b -= 1;
+    }
+    c[b..e].iter().collect()
+}
+
+// the word after position i, across one space
+fn after(c: &[char], i: usize) -> String {
+    let b = i + usize::from(matches!(c.get(i), Some(' ' | '\u{a0}')));
+    let mut e = b;
+    while e < c.len() && is_letter(c[e]) {
+        e += 1;
+    }
+    c[b..e].iter().collect()
+}
+
+// « March 3, 1999 »: a month, a day and a comma before position i
+fn dated(c: &[char], i: usize, l: L) -> bool {
+    let mut k = i;
+    while k > 0 && (is_space(c[k - 1]) || c[k - 1] == ',') {
+        k -= 1;
+    }
+    let digits = (0..k).rev().take_while(|&j| c[j].is_ascii_digit()).count();
+    digits > 0 && digits <= 2 && month(&before(c, k - digits), l).is_some()
+}
+
+fn month(w: &str, l: L) -> Option<usize> {
+    let w = lower(w);
+    months(l).iter().position(|m| lower(m) == w).map(|k| k + 1)
+}
+
+fn months(l: L) -> [&'static str; 12] {
+    match l.lang {
+        "fr" => ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"],
+        "en" => ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+        "es" => ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"],
+        "pt" => ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"],
+        "it" => ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"],
+        "ca" => ["gener", "febrer", "març", "abril", "maig", "juny", "juliol", "agost", "setembre", "octubre", "novembre", "desembre"],
+        "ro" => ["ianuarie", "februarie", "martie", "aprilie", "mai", "iunie", "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie"],
+        "de" => ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"],
+        "nl" => ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"],
+        // genitive, as in « 3 marca »
+        "pl" => ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"],
+        _ => ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"],
+    }
+}
+
+// a day of the month, said before or after the month's name
+fn day(d: u64, l: L) -> String {
+    match l.lang {
+        "fr" if d == 1 => "premier".into(),
+        "it" if d == 1 => "primo".into(),
+        "pt" if d == 1 => "primeiro".into(),
+        "es" if d == 1 => "primero".into(),
+        "ca" if d == 1 => "primer".into(),
+        "ro" if d == 1 => "întâi".into(),
+        "en" => en_ordinal(&card(d, l, G::M, false)),
+        "de" => format!("{}er", de_stem(d, l)),
+        "pl" => pl_ordinal(d, true),
+        "sv" => sv_ordinal(d, l),
+        _ => card(d, l, G::M, false),
+    }
+}
+
+// a year as it is said: « nineteen oh five », « neunzehnhundert », « deux mille vingt-six »
+fn year(y: u64, l: L) -> String {
+    let (h, r) = (y / 100, y % 100);
+    match l.lang {
+        "en" if (1100..2000).contains(&y) || (2010..2100).contains(&y) => match r {
+            0 => format!("{} hundred", card(h, l, G::M, false)),
+            r if r < 10 => format!("{} oh {}", card(h, l, G::M, false), card(r, l, G::M, false)),
+            r => format!("{} {}", card(h, l, G::M, false), card(r, l, G::M, false)),
+        },
+        "de" | "nl" if (1100..2000).contains(&y) => {
+            let head = format!("{}{}", card(h, l, G::M, false), if l.lang == "de" { "hundert" } else { "honderd" });
+            if r == 0 {
+                head
+            } else {
+                format!("{head} {}", card(r, l, G::M, false))
+            }
+        }
+        _ => card(y, l, G::M, false),
+    }
+}
+
+fn date_words(d: u64, m: usize, y: u64, l: L) -> String {
+    let month = months(l)[m - 1];
+    let (dd, yy) = (day(d, l), year(y, l));
+    match l.lang {
+        "en" if l.region == "GB" => format!("{dd} of {month} {yy}"),
+        "en" => format!("{month} {dd} {yy}"),
+        "es" | "pt" => format!("{dd} de {month} de {yy}"),
+        "ca" => format!("{dd} {}{month} de {yy}", if month.starts_with(['a', 'o']) { "d'" } else { "de " }),
+        _ => format!("{dd} {month} {yy}"),
+    }
+}
+
+// 1.2.3, 192.168.0.1: numbers joined by two dots or more, each read, « point » between
+fn dotted(c: &[char], i: usize, l: L) -> Option<(usize, String)> {
+    let mut parts = Vec::new();
+    let mut sizes = Vec::new();
+    let mut j = i;
+    loop {
+        let n = (j..).take_while(|&k| digit(c, k)).count();
+        if n == 0 || n > 3 {
+            return None;
+        }
+        sizes.push(n);
+        parts.push(c[j..j + n].iter().collect::<String>().parse::<u64>().ok()?);
+        j += n;
+        if c.get(j) == Some(&'.') && digit(c, j + 1) {
+            j += 1;
+        } else {
+            break;
+        }
+    }
+    // 1.000.000 is a number where the dot groups thousands
+    let grouped = !matches!(l.lang, "en" | "fr" | "sv" | "pl") && sizes[1..].iter().all(|&n| n == 3);
+    if parts.len() < 3 || !ends(c, j) || grouped {
+        return None;
+    }
+    let dot = match l.lang {
+        "fr" | "en" => "point",
+        "es" | "it" => "punto",
+        "pt" => "ponto",
+        "ca" | "nl" => "punt",
+        "ro" => "punct",
+        "de" => "Punkt",
+        "pl" => "kropka",
+        _ => "punkt",
+    };
+    Some((j, parts.iter().map(|&n| card(n, l, G::M, false)).collect::<Vec<_>>().join(&format!(" {dot} "))))
+}
+
+// 12/03/2026, 12.03.2026, 12-03-26, 2026-03-12; month first in American English
+fn date(c: &[char], i: usize, l: L) -> Option<(usize, String)> {
+    let run = |k: usize| (k..).take_while(|&j| digit(c, j)).count();
+    let num = |k: usize, n: usize| c[k..k + n].iter().collect::<String>().parse::<u64>().ok();
+    let a = run(i);
+    let sep = *c.get(i + a)?;
+    if !matches!(sep, '/' | '.' | '-') {
+        return None;
+    }
+    let b = run(i + a + 1);
+    if b == 0 || c.get(i + a + 1 + b) != Some(&sep) {
+        return None;
+    }
+    let k = i + a + 1 + b + 1;
+    let z = run(k);
+    let end = k + z;
+    if z == 0 || !ends(c, end) {
+        return None;
+    }
+    let (x, mid, w) = (num(i, a)?, num(i + a + 1, b)?, num(k, z)?);
+    let (d, m, y) = if a == 4 && sep == '-' && z <= 2 {
+        (w, mid, x)
+    } else if (1..=2).contains(&a) && b <= 2 && (z == 2 || z == 4) {
+        if l.lang == "en" && l.region != "GB" && sep == '/' {
+            (mid, x, w)
+        } else {
+            (x, mid, w)
+        }
+    } else {
+        return None;
+    };
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some((end, date_words(d, m as usize, y, l)))
 }
 
 fn digit(c: &[char], i: usize) -> bool {
@@ -139,10 +340,26 @@ fn read_number(c: &[char], i: usize, l: L) -> Option<(usize, Number)> {
     Some((j, Number { int, digits, frac }))
 }
 
-fn after_number(c: &[char], i: usize, n: &Number, l: L) -> (usize, String) {
+fn after_number(c: &[char], i: usize, n: &Number, prev: &str, l: L) -> (usize, String) {
     if n.frac.is_none() {
-        if let Some((k, words)) = ordinal(c, i, n.int, l) {
+        if let Some((k, words)) = ordinal(c, i, n.int, prev, l) {
             return (k, words);
+        }
+        let next = after(c, i);
+        if (1..=31).contains(&n.int) && n.digits.len() <= 2 && month(&next, l).is_some() && l.lang != "de" {
+            return (i, if l.lang == "en" && l.region == "GB" { format!("{} of", day(n.int, l)) } else { day(n.int, l) });
+        }
+        if (1..=31).contains(&n.int) && n.digits.len() <= 2 && l.lang == "en" && month(prev, l).is_some() {
+            return (i, day(n.int, l));
+        }
+        let years: &[&str] = match l.lang {
+            "en" => &["in", "since", "until", "by", "from", "of"],
+            "de" => &["im", "Jahr", "seit", "bis", "von", "um"],
+            "nl" => &["in", "sinds", "tot", "van"],
+            _ => &[],
+        };
+        if n.digits.len() == 4 && (1100..2100).contains(&n.int) && (years.contains(&prev) || month(prev, l).is_some() || dated(c, i - 4, l)) {
+            return (i, year(n.int, l));
         }
     }
     let gap = usize::from(matches!(c.get(i), Some(' ' | '\u{a0}' | '\u{202f}')));
@@ -158,6 +375,10 @@ fn after_number(c: &[char], i: usize, n: &Number, l: L) -> (usize, String) {
         if c.len() >= j + k.len() && c[j..j + k.len()] == k[..] && ends(c, j + k.len()) {
             return (j + k.len(), counted(n, unit(key, l), l));
         }
+    }
+    let next = lower(&after(c, i));
+    if let Some(g) = l.nouns.and_then(|t| t.0.get(&next)).filter(|_| n.frac.is_none() && !next.is_empty()) {
+        return (i, plain(n, l, if *g == 'f' { G::F } else { G::N }, true));
     }
     // Spanish and Catalan shorten one before a noun: veintiún años, un any
     let noun = matches!(l.lang, "es" | "ca") && c.get(i) == Some(&' ') && c.get(i + 1).is_some_and(|&x| is_letter(x));
@@ -321,7 +542,7 @@ const PL_HOURS: [&str; 25] = [
     "dwudziesta czwarta",
 ];
 
-fn ordinal(c: &[char], i: usize, n: u64, l: L) -> Option<(usize, String)> {
+fn ordinal(c: &[char], i: usize, n: u64, prev: &str, l: L) -> Option<(usize, String)> {
     let suffix = |s: &str| {
         let k: Vec<char> = s.chars().collect();
         c.len() >= i + k.len() && c[i..i + k.len()] == k[..] && ends(c, i + k.len())
@@ -340,21 +561,12 @@ fn ordinal(c: &[char], i: usize, n: u64, l: L) -> Option<(usize, String)> {
         "es" | "pt" | "it" => {
             let end = pick(&[".º", ".ª", "º", "ª", "°"])?;
             let fem = suffix(".ª") || suffix("ª");
-            let t = match l.lang {
-                "es" => ["primer", "segund", "tercer", "cuart", "quint", "sext", "séptim", "octav", "noven", "décim"],
-                "pt" => ["primeir", "segund", "terceir", "quart", "quint", "sext", "sétim", "oitav", "non", "décim"],
-                _ => ["prim", "second", "terz", "quart", "quint", "sest", "settim", "ottav", "non", "decim"],
-            };
-            let w = t.get(n.wrapping_sub(1) as usize).map(|s| format!("{s}{}", if fem { "a" } else { "o" }));
-            Some((end, w.unwrap_or_else(|| card(n, l, G::M, false))))
+            Some((end, small_ordinal(n, l, fem).unwrap_or_else(|| if l.lang == "it" { it_ordinal(n, l) } else { card(n, l, G::M, false) })))
         }
         "ca" => {
             let end = pick(&["es", "ns", "rs", "ts", "r", "n", "t", "è", "a"])?;
             let fem = suffix("a") || suffix("es");
-            let m = ["primer", "segon", "tercer", "quart", "cinquè", "sisè", "setè", "vuitè", "novè", "desè"];
-            let f = ["primera", "segona", "tercera", "quarta", "cinquena", "sisena", "setena", "vuitena", "novena", "desena"];
-            let w = (if fem { f } else { m }).get(n.wrapping_sub(1) as usize).map(|s| s.to_string());
-            Some((end, w.unwrap_or_else(|| card(n, l, G::M, false))))
+            Some((end, small_ordinal(n, l, fem).unwrap_or_else(|| card(n, l, G::M, false))))
         }
         "nl" => {
             let end = pick(&["ste", "de", "e"])?;
@@ -362,29 +574,30 @@ fn ordinal(c: &[char], i: usize, n: u64, l: L) -> Option<(usize, String)> {
         }
         "sv" => {
             let end = pick(&[":a", ":e"])?;
-            let t = [
-                "första",
-                "andra",
-                "tredje",
-                "fjärde",
-                "femte",
-                "sjätte",
-                "sjunde",
-                "åttonde",
-                "nionde",
-                "tionde",
-                "elfte",
-                "tolfte",
-                "trettonde",
-                "fjortonde",
-                "femtonde",
-                "sextonde",
-                "sjuttonde",
-                "artonde",
-                "nittonde",
-                "tjugonde",
-            ];
-            Some((end, t.get(n.wrapping_sub(1) as usize).map_or_else(|| card(n, l, G::M, false), |s| s.to_string())))
+            Some((end, sv_ordinal(n, l)))
+        }
+        // « am 3. Mai », « der 3. Platz »: a number and a dot is an ordinal only after an article or before a month
+        "de" if c.get(i) == Some(&'.') && matches!(c.get(i + 1), Some(' ')) => {
+            let dative = ["am", "im", "zum", "vom", "beim", "dem", "den", "des", "zur", "seit", "ab", "bis", "vor", "nach"];
+            let ending = if dative.contains(&prev) {
+                "en"
+            } else if ["der", "die", "das"].contains(&prev) {
+                "e"
+            } else if month(&after(c, i + 1), l).is_some() {
+                "er"
+            } else {
+                return None;
+            };
+            Some((i + 1, format!("{}{ending}", de_stem(n, l))))
+        }
+        // « 3. miejsce »: a dot then a word in lower case, not a new sentence
+        "pl" if c.get(i) == Some(&'.') => {
+            let next = after(c, i + 1);
+            let lower_next = next.chars().next().is_some_and(|x| is_letter(x) && lower(&x.to_string()) == x.to_string());
+            if !lower_next {
+                return None;
+            }
+            Some((i + 1, pl_ordinal(n, month(&next, l).is_some())))
         }
         "ro" => {
             if suffix("-lea") {
@@ -401,8 +614,235 @@ fn ordinal(c: &[char], i: usize, n: u64, l: L) -> Option<(usize, String)> {
     }
 }
 
+// es, pt, it, ca: 1st to 10th
+fn small_ordinal(n: u64, l: L, fem: bool) -> Option<String> {
+    let k = n.checked_sub(1).filter(|&k| k < 10)? as usize;
+    let end = if fem { "a" } else { "o" };
+    Some(match l.lang {
+        "es" => format!("{}{end}", ["primer", "segund", "tercer", "cuart", "quint", "sext", "séptim", "octav", "noven", "décim"][k]),
+        "pt" => format!("{}{end}", ["primeir", "segund", "terceir", "quart", "quint", "sext", "sétim", "oitav", "non", "décim"][k]),
+        "it" => format!("{}{end}", ["prim", "second", "terz", "quart", "quint", "sest", "settim", "ottav", "non", "decim"][k]),
+        _ if fem => ["primera", "segona", "tercera", "quarta", "cinquena", "sisena", "setena", "vuitena", "novena", "desena"][k].to_string(),
+        _ => ["primer", "segon", "tercer", "quart", "cinquè", "sisè", "setè", "vuitè", "novè", "desè"][k].to_string(),
+    })
+}
+
+// undicesimo, ventitreesimo, trentaseiesimo
+fn it_ordinal(n: u64, l: L) -> String {
+    if let Some(w) = small_ordinal(n, l, false) {
+        return w;
+    }
+    let mut w = card(n, l, G::M, false).replace(' ', "");
+    if let Some(stem) = w.strip_suffix("tré") {
+        format!("{stem}treesimo")
+    } else if w.ends_with("sei") {
+        w + "esimo"
+    } else {
+        w.pop();
+        w + "esimo"
+    }
+}
+
+// German ordinal stem: erst, zweit, dritt, siebt, acht, zwanzigst
+fn de_stem(n: u64, l: L) -> String {
+    match n {
+        1 => "erst".into(),
+        3 => "dritt".into(),
+        7 => "siebt".into(),
+        8 => "acht".into(),
+        n if n < 20 => format!("{}t", card(n, l, G::M, false)),
+        n => format!("{}st", card(n, l, G::M, false)),
+    }
+}
+
+// pierwszy, dwudziesty trzeci; `genitive`: pierwszego, as before a month
+fn pl_ordinal(n: u64, genitive: bool) -> String {
+    const U: [&str; 20] = [
+        "",
+        "pierwszy",
+        "drugi",
+        "trzeci",
+        "czwarty",
+        "piąty",
+        "szósty",
+        "siódmy",
+        "ósmy",
+        "dziewiąty",
+        "dziesiąty",
+        "jedenasty",
+        "dwunasty",
+        "trzynasty",
+        "czternasty",
+        "piętnasty",
+        "szesnasty",
+        "siedemnasty",
+        "osiemnasty",
+        "dziewiętnasty",
+    ];
+    const T: [&str; 10] = ["", "", "dwudziesty", "trzydziesty", "czterdziesty", "pięćdziesiąty", "sześćdziesiąty", "siedemdziesiąty", "osiemdziesiąty", "dziewięćdziesiąty"];
+    let words: Vec<&str> = match n {
+        1..=19 => vec![U[n as usize]],
+        20..=99 if n.is_multiple_of(10) => vec![T[(n / 10) as usize]],
+        20..=99 => vec![T[(n / 10) as usize], U[(n % 10) as usize]],
+        _ => return pl(n, G::M),
+    };
+    let gen = |w: &str| if let Some(s) = w.strip_suffix('y') { format!("{s}ego") } else { format!("{w}ego") };
+    words.iter().map(|w| if genitive { gen(w) } else { w.to_string() }).collect::<Vec<_>>().join(" ")
+}
+
+// första, tjugoförsta, trettionde
+fn sv_ordinal(n: u64, l: L) -> String {
+    const U: [&str; 20] = [
+        "",
+        "första",
+        "andra",
+        "tredje",
+        "fjärde",
+        "femte",
+        "sjätte",
+        "sjunde",
+        "åttonde",
+        "nionde",
+        "tionde",
+        "elfte",
+        "tolfte",
+        "trettonde",
+        "fjortonde",
+        "femtonde",
+        "sextonde",
+        "sjuttonde",
+        "artonde",
+        "nittonde",
+    ];
+    const T: [&str; 10] = ["", "", "tjugo", "trettio", "fyrtio", "femtio", "sextio", "sjuttio", "åttio", "nittio"];
+    match n {
+        1..=19 => U[n as usize].into(),
+        20..=99 if n.is_multiple_of(10) => format!("{}nde", T[(n / 10) as usize]),
+        20..=99 => format!("{}{}", T[(n / 10) as usize], U[(n % 10) as usize]),
+        n => card(n, l, G::M, false),
+    }
+}
+
+fn roman_value(s: &str) -> Option<u64> {
+    let v = |c: char| match c {
+        'I' => 1,
+        'V' => 5,
+        'X' => 10,
+        'L' => 50,
+        'C' => 100,
+        'D' => 500,
+        'M' => 1000,
+        _ => 0,
+    };
+    let ds: Vec<i64> = s.chars().map(v).collect();
+    let n: i64 = ds.iter().enumerate().map(|(k, &d)| if ds.get(k + 1).is_some_and(|&e| e > d) { -d } else { d }).sum();
+    let n = u64::try_from(n).ok().filter(|&n| n > 0 && n < 4000)?;
+    // the canonical spelling only: MIX, DID and the like stay words
+    let mut back = String::new();
+    let mut r = n;
+    for (k, sym) in [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")] {
+        while r >= k {
+            back.push_str(sym);
+            r -= k;
+        }
+    }
+    (back == s).then_some(n)
+}
+
+// Roman numerals where they are sure: « XXIe siècle », « siglo XXI », « chapitre IV », « Louis XIV », « Henry VIII »
+fn roman(c: &[char], i: usize, prev: &str, l: L) -> Option<(usize, String)> {
+    let e = i + (i..).take_while(|&j| c.get(j).is_some_and(|x| "IVXLCDM".contains(*x))).count();
+    if e == i {
+        return None;
+    }
+    let s: String = c[i..e].iter().collect();
+    let n = roman_value(&s)?;
+    if l.lang == "fr" || l.lang == "ro" {
+        if let Some(found) = ordinal(c, e, n, prev, l) {
+            return Some(found);
+        }
+    }
+    if !ends(c, e) {
+        return None;
+    }
+    let keyword = [
+        "chapitre",
+        "tome",
+        "acte",
+        "livre",
+        "partie",
+        "chapter",
+        "volume",
+        "act",
+        "part",
+        "book",
+        "siglo",
+        "capítulo",
+        "tomo",
+        "século",
+        "capitolo",
+        "atto",
+        "parte",
+        "segle",
+        "capítol",
+        "secolul",
+        "capitolul",
+        "kapitel",
+        "teil",
+        "band",
+        "akt",
+        "hoofdstuk",
+        "deel",
+        "rozdział",
+        "tom",
+        "część",
+        "del",
+        "war",
+        "phase",
+        "type",
+        "level",
+        "stage",
+        "class",
+        "grade",
+        "round",
+    ];
+    if keyword.contains(&lower(prev).as_str()) {
+        return Some((e, card(n, l, G::M, false)));
+    }
+    if ["siècle", "secolo", "wiek", "century"].contains(&lower(&after(c, e)).as_str()) {
+        let w = match l.lang {
+            "fr" if n == 1 => "premier".into(),
+            "fr" => fr_ordinal(n),
+            "it" => it_ordinal(n, l),
+            "pl" => pl_ordinal(n, false),
+            "en" => en_ordinal(&card(n, l, G::M, false)),
+            _ => card(n, l, G::M, false),
+        };
+        return Some((e, w));
+    }
+    // a ruler: a capitalized name before; « I » alone never in English, where it is the pronoun
+    let named = prev.chars().count() >= 2 && prev.chars().next().is_some_and(|x| lower(&x.to_string()) != x.to_string());
+    if !named || n > 39 || (s.len() == 1 && (l.lang == "en" || (s != "I" && s != "V"))) {
+        return None;
+    }
+    let w = match l.lang {
+        "fr" if n == 1 => "premier".into(),
+        "fr" => card(n, l, G::M, false),
+        "en" => format!("the {}", en_ordinal(&card(n, l, G::M, false))),
+        "es" | "pt" | "ca" => small_ordinal(n, l, false).unwrap_or_else(|| card(n, l, G::M, false)),
+        "it" => it_ordinal(n, l),
+        "ro" => format!("al {}", if n == 1 { "întâilea".into() } else { ro_ordinal(&card(n, l, G::M, false)) }),
+        "de" => format!("der {}e", de_stem(n, l)),
+        "nl" => format!("de {}", nl_ordinal(n, l)),
+        "pl" => pl_ordinal(n, false),
+        _ => format!("den {}", sv_ordinal(n, l)),
+    };
+    // German writes its rulers with a dot: « Ludwig XIV. »
+    Some((e + usize::from(l.lang == "de" && c.get(e) == Some(&'.')), w))
+}
+
 fn fr_ordinal(n: u64) -> String {
-    let mut w = card(n, L { lang: "fr", region: "" }, G::M, false);
+    let mut w = card(n, L { lang: "fr", region: "", nouns: None }, G::M, false);
     if w.ends_with("vingts") || w.ends_with("cents") {
         w.pop();
     }
@@ -847,7 +1287,7 @@ fn card(n: u64, l: L, g: G, noun: bool) -> String {
         "de" => de(n, g, noun),
         "nl" => nl(n),
         "pl" => pl(n, g),
-        _ => sv(n, noun),
+        _ => sv(n, noun && g != G::N),
     }
 }
 
@@ -1486,7 +1926,11 @@ fn nl(n: u64) -> String {
 fn pl_below_1000(n: u64, g: G) -> String {
     let u: [&str; 20] = [
         "zero",
-        if g == G::F { "jedna" } else { "jeden" },
+        match g {
+            G::F => "jedna",
+            G::N => "jedno",
+            G::M => "jeden",
+        },
         if g == G::F { "dwie" } else { "dwa" },
         "trzy",
         "cztery",
@@ -1713,6 +2157,66 @@ mod tests {
         t("sv", "2000", "tvåtusen");
         t("sv", "3:e", "tredje");
         t("sv", "t.ex. 5 kg", "till exempel fem kilogram");
+    }
+
+    #[test]
+    fn dates() {
+        t("fr", "le 12/03/2026", "le douze mars deux mille vingt-six");
+        t("fr", "le 1 mai", "le premier mai");
+        t("en", "03/12/2026", "March twelfth twenty twenty-six");
+        t("en-GB", "12/03/2026", "twelfth of March twenty twenty-six");
+        t("en", "March 3, 1999", "March third, nineteen ninety-nine");
+        t("en", "in 2005", "in two thousand five");
+        t("en-GB", "3 March", "third of March");
+        t("es", "12/03/2026", "doce de marzo de dos mil veintiséis");
+        t("pt", "2026-03-01", "primeiro de março de dois mil e vinte e seis");
+        t("ca", "12/04/2026", "dotze d'abril de dos mil vint-i-sis");
+        t("de", "12.03.1999", "zwölfter März neunzehnhundert neunundneunzig");
+        t("de", "im Jahr 1999", "im Jahr neunzehnhundert neunundneunzig");
+        t("pl", "3 marca", "trzeciego marca");
+        t("sv", "3 mars", "tredje mars");
+        t("ro", "1 mai", "întâi mai");
+        t("fr", "version 1.2.3", "version un point deux point trois");
+    }
+
+    #[test]
+    fn german_polish_ordinals() {
+        t("de", "am 3. Mai", "am dritten Mai");
+        t("de", "der 2. Platz", "der zweite Platz");
+        t("de", "3. Mai", "dritter Mai");
+        t("de", "Es sind 3. Dann", "Es sind drei. Dann");
+        t("pl", "3. miejsce", "trzeci miejsce");
+        t("pl", "Mam 3. Potem", "Mam trzy. Potem");
+    }
+
+    #[test]
+    fn roman() {
+        t("fr", "Louis XIV", "Louis quatorze");
+        t("fr", "François Ier", "François premier");
+        t("fr", "le XXIe siècle", "le vingt et unième siècle");
+        t("fr", "chapitre IV", "chapitre quatre");
+        t("en", "Henry VIII", "Henry the eighth");
+        t("en", "World War II", "World War two");
+        t("en", "Then I went", "Then I went");
+        t("es", "siglo XXI", "siglo veintiuno");
+        t("es", "Felipe VI", "Felipe sexto");
+        t("it", "Luigi XIV", "Luigi quattordicesimo");
+        t("de", "Ludwig XIV. kam", "Ludwig der vierzehnte kam");
+        t("pl", "XXI wiek", "dwudziesty pierwszy wiek");
+        t("fr", "envoyez votre CV", "envoyez votre CV");
+        t("fr", "Mon CV", "Mon CV");
+    }
+
+    #[test]
+    fn nouns() {
+        use super::{spoken_with, Nouns};
+        let n = |lang: &str, table: &str, text: &str| spoken_with(text, lang, Some(&Nouns::parse(table)));
+        assert_eq!(n("fr", "f heure\nf fois", "1 heure, 21 fois, 1 jour"), "une heure, vingt et une fois, un jour");
+        assert_eq!(n("es", "f casa", "1 casa"), "una casa");
+        assert_eq!(n("ro", "f casă\nn scaun\nn scaune", "1 casă, 2 scaune"), "o casă, două scaune");
+        assert_eq!(n("de", "f Frau\nf frau", "1 Frau"), "eine Frau");
+        assert_eq!(n("pl", "f kobiety\nn okno", "2 kobiety, 1 okno"), "dwie kobiety, jedno okno");
+        assert_eq!(n("sv", "n barn", "1 barn"), "ett barn");
     }
 
     #[test]
