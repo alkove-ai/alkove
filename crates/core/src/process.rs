@@ -85,7 +85,7 @@ pub struct Part {
     pub audio: Vec<f32>,
     pub speech: Vec<Speech>,
     pub wakes: Vec<WakeEvent>,
-    // idle, focus.print and focus.reset
+    // idle and focus.print
     pub diag: Vec<ChainEvent>,
     pub trace: Option<Trace>,
 }

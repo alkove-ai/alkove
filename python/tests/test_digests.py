@@ -106,10 +106,10 @@ def params(**k):
 
 
 CHAINS = [
-    ("defaults, left alone past the 30 s reset", 1, 40, dict(), False, 0),
+    ("defaults, left alone 40 s", 1, 40, dict(), False, 0),
     ("gate, a print, other speech settings, settings changed often", 2, 40, dict(gate=True, print=PRINT, speech=params(confidence=0.6, stop_secs=0.3)), False, 0.008),
     ("no normalize, no sleep, half strength", 3, 30, dict(normalize=False, sleep=False, strength=0.5), False, 0.002),
-    ("speech that never stops, past the forced reset", 4, 75, dict(speech=params(stop_secs=5)), True, 0),
+    ("speech that never stops, 75 s", 4, 75, dict(speech=params(stop_secs=5)), True, 0),
 ]
 
 

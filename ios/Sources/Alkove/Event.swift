@@ -19,7 +19,7 @@ public struct PhraseLevel: Equatable, Sendable {
     public let refDb: Double?
 }
 
-/// `idle`, `focus.print`, `focus.reset`, `speech.far`, `timing`, `overload`… with their fields in `data`; see the errors and diagnostics guide.
+/// `idle`, `focus.print`, `speech.far`, `timing`, `overload`… with their fields in `data`; see the errors and diagnostics guide.
 public struct Diag: Equatable, Sendable {
     public let code: String
     public let level: String
@@ -120,7 +120,6 @@ func chainEvents(_ r: UnsafeBufferPointer<Double>, _ count: Int) -> [Event] {
             level = nil
         case 2: out.append(.diag(Diag(code: "idle", level: "info", data: .obj([("asleep", .bool(a == 1)), ("at", .num(b))]))))
         case 3: out.append(.diag(Diag(code: "focus.print", level: "info", data: .obj([("print", .bool(a == 1)), ("after", .num(b)), ("why", .str(why[Int(c)]))]))))
-        case 4: out.append(.diag(Diag(code: "focus.reset", level: "info", data: .obj([("after", .num(a)), ("why", .str(why[Int(b)]))]))))
         case 7: level = PhraseLevel(voiceDb: orNil(a), noiseDb: b, refDb: orNil(c))
         case 8:
             var data: [(String, Value)] = [("start", .num(a)), ("end", .num(b))]

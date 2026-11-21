@@ -87,7 +87,6 @@ internal fun chainEvents(r: DoubleArray, count: Int): List<Event> {
             1 -> out.add(Event.SpeechEnd(a, b, level)).also { level = null }
             2 -> out.add(Event.Diag("idle", "info", mapOf("asleep" to (a == 1.0), "at" to b)))
             3 -> out.add(Event.Diag("focus.print", "info", mapOf("print" to (a == 1.0), "after" to b, "why" to WHY[c.toInt()])))
-            4 -> out.add(Event.Diag("focus.reset", "info", mapOf("after" to a, "why" to WHY[b.toInt()])))
             7 -> level = PhraseLevel(orNull(a), b, orNull(c))
             8 -> {
                 val l = level

@@ -124,9 +124,6 @@ export class Chain {
         case 3:
           emit({ type: 'diag', code: 'focus.print', level: 'info', data: { print: a === 1, after: b, why: WHY[c]! } })
           break
-        case 4:
-          emit({ type: 'diag', code: 'focus.reset', level: 'info', data: { after: a, why: WHY[b]! } })
-          break
         case 5:
           if (this.onFocus) {
             this.focusOut.set(new Float32Array(alk.heap, x.alk_chain_focus(ptr), HOP))

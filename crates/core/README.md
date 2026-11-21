@@ -8,7 +8,7 @@ Rust, no dependencies beyond the engine, Apache-2.0.
 
 | Piece | |
 |---|---|
-| `Chain` | Focus, then Cue on Focus's output, the mix with the raw mic (`strength`), the level (`normalize`), the gate; a new print applied at the next silence from a fresh state, a fresh state after 30 s, sleep in silences. One hop of 256 samples at 16 kHz per `step`. |
+| `Chain` | Focus, then Cue on Focus's output, the mix with the raw mic (`strength`), the level (`normalize`), the gate; a new print applied at the next silence from a fresh state (after 60 s at most), sleep in silences. One hop of 256 samples at 16 kHz per `step`. |
 | `Processor`, `process` | Focus and Cue over audio pushed in blocks of any size, the output aligned with the input, as `Alkove.process` and `Alkove.stream` give them. |
 | `SpeechTracker` | the speech state machine on Cue's probabilities: `confidence`, `exitConfidence`, `startSecs`, `stopSecs`. |
 | `Resampler` | windowed sinc between any two rates, across chunks. |
@@ -59,7 +59,7 @@ for hop in mic.chunks_exact(256) {
 | `alk_chain_print(c, p, len)`, `alk_chain_strength(c, s)`, `alk_chain_enabled(c, on)` | settings; a print applies at the next silence |
 | `alk_chain_get(c, what)` | speaking, asleep, time, gain in dB, delay |
 
-Event kinds: 0 speech start (`start`), 1 speech end (`start`, `end`), 2 idle (`asleep`, `at`), 3 print applied (`print`, `after`, why), 4 fresh state (`after`, why), 5 Focus's output ready (`t` in samples), 6 Cue's probability (`speech`, `t`). Why: 0 silence, 1 forced, 2 waking up.
+Event kinds: 0 speech start (`start`), 1 speech end (`start`, `end`), 2 idle (`asleep`, `at`), 3 print applied (`print`, `after`, why), 5 Focus's output ready (`t` in samples), 6 Cue's probability (`speech`, `t`). Why: 0 silence, 1 forced, 2 waking up.
 
 ## Tests
 

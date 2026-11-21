@@ -11,9 +11,8 @@ use crate::near::Near;
 use crate::{js, Error, CUE, FOCUS, RATE};
 
 const HOP: usize = FOCUS.chunk;
-// fresh state after 1 s of silence, every 30 s at most, every 60 s even without silence
+// a new print applied at the next 1 s of silence, or once it waited 60 s; no other fresh state: one after a pause made a print-less Focus take the next voice, often one in the background, for the closest
 const RESET_SILENCE: usize = 16000;
-const RESET_EVERY: usize = 30 * 16000;
 const RESET_FORCE: usize = 60 * 16000;
 // asleep once Focus's output stayed under QUIET and the mic near its noise floor for SLEEP_AFTER; woken when the mic rises WAKE_DB over that floor
 const QUIET: f64 = 0.005;
@@ -48,8 +47,6 @@ pub enum ChainEvent {
     Idle { asleep: bool, at: f64 },
     // diag `focus.print`
     Print { print: bool, after: f64, why: Why },
-    // diag `focus.reset`
-    Reset { after: f64, why: Why },
     // Focus's output for the hop is in `Chain::focus_out`; `t` in samples
     Focus { t: f64 },
     // `turn` and `hesitation` NaN without the end of turn head or asleep
@@ -113,6 +110,7 @@ pub struct Chain {
     since_reset: usize,
     // Some(None): back to no print at the next silence
     pending: Option<Option<Vec<f32>>>,
+    pending_for: usize,
     strength: f64,
     enabled: bool,
     s: f64,
@@ -168,6 +166,7 @@ impl Chain {
             cue_steps: 0,
             since_speech: RESET_SILENCE,
             since_reset: 0,
+            pending_for: 0,
             pending: None,
             strength: opts.strength,
             enabled: true,
@@ -237,6 +236,7 @@ impl Chain {
             check_print(e)?;
         }
         self.pending = Some(embedding.map(|e| e.to_vec()));
+        self.pending_for = 0;
         Ok(())
     }
 
@@ -436,6 +436,9 @@ impl Chain {
         }
         self.since_speech = if self.tracker.active { 0 } else { self.since_speech.saturating_add(HOP) };
         self.since_reset += HOP;
+        if self.pending.is_some() {
+            self.pending_for += HOP;
+        }
         self.t += HOP as u64;
     }
 
@@ -451,26 +454,17 @@ impl Chain {
     }
 
     fn rules(&mut self, events: &mut Vec<ChainEvent>) {
-        if self.since_speech < RESET_SILENCE && self.since_reset < RESET_FORCE {
+        if self.pending.is_none() || (self.since_speech < RESET_SILENCE && self.pending_for < RESET_FORCE) {
             return;
         }
-        if self.pending.is_some() || self.since_reset >= RESET_EVERY {
-            self.fresh(events, if self.since_speech >= RESET_SILENCE { Why::Silence } else { Why::Forced });
-        }
+        self.fresh(events, if self.since_speech >= RESET_SILENCE { Why::Silence } else { Why::Forced });
     }
 
     fn fresh(&mut self, events: &mut Vec<ChainEvent>, why: Why) {
+        let Some(print) = self.pending.take() else { return };
         let after = js::to_fixed(self.since_reset as f64 / RATE, 1);
-        match self.pending.take() {
-            Some(print) => {
-                self.focus.set_print(print.as_deref());
-                events.push(ChainEvent::Print { print: print.is_some(), after, why });
-            }
-            None => {
-                self.focus.reset();
-                events.push(ChainEvent::Reset { after, why });
-            }
-        }
+        self.focus.set_print(print.as_deref());
+        events.push(ChainEvent::Print { print: print.is_some(), after, why });
         self.since_reset = 0;
     }
 
@@ -543,9 +537,6 @@ impl ChainEvent {
                 ("level", "info".into()),
                 ("data", obj([("print", print.into()), ("after", after.into()), ("why", why.as_str().into())])),
             ]),
-            ChainEvent::Reset { after, why } => {
-                obj([("type", "diag".into()), ("code", "focus.reset".into()), ("level", "info".into()), ("data", obj([("after", after.into()), ("why", why.as_str().into())]))])
-            }
             ChainEvent::Cancel { start } => obj([("type", "speechcancel".into()), ("start", start.into())]),
             ChainEvent::Far { start, end } => obj([("type", "diag".into()), ("code", "speech.far".into()), ("level", "info".into()), ("data", obj([("start", start.into()), ("end", end.into())]))]),
             ChainEvent::Focus { .. } | ChainEvent::Cue { .. } | ChainEvent::Level { .. } => return None,

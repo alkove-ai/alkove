@@ -204,9 +204,7 @@ def _event(kind: int, a: float, b: float, c: float) -> dict:
         return {"type": "speechend", "start": a, "end": b}
     if kind == 2:
         return {"type": "idle", "asleep": a == 1, "at": b}
-    if kind == 3:
-        return {"type": "diag", "code": "focus.print", "level": "info", "data": {"print": a == 1, "after": b, "why": WHY[int(c)]}}
-    return {"type": "diag", "code": "focus.reset", "level": "info", "data": {"after": a, "why": WHY[int(b)]}}
+    return {"type": "diag", "code": "focus.print", "level": "info", "data": {"print": a == 1, "after": b, "why": WHY[int(c)]}}
 
 
 def _events(records: Iterable[tuple]) -> List[dict]:

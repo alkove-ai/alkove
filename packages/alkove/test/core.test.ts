@@ -236,15 +236,16 @@ function partNumbers(p: ProcessPart): Float64Array {
 }
 
 describe('the chain, hop by hop as in real time', () => {
-  // name, seed, seconds, options, speech without pauses, settings changed (per hop)
-  const cases: [string, number, number, ChainOptions, boolean, number][] = [
-    ['defaults, left alone past the 30 s reset', 1, 40, {}, false, 0],
+  // name, seed, seconds, options, speech without pauses, settings changed (per hop), a print given at that second
+  const cases: [string, number, number, ChainOptions, boolean, number, number?][] = [
+    ['defaults, left alone 40 s', 1, 40, {}, false, 0],
     ['gate, a print, other speech settings, settings changed often', 2, 40, { gate: true, print: print(), speech: { confidence: 0.6, stopSecs: 0.3 } }, false, 0.008],
     ['no normalize, no sleep, half strength', 3, 30, { normalize: false, sleep: false, strength: 0.5 }, false, 0.002],
-    ['speech that never stops, past the forced reset', 4, 75, { speech: { stopSecs: 5 } }, true, 0],
+    ['speech that never stops, 75 s', 4, 75, { speech: { stopSecs: 5 } }, true, 0],
+    ['speech that never stops, a print waiting past 60 s', 9, 75, { speech: { stopSecs: 5 } }, true, 0, 5],
   ]
   const seen = new Set<string>()
-  for (const [name, seed, seconds, opts, dense, rate] of cases)
+  for (const [name, seed, seconds, opts, dense, rate, printAt] of cases)
     it(name, async () => {
       const pcm = stream(seed, seconds, dense)
       const chain = sdkChain(opts)
@@ -256,6 +257,7 @@ describe('the chain, hop by hop as in real time', () => {
         if (x < 0.375) c.print = r() < 0.5 ? print().map((v, j) => v * (1 + 0.1 * Math.sin(i + j))) : null
         else if (x < 0.75) c.strength = r() * 1.4 - 0.2
         else if (x < 1) c.enabled = r() < 0.5
+        if (printAt !== undefined && i === Math.round((printAt * 16000) / 256) * 256) c.print = print()
         if (Object.keys(c).length) chain.control(c)
         const a = chain.step(pcm.subarray(i, i + 256))
         digest.update(a.out)
@@ -271,7 +273,7 @@ describe('the chain, hop by hop as in real time', () => {
     }, 120_000)
 
   it('went through every event', () => {
-    expect([...seen].sort()).toEqual(['cue', 'focus', 'focus.print silence', 'focus.print wake', 'focus.reset forced', 'focus.reset silence', 'idle false', 'idle true', 'speechend', 'speechstart'])
+    expect([...seen].sort()).toEqual(['cue', 'focus', 'focus.print forced', 'focus.print silence', 'focus.print wake', 'idle false', 'idle true', 'speechend', 'speechstart'])
   })
 })
 

@@ -12,7 +12,6 @@ pub(crate) fn record(e: &ChainEvent) -> [f64; 4] {
         ChainEvent::Speech(SpeechEvent::End { start, end }) => [1.0, start, end, 0.0],
         ChainEvent::Idle { asleep, at } => [2.0, b(asleep), at, 0.0],
         ChainEvent::Print { print, after, why: w } => [3.0, b(print), after, why(w)],
-        ChainEvent::Reset { after, why: w } => [4.0, after, why(w), 0.0],
         ChainEvent::Focus { t } => [5.0, t, 0.0, 0.0],
         ChainEvent::Cue { speech, t, .. } => [6.0, speech, t, 0.0],
         ChainEvent::Level { voice_db, noise_db, ref_db } => [7.0, voice_db, noise_db, ref_db],

@@ -60,13 +60,13 @@ Focus keeps one voice and removes noise, music and the other voices. It works on
 await Alkove.process(file, { focus: { voiceprint: print, strength: 0.8 } })
 ```
 
-- Without a print, Focus keeps the closest voice. It stays on the voice it follows and starts over from a fresh state after 1 s of silence, at most once every 30 s (and once every 60 s whatever happens).
+- Without a print, Focus keeps the closest voice, and stays on it: its state carries over the whole stream, pauses included.
 - With a print, it keeps only that voice. See [voiceprints](/docs/guides/voiceprints/).
 - `strength` mixes Focus with the input: 1 (the default) is Focus alone, 0 the input alone.
 
 With `focus` on, Cue runs too: speech segments come with it.
 
-The `diag` list reports `focus.reset` (a fresh state, with why) and `focus.print` (a print taken).
+The `diag` list reports `focus.print` (a print taken, with why).
 
 ## Cue
 

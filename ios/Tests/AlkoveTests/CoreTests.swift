@@ -66,7 +66,7 @@ final class CoreTests: XCTestCase {
 
     private func speech(confidence: Double = 0.5, stopSecs: Double = 0.6) -> Value { SpeechParams(confidence: confidence, stopSecs: stopSecs).value }
 
-    func testChainLeftAlone() throws { try chain("defaults, left alone past the 30 s reset", 1, 40, false, 0, []) }
+    func testChainLeftAlone() throws { try chain("defaults, left alone 40 s", 1, 40, false, 0, []) }
 
     func testChainSettingsChanged() throws {
         try chain("gate, a print, other speech settings, settings changed often", 2, 40, false, 0.008, [("gate", true), ("print", .floats(print)), ("speech", speech(confidence: 0.6, stopSecs: 0.3))])
@@ -74,7 +74,7 @@ final class CoreTests: XCTestCase {
 
     func testChainHalfStrength() throws { try chain("no normalize, no sleep, half strength", 3, 30, false, 0.002, [("normalize", false), ("sleep", false), ("strength", 0.5)]) }
 
-    func testChainNeverStops() throws { try chain("speech that never stops, past the forced reset", 4, 75, true, 0, [("speech", speech(stopSecs: 5))]) }
+    func testChainNeverStops() throws { try chain("speech that never stops, 75 s", 4, 75, true, 0, [("speech", speech(stopSecs: 5))]) }
 
     private let why = ["silence", "forced", "wake"]
 

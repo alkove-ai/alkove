@@ -40,7 +40,7 @@ sealed interface Event {
     /** That speech stopped before: a backchannel, the far end's volume back. */
     data class InterruptCancel(val start: Double, val end: Double) : Event
 
-    /** `idle`, `focus.print`, `focus.reset`, `timing`, `overload`… with their fields in `data`; see the errors and diagnostics guide. */
+    /** `idle`, `focus.print`, `timing`, `overload`… with their fields in `data`; see the errors and diagnostics guide. */
     data class Diag(val code: String, val level: String, val data: Map<String, Any?> = emptyMap()) : Event
 
     data class ModeChange(val mode: Mode, val reason: RawReason? = null) : Event

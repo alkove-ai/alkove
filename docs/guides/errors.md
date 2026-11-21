@@ -133,7 +133,6 @@ const off = Alkove.onDiag((d) => console.warn(d.code, d))
 | `queue` | info | every 2 s, the worklet's queue | `queueMs`, `debtMs`, `droppedMs`, `latencyMs` | latency analysis |
 | `idle` | info | Focus and Cue go to sleep in a silence, or wake up | `asleep`, `at` | nothing |
 | `focus.print` | info | a print was applied, at a silence | `print`, `after`, `why` | nothing |
-| `focus.reset` | info | Focus restarted from a fresh state | `after`, `why` | nothing |
 | `print.learn` / `print.reject` / `print.restart` | info | a learning window was accepted, refused, or the print started over | `score`, `progress`, `ms` | nothing |
 | `voiceprint.reset` | warn | a print from another version of Timbre was ignored (`voiceprint`, `setVoiceprint`, `onlyMyVoice`) | | let it learn again |
 | `spot.no-print` | warn | `input.spot(words, { onlyMyVoice: true })` on an input without a print: the closest voice wakes it | | give the input a `voiceprint`, or `learn: true` |

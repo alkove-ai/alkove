@@ -97,7 +97,6 @@ fn record(e: &ChainEvent) -> (u8, f64, f64, f64) {
         ChainEvent::Speech(SpeechEvent::End { start, end }) => (1, start, end, 0.0),
         ChainEvent::Idle { asleep, at } => (2, b(asleep), at, 0.0),
         ChainEvent::Print { print, after, why } => (3, b(print), after, why as u8 as f64),
-        ChainEvent::Reset { after, why } => (4, after, why as u8 as f64, 0.0),
         ChainEvent::Focus { t } => (5, t, 0.0, 0.0),
         ChainEvent::Cue { speech, t, .. } => (6, speech, t, 0.0),
         ChainEvent::Level { voice_db, noise_db, ref_db } => (7, voice_db, noise_db, ref_db),

@@ -51,7 +51,7 @@ class CoreTest {
     private fun speech(confidence: Double = 0.5, stopSecs: Double = 0.6) = SpeechParams(confidence = confidence, stopSecs = stopSecs).value()
 
     @Test
-    fun chainLeftAlone() = chain("defaults, left alone past the 30 s reset", 1, 40, false, 0.0, emptyMap())
+    fun chainLeftAlone() = chain("defaults, left alone 40 s", 1, 40, false, 0.0, emptyMap())
 
     @Test
     fun chainSettingsChanged() =
@@ -61,7 +61,7 @@ class CoreTest {
     fun chainHalfStrength() = chain("no normalize, no sleep, half strength", 3, 30, false, 0.002, mapOf("normalize" to false, "sleep" to false, "strength" to 0.5))
 
     @Test
-    fun chainNeverStops() = chain("speech that never stops, past the forced reset", 4, 75, true, 0.0, mapOf("speech" to speech(stopSecs = 5.0)))
+    fun chainNeverStops() = chain("speech that never stops, 75 s", 4, 75, true, 0.0, mapOf("speech" to speech(stopSecs = 5.0)))
 
     private val why = listOf("silence", "forced", "wake")
 

@@ -2,6 +2,10 @@
 
 The `alkove` npm package. Before 1.0, a minor version (0.2, 0.3) may break; a patch version never does. See [stability and versions](https://alkove.ai/docs/guides/stability/).
 
+## Unreleased
+
+- Focus without a print keeps its state for the whole stream. The chain restarted it from a fresh state after 1 s of silence, every 30 s at most, and a fresh Focus without a print takes the first voice it hears for the closest one: often a voice in the background, which then came through until the user spoke again. A new print still applies at the next pause of 1 s, or once it has waited 60 s. The diag `focus.reset` is gone with it.
+
 ## 0.4.3 (2026-11-04)
 
 The Swift package and `alkove-livekit-swift` move to 0.4.3, for React Native; npm stays at 0.4.2, PyPI at 0.4.0, Android at 0.4.1, and the core, the engine and the models do not move (the same outputs to the bit).
