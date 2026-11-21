@@ -364,44 +364,54 @@ unsafe fn depthwise(a: *mut f32, c: &Conv, [hi, wi, ho, wo]: [usize; 4], w: &[Ve
     epilogue_plane(a, c, ho, wo, w);
 }
 
-// four output positions of one channel at a time, every row read through a copy padded with zeros on both sides
+// four output positions of one channel at a time, every row read in tiles through copies padded with zeros on both sides
 unsafe fn depthwise_rows(a: *mut f32, c: &Conv, [hi, wi, ho, wo]: [usize; 4], w: &[Vec<f32>]) {
     const ROWS: usize = 8;
     const WIDTH: usize = 96;
     let (wt, n) = (w[c.w].as_ptr(), c.c_out);
     let (dw, pw, kh, kw) = (c.dil[1], c.pad[1], c.k[0], c.k[1]);
-    let chunks = wo.div_ceil(4);
-    let width = chunks * 4 + (kw - 1) * dw;
-    if kh > ROWS || width > WIDTH || pw + wi > width {
+    let halo = (kw - 1) * dw;
+    if kh > ROWS || halo + 4 > WIDTH {
         return depthwise_slow(a, c, [hi, wi, ho, wo], w);
     }
+    let tile = (WIDTH - halo) & !3;
     let mut rows = [[0f32; WIDTH]; ROWS];
     let mut out = [0f32; WIDTH];
     for ch in 0..n {
         for y in 0..ho {
-            for (ky, row) in rows.iter_mut().enumerate().take(kh) {
-                row[..width].fill(0.0);
-                if let Some(iy) = tap(y, ky, c.stride[0], c.dil[0], c.pad[0], hi, false) {
-                    let src = a.add(c.x.off + iy * c.x.h + ch * c.x.c);
-                    row[pw..pw + wi].copy_from_slice(view(src, wi));
-                }
-            }
-            for q in 0..chunks {
-                let mut acc = F32x4::splat(0.0);
-                for (ky, row) in rows.iter().enumerate().take(kh) {
-                    for kx in 0..kw {
-                        acc = F32x4::load(row.as_ptr().add(4 * q + kx * dw)).mul_add(F32x4::splat(*wt.add((ky * kw + kx) * n + ch)), acc);
+            let mut x0 = 0;
+            while x0 < wo {
+                let m = tile.min(wo - x0);
+                let chunks = m.div_ceil(4);
+                let width = chunks * 4 + halo;
+                // the tile's padded positions x0.. hold the input from x0 - pw on
+                let (from, to) = (x0.saturating_sub(pw), (x0 + width).saturating_sub(pw).min(wi));
+                for (ky, row) in rows.iter_mut().enumerate().take(kh) {
+                    row[..width].fill(0.0);
+                    if let (Some(iy), true) = (tap(y, ky, c.stride[0], c.dil[0], c.pad[0], hi, false), to > from) {
+                        let src = a.add(c.x.off + iy * c.x.h + ch * c.x.c + from);
+                        let at = from + pw - x0;
+                        row[at..at + to - from].copy_from_slice(view(src, to - from));
                     }
                 }
-                acc.store(out.as_mut_ptr().add(4 * q));
+                for q in 0..chunks {
+                    let mut acc = F32x4::splat(0.0);
+                    for (ky, row) in rows.iter().enumerate().take(kh) {
+                        for kx in 0..kw {
+                            acc = F32x4::load(row.as_ptr().add(4 * q + kx * dw)).mul_add(F32x4::splat(*wt.add((ky * kw + kx) * n + ch)), acc);
+                        }
+                    }
+                    acc.store(out.as_mut_ptr().add(4 * q));
+                }
+                view_mut(a.add(c.out.off + y * c.out.h + ch * c.out.c + x0), m).copy_from_slice(&out[..m]);
+                x0 += m;
             }
-            view_mut(a.add(c.out.off + y * c.out.h + ch * c.out.c), wo).copy_from_slice(&out[..wo]);
         }
     }
     epilogue_plane(a, c, ho, wo, w);
 }
 
-// the same sums one position at a time, for rows too long for the stack copies
+// the same sums one position at a time, for kernels too tall or too dilated for the stack copies
 unsafe fn depthwise_slow(a: *mut f32, c: &Conv, [hi, wi, ho, wo]: [usize; 4], w: &[Vec<f32>]) {
     let (wt, n, kw) = (w[c.w].as_ptr(), c.c_out, c.k[1]);
     for ch in 0..n {

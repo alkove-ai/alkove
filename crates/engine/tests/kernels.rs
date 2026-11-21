@@ -181,6 +181,10 @@ fn conv_2d_as_plain_sums() {
         (4, 6, [7, 5], [3, 2], [2, 1], [1, 2], [1, 1], 2, false),
         (3, 2, [4, 4], [4, 4], [1, 1], [1, 1], [0, 0], 1, false),
         (4, 4, [5, 5], [3, 3], [1, 1], [1, 1], [1, 1], 4, false),
+        // depthwise rows wider than one tile of the stack copies: padded, dilated, and narrower than their input
+        (3, 3, [2, 300], [3, 3], [1, 1], [1, 1], [1, 1], 3, false),
+        (2, 2, [3, 257], [1, 5], [1, 1], [1, 2], [0, 4], 2, false),
+        (2, 2, [1, 203], [1, 7], [1, 1], [1, 1], [0, 0], 2, false),
         (2, 3, [4, 3], [2, 3], [2, 1], [1, 1], [0, 1], 1, true),
     ] {
         let size = |d: usize| if tr { (hw(hi, wi, d) - 1) * st[d] + dl[d] * (k[d] - 1) + 1 - 2 * pd[d] } else { (hw(hi, wi, d) + 2 * pd[d] - dl[d] * (k[d] - 1) - 1) / st[d] + 1 };
