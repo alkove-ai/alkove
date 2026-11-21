@@ -154,7 +154,7 @@ pub fn compile(text: &str, langs: &[String], chain: Option<&str>, lex: Option<&m
             return Err(Error::Type("lang is required for a typed word".into()));
         }
         let lex = lex.ok_or(Error::Missing("lex"))?;
-        warnings.extend(check_text(text));
+        warnings.extend(check_text(&crate::text::spoken(text, &langs[0])));
         let mut seen: Vec<Vec<u32>> = Vec::new();
         let mut out = Vec::new();
         for l in langs {

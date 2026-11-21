@@ -182,7 +182,7 @@ impl Lex {
     // a phrase: each word's pronunciations multiplied, the `max` likeliest kept; `keep` filters each word's variants
     pub fn phonemize(&mut self, t: &str, lang: &str, max: usize, keep: impl Fn(&Pronunciation, usize) -> bool) -> Result<Vec<Pronunciation>, Error> {
         let mut out = vec![Pronunciation { ids: Vec::new(), ipa: String::new(), p: 1.0 }];
-        for w in split_words(t) {
+        for w in split_words(&text::spoken(t, lang)) {
             let vs: Vec<Pronunciation> = self.word(&w, lang)?.into_iter().enumerate().filter(|(i, v)| keep(v, *i)).map(|(_, v)| v).collect();
             let mut next: Vec<Pronunciation> = out.iter().flat_map(|a| vs.iter().map(move |v| Pronunciation { ids: [a.ids.as_slice(), &v.ids].concat(), ipa: String::new(), p: a.p * v.p })).collect();
             js::sort(&mut next, |a, b| a.p > b.p);

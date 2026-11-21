@@ -42,9 +42,9 @@ const word = await Spot.compile('/heɪ ˈnoʊvə/', { lang: 'en' })
 
 | Code | Meaning |
 |---|---|
-| `text.digits` | numbers are not read: write them in letters |
+| `text.digits` | digits that are not a number, time, unit or currency the SDK reads: write them in letters |
 | `text.acronym` | acronyms are read as words: write them as they sound |
-| `text.abbreviation` | abbreviations are read as written |
+| `text.abbreviation` | abbreviations the SDK does not know are read as written |
 | `word.too-short` | fewer than 6 phonemes or 3 vowels: expect more false alarms |
 
 ## Where the word counts

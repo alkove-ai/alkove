@@ -28,7 +28,7 @@ const word = await Spot.compile('Camille', { lang: ['fr', 'es'] })
 for (const w of word.warnings) console.warn(w.code, w.message)
 ```
 
-Read the warnings: `word.too-short` means more false alarms (short words, few syllables), and `text.digits`, `text.acronym` or `text.abbreviation` mean the text will not be read the way you think. Write numbers and acronyms as they sound.
+Read the warnings: `word.too-short` means more false alarms (short words, few syllables), and `text.digits`, `text.acronym` or `text.abbreviation` mean the text will not be read the way you think. Numbers, times, units and common abbreviations are read in the word's language; write acronyms as they sound.
 
 A typed word uses default thresholds, set per language. For a word that matters, enroll it.
 

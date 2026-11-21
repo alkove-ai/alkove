@@ -70,13 +70,15 @@ Phonemes outside the inventory are refused.
 
 ### Text that Lex reads poorly
 
+Before Lex, the text is put as it is said, in the word's language: numbers (cardinals, decimals, negatives, the ordinals written with their mark), times, percentages, currencies (€, $, £), common units (km, kg, °C, km/h…) and common abbreviations (« M. », « Dr. », « z.B. »…). « 14h30 » is read « quatorze heures trente », « 2 h » « dwie godziny » in Polish.
+
 When it compiles a word, the SDK warns about text that will not be read the way you expect. The warnings are on `word.warnings`:
 
 | Code | Why |
 |---|---|
-| `text.digits` | Numbers are not read: write them in letters. |
+| `text.digits` | Digits left after that are not read: write them in letters. |
 | `text.acronym` | Acronyms are read as words: write them as they sound. |
-| `text.abbreviation` | Abbreviations are read as written. |
+| `text.abbreviation` | Abbreviations the SDK does not know are read as written. |
 | `word.too-short` | Short words give more false alarms in Spot. |
 
 ## Performance

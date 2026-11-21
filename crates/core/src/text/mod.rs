@@ -2,6 +2,9 @@
 
 #[rustfmt::skip]
 mod tables;
+mod spoken;
+
+pub use spoken::spoken;
 
 use std::sync::OnceLock;
 
