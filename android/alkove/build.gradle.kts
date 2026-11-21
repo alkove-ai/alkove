@@ -87,7 +87,7 @@ publishing {
             afterEvaluate { from(components["release"]) }
             pom {
                 name = "Alkove"
-                description = "On-device voice input for Android: keep the user's voice, find speech, hear words, know a voice; the same to the bit as the web and Python packages"
+                description = "On-device voice models and SDK for Android: keep the user's voice, find speech, hear words, know a voice; the same to the bit as the web and Python packages"
                 url = "https://alkove.ai"
                 licenses {
                     license {

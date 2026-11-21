@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "alkove"
-description = "On-device voice input: keep the user's voice, detect speech. No server, no key."
+description = "On-device voice models and SDK: keep the user's voice, detect speech. No server, no key."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
