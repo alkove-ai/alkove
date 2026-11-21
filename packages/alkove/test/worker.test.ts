@@ -252,6 +252,8 @@ describe('the workers, before the core and on it', () => {
   it('every channel, every scenario', async () => {
     const seen: Record<string, string[]> = {}
     for (const s of scenarios()) {
+      // a macrotask between scenarios: vitest's RPC replies wait for one, and time out after 60 s on a slow runner
+      await new Promise((r) => setImmediate(r))
       const after = await run(join(root, 'dist/alkove-worker.js'), s)
       for (const k of Object.keys(after) as (keyof typeof after)[]) expect(digest(after[k]), `${s.name}: ${k}`).toBe(GOLDEN[`worker: ${s.name}: ${k}`])
       const all = [...after.events, ...after.bg.filter((m) => (m as { type: string }).type === 'event').map((m) => (m as { event: unknown }).event)]

@@ -850,7 +850,7 @@ mod header {
     #[test]
     fn header_matches_the_exports() {
         let rust = rust_fns(include_str!("lib.rs"));
-        assert_eq!(rust.len(), 84);
+        assert_eq!(rust.len(), 86);
         assert_eq!(rust, c_fns(include_str!("../include/alkove.h")));
     }
 }
