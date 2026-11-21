@@ -51,8 +51,9 @@ class Focus(rtc.FrameProcessor[rtc.AudioFrame]):
         Args:
             models: The models to use, with Focus and Cue. Defaults to those `download-files`
                 put in the cache, shared by every session of the process.
-            voiceprint: The print of the voice to keep (`alkove.Voiceprint` or its
-                embedding). Defaults to the closest voice.
+            voiceprint: The voice to keep: an `alkove.Voiceprint`, or a few seconds of the
+                user alone at 16 kHz (its print, and Focus's sample from the first word).
+                Defaults to the closest voice.
             strength: How much of Focus goes out, from 0 to 1, the rest being the raw
                 microphone.
             normalize: Bring the voice that goes out to a steady level.
@@ -85,16 +86,16 @@ class Focus(rtc.FrameProcessor[rtc.AudioFrame]):
             self._streams.clear()
         self._enabled = value
 
-    def set_voiceprint(self, embedding: Any) -> None:
-        """Keep the voice of another print, from the user's next silence.
+    def set_voiceprint(self, voiceprint: Any) -> None:
+        """Keep another voice, from the next hop.
 
         Args:
-            embedding: The print (`alkove.Voiceprint` or its embedding), or `None` to go
-                back to the closest voice.
+            voiceprint: An `alkove.Voiceprint`, a few seconds of the user alone at 16 kHz,
+                or `None` to go back to the closest voice.
         """
-        self._voiceprint = embedding
+        self._voiceprint = voiceprint
         for live, _ in self._streams.values():
-            live.set_voiceprint(embedding)
+            live.set_voiceprint(voiceprint)
 
     def set_strength(self, s: float) -> None:
         """Set how much of Focus goes out.

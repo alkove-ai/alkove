@@ -35,7 +35,7 @@ from alkove import Models, Timbre
 
 models = Models.load(["focus", "cue", "timbre"])
 me = Timbre(models).embed(pcm)
-f = AlkoveFilter(models=models, voiceprint=me)  # an alkove.Voiceprint or its 192 numbers
+f = AlkoveFilter(models=models, voiceprint=me)  # an alkove.Voiceprint, or a few seconds of the user alone at 16 kHz
 ```
 
 ### End of turn and interruptions

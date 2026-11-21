@@ -31,7 +31,7 @@ class AlkoveFilter(BaseAudioFilter):
     async def stop(self) -> None:
         self._live = None
 
-    # FilterUpdateSettingsFrame: `strength` (0 to 1) and `voiceprint` (192 numbers, or None)
+    # FilterUpdateSettingsFrame: `strength` (0 to 1) and `voiceprint` (an alkove.Voiceprint, a 16 kHz recording of the user, or None)
     async def process_frame(self, frame: FilterControlFrame) -> None:
         if isinstance(frame, FilterEnableFrame):
             self._enabled = frame.enable
