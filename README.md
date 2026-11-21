@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://alkove.ai">
-    <img alt="Alkove" src=".github/assets/alkove.png" width="273" height="76">
+    <img alt="Alkove" src=".github/assets/alkove.png" width="164" height="46">
   </a>
 </p>
 
