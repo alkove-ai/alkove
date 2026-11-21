@@ -100,7 +100,7 @@ let input = try await AgentInput.start(AgentOptions(output: Output(format: .s16,
 }
 ```
 
-A preview, not yet tried on an iPhone's microphone. Wake words, files, a LiveKit room (`alkove-livekit-swift`): [the iOS quick start](https://alkove.ai/docs/start/ios/).
+Wake words, files, a LiveKit room (`alkove-livekit-swift`): [the iOS quick start](https://alkove.ai/docs/start/ios/).
 
 ### On React Native
 
@@ -112,7 +112,7 @@ npm install @alkove/react-native
 const { status } = useAgentInput({ enabled: talking, on: { utterance: ({ pcm }) => transcribe(pcm) } })
 ```
 
-The hooks of `alkove/react` on the native SDKs, Expo plugin included. A preview, not yet tried on a phone. Wake words, a LiveKit room (`@alkove/react-native-livekit`): [the React Native quick start](https://alkove.ai/docs/start/react-native/).
+The hooks of `alkove/react` on the native SDKs, Expo plugin included. Wake words, a LiveKit room (`@alkove/react-native-livekit`): [the React Native quick start](https://alkove.ai/docs/start/react-native/).
 
 ### LiveKit Agents
 
@@ -204,6 +204,10 @@ Weights on [Hugging Face](https://huggingface.co/alkove-ai), downloaded once, ch
 | [`examples`](./examples) | two React apps (Next.js, Vite) and two plain HTML pages |
 
 Building from source: [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## Help and custom models
+
+Integrating Alkove into your app or agent, or need a model trained for your own use? Write to me through [alkove.ai/contact](https://alkove.ai/contact/). Bugs and questions about the SDK go to [issues](https://github.com/alkove-ai/alkove/issues).
 
 ## License
 

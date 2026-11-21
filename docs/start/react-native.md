@@ -5,10 +5,6 @@ sidebar:
   order: 8.5
 ---
 
-:::caution[A preview, not yet tried on a device]
-The module passes its end-to-end tests in the Android emulator and the iOS simulator, React Native 0.88 with the new architecture. It has not run on a phone's microphone yet. Report what you hear in an [issue](https://github.com/alkove-ai/alkove/issues).
-:::
-
 ```sh
 npm install @alkove/react-native
 ```

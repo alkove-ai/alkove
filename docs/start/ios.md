@@ -5,10 +5,6 @@ sidebar:
   order: 8
 ---
 
-:::caution[A preview, not yet tried on a device]
-The Swift package gives the web's outputs to the bit on a Mac and in the iOS simulator, its inputs are tested on recorded audio, but it has not run on an iPhone's microphone yet: the speeds, the audio session, Bluetooth and interruptions on a device are not measured. Report what you hear in an [issue](https://github.com/alkove-ai/alkove/issues).
-:::
-
 ```swift
 // Package.swift, or File > Add Package Dependencies in Xcode
 .package(url: "https://github.com/alkove-ai/alkove.git", from: "0.4.3")
