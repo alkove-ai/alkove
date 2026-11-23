@@ -5,7 +5,10 @@ mod gemm;
 mod kernels;
 pub mod math;
 mod ops;
+mod pool;
 mod simd;
+
+pub use pool::{max_threads, set_threads, threads};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -260,6 +263,7 @@ pub struct Session {
     plan: usize,
     arena: Vec<f32>,
     frames: usize,
+    threads: usize,
 }
 
 impl Session {
@@ -272,7 +276,7 @@ impl Session {
         let p = model.plans.get(plan).ok_or(Error::Plan(plan))?;
         let arena = zeros(p.arena)?;
         let frames = p.frames.map_or(0, |f| f.of(f.max_len));
-        Ok(Session { model, plan, arena, frames })
+        Ok(Session { model, plan, arena, frames, threads: 0 })
     }
 
     pub fn plan(&self) -> &Plan {
@@ -305,13 +309,24 @@ impl Session {
         Some(&self.arena[io.off..io.off + io.len])
     }
 
+    // this session's thread count, whatever `set_threads` says; 0 follows it
+    pub fn set_threads(&mut self, n: usize) {
+        self.threads = n;
+    }
+
     pub fn run(&mut self) {
-        for i in 0..self.plan().ops.len() {
-            self.step(i);
-        }
+        pool::with(self.threads, || {
+            for i in 0..self.plan().ops.len() {
+                self.exec(i);
+            }
+        })
     }
 
     pub fn step(&mut self, i: usize) {
+        pool::with(self.threads, || self.exec(i))
+    }
+
+    fn exec(&mut self, i: usize) {
         let m = &*self.model;
         // Safety: every instruction was checked against this arena's size at load.
         unsafe { kernels::exec(self.arena.as_mut_ptr(), &m.plans[self.plan].ops[i], &m.weights, self.frames) }

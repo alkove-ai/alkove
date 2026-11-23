@@ -471,7 +471,8 @@ unsafe fn gru(a: *mut f32, g: &Gru, w: &[Vec<f32>]) {
         };
         let hs = gemm::Rows { rows: prev, k: h };
         gemm::run(&hs, nb, &w[g.packed[1]], h, 3 * h, |i, j, v| *gh.add(i * 3 * h + j) = v);
-        for b in 0..nb {
+        // each band reads its own rows of gx and gh and writes its own row of y
+        let band = gemm::Apart(|b: usize| {
             let (x, r) = (gx.add((t * nb + b) * 3 * h), gh.add(b * 3 * h));
             let p = prev(b);
             let y = a.add(g.y.off + t * g.y.s0 + b * g.y.s1);
@@ -493,7 +494,10 @@ unsafe fn gru(a: *mut f32, g: &Gru, w: &[Vec<f32>]) {
                 let n = math::tanh((*x.add(2 * h + u) + bw[2 * h + u]) + rr * (*r.add(2 * h + u) + br[2 * h + u]));
                 *y.add(u) = (1.0 - z) * n + z * *p.p.offset(u as isize * p.s);
             }
-        }
+        });
+        let parts = crate::pool::threads().min(nb * h / 512).max(1);
+        let size = nb.div_ceil(parts);
+        crate::pool::run(parts, nb.div_ceil(size), &|q| (q * size..((q + 1) * size).min(nb)).for_each(|b| (band.get())(b)));
     }
 }
 

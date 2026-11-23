@@ -1,4 +1,4 @@
-//! cargo run --release --example bench -- model.alk [runs] [--top N] [--only kind] [--range a-b] [--kinds] [--len samples]: for each plan, time per run and per kind of instruction, and a fingerprint of the outputs of 200 runs on fixed inputs (equal on every target).
+//! cargo run --release --example bench -- model.alk [runs] [--threads N] [--top N] [--only kind] [--range a-b] [--kinds] [--len samples]: for each plan, time per run and per kind of instruction, and a fingerprint of the outputs of 200 runs on fixed inputs (equal on every target).
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -9,6 +9,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let bytes = std::fs::read(&args[1]).expect("read the .alk");
     let model = Arc::new(Model::load(&bytes).expect("load"));
+    if let Some(n) = args.iter().position(|a| a == "--threads").and_then(|i| args.get(i + 1)) {
+        alkove_engine::set_threads(n.parse().expect("--threads: a count"));
+    }
     for p in 0..model.plans().len() {
         bench(&model, p, &args);
     }

@@ -94,7 +94,7 @@ unsafe fn tile4<const P: usize>(k: usize, row: Row, b: [*const f32; P], acc: &mu
 pub const SEGS: usize = 16;
 
 #[inline(always)]
-unsafe fn panels<const R: usize, const P: usize>(segs: &[(usize, usize, [Row; R])], i0: usize, q0: usize, b: *const f32, k: usize, n: usize, out: &mut impl FnMut(usize, usize, f32)) {
+unsafe fn panels<const R: usize, const P: usize>(segs: &[(usize, usize, [Row; R])], i0: usize, q0: usize, b: *const f32, k: usize, n: usize, out: &impl Fn(usize, usize, f32)) {
     let mut acc = [[[F32x4::splat(0.0); 2]; P]; R];
     for (k0, len, rows) in segs {
         if *len == 0 {
@@ -128,7 +128,7 @@ unsafe fn panels<const R: usize, const P: usize>(segs: &[(usize, usize, [Row; R]
 
 // the rows of every segment once per tile of rows, then every panel of columns against them
 #[inline(always)]
-unsafe fn rows<const R: usize, S: Source>(src: &S, i0: usize, b: *const f32, k: usize, n: usize, out: &mut impl FnMut(usize, usize, f32)) {
+unsafe fn rows<const R: usize, S: Source>(src: &S, i0: usize, b: *const f32, k: usize, n: usize, out: &impl Fn(usize, usize, f32)) {
     let count = src.segs();
     assert!(count <= SEGS, "more than {SEGS} segments");
     let mut segs = [(0usize, 0usize, [NO_ROW; R]); SEGS];
@@ -159,19 +159,51 @@ unsafe fn rows<const R: usize, S: Source>(src: &S, i0: usize, b: *const f32, k: 
     }
 }
 
-// Safety: every row the source hands out is readable over its segment; b is `pack` of a k by n matrix.
-pub unsafe fn run<S: Source>(src: &S, m: usize, b: &[f32], k: usize, n: usize, mut out: impl FnMut(usize, usize, f32)) {
-    debug_assert_eq!(b.len(), n.div_ceil(PANEL) * k * PANEL);
-    let mut i = 0;
-    while i < m {
-        match m - i {
-            1 => rows::<1, S>(src, i, b.as_ptr(), k, n, &mut out),
-            2 => rows::<2, S>(src, i, b.as_ptr(), k, n, &mut out),
-            3 => rows::<3, S>(src, i, b.as_ptr(), k, n, &mut out),
-            _ => rows::<4, S>(src, i, b.as_ptr(), k, n, &mut out),
+unsafe fn span<S: Source>(src: &S, i0: usize, i1: usize, b: &[f32], k: usize, n: usize, out: &impl Fn(usize, usize, f32)) {
+    let mut i = i0;
+    while i < i1 {
+        match i1 - i {
+            1 => rows::<1, S>(src, i, b.as_ptr(), k, n, out),
+            2 => rows::<2, S>(src, i, b.as_ptr(), k, n, out),
+            3 => rows::<3, S>(src, i, b.as_ptr(), k, n, out),
+            _ => rows::<4, S>(src, i, b.as_ptr(), k, n, out),
         }
-        i += (m - i).min(4);
+        i += (i1 - i).min(4);
     }
+}
+
+// below this many products a part costs less than handing it to another thread
+const MIN_PAR: usize = 1 << 16;
+const MIN_ROWS: usize = 8;
+
+pub struct Apart<T>(pub T);
+
+// Safety: the parts write disjoint rows of the output and only read the rest.
+unsafe impl<T> Sync for Apart<T> {}
+
+impl<T> Apart<T> {
+    // through a method, so that a closure captures the whole wrapper and not its fields
+    pub fn get(&self) -> &T {
+        &self.0
+    }
+}
+
+// Safety: every row the source hands out is readable over its segment; b is `pack` of a k by n matrix.
+pub unsafe fn run<S: Source>(src: &S, m: usize, b: &[f32], k: usize, n: usize, out: impl Fn(usize, usize, f32)) {
+    debug_assert_eq!(b.len(), n.div_ceil(PANEL) * k * PANEL);
+    let threads = crate::pool::threads().min(m / MIN_ROWS);
+    if threads > 1 && m * k * n >= MIN_PAR {
+        // parts of four rows, taken as threads free up: a slower core takes fewer
+        let step = 4;
+        let ctx = Apart((src, &out, b));
+        let part = |p: usize| {
+            let &(src, out, b) = ctx.get();
+            span(src, p * step, ((p + 1) * step).min(m), b, k, n, out)
+        };
+        crate::pool::run(threads, m.div_ceil(step), &part);
+        return;
+    }
+    span(src, 0, m, b, k, n, &out);
 }
 
 // rows anywhere, one segment: row i is rows(i)
@@ -199,6 +231,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn threads_give_the_same_bits() {
+        let (m, k, n) = (37usize, 96usize, 144usize);
+        let a: Vec<f32> = (0..m * k).map(|i| ((i * 7919 % 1000) as f32 - 500.0) * 1e-3).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| ((i * 104_729 % 997) as f32 - 498.0) * 1e-3).collect();
+        let packed = pack(&b, k, n, n, 0);
+        let src = Rows { rows: |i: usize| Row { p: unsafe { a.as_ptr().add(i * k) }, s: 1 }, k };
+        let mut outs = Vec::new();
+        for t in [1, 4] {
+            crate::pool::set_threads(t);
+            let mut out = vec![0f32; m * n];
+            let o = Apart(out.as_mut_ptr());
+            unsafe { run(&src, m, &packed, k, n, |i, j, v| *o.get().add(i * n + j) = v) };
+            outs.push(out.iter().map(|v| v.to_bits()).collect::<Vec<u32>>());
+        }
+        crate::pool::set_threads(1);
+        assert_eq!(outs[0], outs[1]);
+    }
+
+    #[test]
     #[ignore]
     fn speed() {
         for (m, k, n) in [(1usize, 192usize, 768usize), (1, 768, 192), (4, 192, 768), (117, 128, 384), (33, 48, 144)] {
@@ -210,7 +261,10 @@ mod tests {
             let reps = (200_000_000 / (m * k * n)).max(1);
             let t = std::time::Instant::now();
             for _ in 0..reps {
-                unsafe { run(&src, m, &packed, k, n, |i, j, v| out[i * n + j] = v) };
+                {
+                    let o = Apart(out.as_mut_ptr());
+                    unsafe { run(&src, m, &packed, k, n, |i, j, v| *o.get().add(i * n + j) = v) };
+                }
             }
             let s = t.elapsed().as_secs_f64();
             let mut axpy = vec![0f32; m * n];
