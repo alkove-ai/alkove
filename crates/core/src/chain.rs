@@ -7,6 +7,7 @@ use crate::cue::{Cue, SpeechEvent, SpeechParams, SpeechTracker};
 use crate::farpass::{FarPass, Kept, CUT_DB};
 use crate::focus::Focus;
 use crate::level::{coef, Chunker, Delay, Gate, InputGain, Level};
+use crate::load::{Load, Mode};
 use crate::math::{log10, pow};
 use crate::near::Near;
 use crate::{js, Error, CUE, FOCUS, RATE};
@@ -57,6 +58,8 @@ pub enum ChainEvent {
     Far { start: f64, end: f64 },
     // the phrase sent out from `start` will have no end: the app stopped listening
     Cancel { start: f64 },
+    // diag `focus.mode`: what of Focus the device runs now; without Focus the mic passes as it is
+    Mode { focus: bool, separator: bool, threads: usize },
 }
 
 // who makes the phrases: Cue, nobody, or the app between hold and release
@@ -80,17 +83,25 @@ pub struct ChainOptions {
     pub levels: bool,
     // the gap in dB under the session's voice past which a voice is far
     pub near: Option<f64>,
+    // Some(true): Focus without its separator; Some(false): never cut by itself; None: cut while the device is too slow, from the hop times its host gives (`spent`)
+    pub low_power: Option<bool>,
 }
 
 impl Default for ChainOptions {
     fn default() -> Self {
-        ChainOptions { gate: false, normalize: true, strength: 1.0, print: None, sample: None, speech: SpeechParams::default(), sleep: true, levels: false, near: None }
+        ChainOptions { gate: false, normalize: true, strength: 1.0, print: None, sample: None, speech: SpeechParams::default(), sleep: true, levels: false, near: None, low_power: None }
     }
 }
 
 // Focus -> Cue -> mix with the raw -> level -> gate, every rule that touches state counted in samples: real time and `process` give the same output
 pub struct Chain {
     focus: Focus,
+    load: Load,
+    // the last step's milliseconds, given by the host; whether that hop ran Focus awake and its separator, and Focus's own ms
+    last_ms: Option<f64>,
+    ran: (bool, bool),
+    focus_ms: Option<f64>,
+    told_mode: Option<Mode>,
     cue: Cue,
     opts: ChainOptions,
     cue_in: Chunker,
@@ -162,8 +173,14 @@ impl Chain {
         if let Some(s) = &opts.sample {
             focus.set_sample(Some(s), false);
         }
+        focus.set_light(opts.low_power == Some(true));
         let lag = focus.lag();
         Ok(Chain {
+            load: Load::new(opts.low_power, alkove_engine::max_threads()),
+            last_ms: None,
+            ran: (false, false),
+            focus_ms: None,
+            told_mode: None,
             focus,
             cue: Cue::new(cue)?,
             cue_in: Chunker::new(CUE.chunk),
@@ -229,9 +246,8 @@ impl Chain {
 
     // Timbre for the far pass and the sample a Focus that reads one takes from the stream, before the first hop
     pub fn attach_timbre(&mut self, timbre: &Arc<Model>) -> Result<(), Error> {
-        let mut fp = FarPass::new(timbre)?;
-        fp.pool(self.focus.is_told() && !self.focus.has_sample());
-        self.farpass = Some(fp);
+        self.farpass = Some(FarPass::new(timbre)?);
+        self.pool();
         Ok(())
     }
 
@@ -275,8 +291,17 @@ impl Chain {
         self.wake_far == Some(true) || self.farpass.as_ref().is_some_and(FarPass::far)
     }
 
+    // far, or a device too slow for Focus: the mic passes
+    fn raw_passes(&self) -> bool {
+        self.far() || !self.load.mode().focus
+    }
+
     // a wake word heard over [start, end] s: far until the next one when Focus's own output lost CUT_DB of it; the gap in dB, None when not decided
     pub fn wake(&mut self, start: f64, end: f64) -> Option<f64> {
+        // without Focus the kept output is the mic itself: no gap to judge
+        if !self.load.mode().focus {
+            return None;
+        }
         let gap = self.kept.gap(js::round(start * RATE).max(0.0) as u64, js::round(end * RATE).max(0.0) as u64)?;
         self.wake_far = Some(gap <= CUT_DB);
         if let Some(fp) = &mut self.farpass {
@@ -301,7 +326,7 @@ impl Chain {
 
     // what Focus hands on: its output, the mic once far
     pub fn listened(&self) -> &[f32] {
-        if self.far() {
+        if self.raw_passes() {
             &self.raw
         } else {
             &self.focus_out
@@ -331,9 +356,7 @@ impl Chain {
     // a few seconds of the user's voice (16 kHz) for a Focus that reads a sample (Focus::is_told): the separator keeps that voice from the next hop. Without one the stream gives its own, from the mic where the print's voice is heard. False: Focus has no sample
     pub fn set_sample(&mut self, pcm: Option<&[f32]>) -> bool {
         let on = self.focus.set_sample(pcm, self.band.narrow());
-        if let Some(fp) = &mut self.farpass {
-            fp.pool(!on && self.focus.is_told());
-        }
+        self.pool();
         on
     }
 
@@ -401,8 +424,41 @@ impl Chain {
     // exactly one hop of 256 samples; the result is valid until the next call
     pub fn step(&mut self, hop: &[f32], events: &mut Vec<ChainEvent>) -> &[f32] {
         assert_eq!(hop.len(), HOP, "step() takes whole hops only");
+        self.account();
         self.hop(hop, events);
         &self.mix
+    }
+
+    // the milliseconds the last step took, for a chain that adapts to its device; only real-time hosts tell, so a recording never depends on the device
+    pub fn spent(&mut self, ms: f64) {
+        self.last_ms = Some(ms);
+    }
+
+    fn account(&mut self) {
+        let ms = self.last_ms.take().filter(|_| self.ran.0);
+        let before = self.load.mode();
+        let told = self.focus.is_told();
+        let Some(m) = self.load.hop(ms, self.ran.1, self.focus_ms.take(), told) else { return };
+        self.focus.set_threads(m.threads);
+        self.focus.set_light(!m.separator);
+        if m.focus && !before.focus {
+            self.focus.reset();
+        }
+        self.pool();
+        self.told_mode = Some(m);
+    }
+
+    // the sample is looked for in the stream only while the separator may read it
+    fn pool(&mut self) {
+        let m = self.load.mode();
+        let want = self.focus.is_told() && !self.focus.has_sample() && m.focus && m.separator;
+        if let Some(fp) = &mut self.farpass {
+            fp.pool(want);
+        }
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.load.mode()
     }
 
     fn woken(&self) -> bool {
@@ -444,6 +500,9 @@ impl Chain {
     }
 
     fn told(&mut self, events: &mut Vec<ChainEvent>) {
+        if let Some(m) = self.told_mode.take() {
+            events.push(ChainEvent::Mode { focus: m.focus, separator: m.separator, threads: m.threads });
+        }
         if let Some(start) = self.cancel.take() {
             events.push(ChainEvent::Cancel { start });
         }
@@ -483,18 +542,29 @@ impl Chain {
             }
             events.push(ChainEvent::Idle { asleep: false, at });
         }
+        let focus = self.load.mode().focus;
         if self.asleep {
             self.focus_out.fill(0.0);
+        } else if !focus {
+            self.rules(events);
+            self.focus_out.copy_from_slice(&self.raw);
         } else {
             self.rules(events);
+            #[cfg(not(target_arch = "wasm32"))]
+            let t0 = std::time::Instant::now();
             self.focus.step(&self.gained, &mut self.focus_out);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.focus_ms = Some(t0.elapsed().as_secs_f64() * 1e3);
+            }
         }
+        self.ran = (focus && !self.asleep, self.focus.splitting());
         events.push(ChainEvent::Focus { t: self.t as f64 });
         // asleep, Focus's output is silence, not a removed voice
         let first = self.t as i64 - self.focus.lag() as i64;
         self.kept.push(first, &self.raw, if self.asleep { &self.raw } else { &self.focus_out });
         let mut at_cue = 0;
-        let far = self.far();
+        let far = self.raw_passes();
         while let Some(c) = self.cue_in.next(if far { &self.raw } else { &self.focus_out }, &mut at_cue) {
             self.cue_chunk.copy_from_slice(c);
             self.cue_frame(events);
@@ -651,6 +721,12 @@ impl ChainEvent {
                 ("data", obj([("print", print.into()), ("after", after.into()), ("why", why.as_str().into())])),
             ]),
             ChainEvent::Cancel { start } => obj([("type", "speechcancel".into()), ("start", start.into())]),
+            ChainEvent::Mode { focus, separator, threads } => obj([
+                ("type", "diag".into()),
+                ("code", "focus.mode".into()),
+                ("level", if focus && separator { "info" } else { "warn" }.into()),
+                ("data", obj([("focus", focus.into()), ("separator", separator.into()), ("threads", (threads as f64).into())])),
+            ]),
             ChainEvent::Far { start, end } => obj([("type", "diag".into()), ("code", "speech.far".into()), ("level", "info".into()), ("data", obj([("start", start.into()), ("end", end.into())]))]),
             ChainEvent::Focus { .. } | ChainEvent::Cue { .. } | ChainEvent::Level { .. } => return None,
         })
@@ -658,7 +734,7 @@ impl ChainEvent {
 }
 
 impl ChainOptions {
-    // { gate, normalize, strength, print, speech, sleep, levels, near: true | { gapDb } }, as the web's options with their defaults
+    // { gate, normalize, strength, print, speech, sleep, levels, near: true | { gapDb }, lowPower }, as the web's options with their defaults
     pub fn from_value(v: &crate::Value) -> ChainOptions {
         use crate::near::NEAR_GAP_DB;
         use crate::Value;
@@ -691,6 +767,7 @@ impl ChainOptions {
                 Some(n @ Value::Obj(_)) => Some(num(n, "gapDb", NEAR_GAP_DB)),
                 _ => None,
             },
+            low_power: v.get("lowPower").and_then(Value::bool),
         }
     }
 }
@@ -698,6 +775,37 @@ impl ChainOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_slow_device_runs_focus_without_its_separator() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/alkove");
+        let (Ok(f), Ok(c)) = (std::fs::read(root.join(".cache/models/alkove-focus-1.alk")), std::fs::read(root.join(".cache/models/alkove-cue-1-preview.alk"))) else { return };
+        let (f, c) = (Arc::new(Model::load(&f).unwrap()), Arc::new(Model::load(&c).unwrap()));
+        let b = std::fs::read(root.join("test/fixtures/enroll.wav")).unwrap();
+        let at = b.windows(4).position(|w| w == b"data").unwrap() + 8;
+        let voice: Vec<f32> = b[at..].as_chunks::<2>().0.iter().map(|s| i16::from_le_bytes(*s) as f32 / 32768.0).collect();
+        let run = |low_power: Option<bool>, ms: Option<f64>| {
+            let mut ch = Chain::new(&f, &c, ChainOptions { sample: Some(voice.clone()), low_power, sleep: false, ..ChainOptions::default() }).unwrap();
+            let (mut events, mut split, mut modes) = (Vec::new(), 0, Vec::new());
+            for hop in voice.as_chunks::<HOP>().0.iter().cycle().take(1000) {
+                events.clear();
+                ch.step(hop, &mut events);
+                if let Some(ms) = ms {
+                    ch.spent(ms);
+                }
+                split += ch.focus.splitting() as usize;
+                modes.extend(events.iter().filter_map(|e| if let ChainEvent::Mode { separator, .. } = e { Some(*separator) } else { None }));
+            }
+            modes.dedup();
+            (split, modes, ch.mode().separator)
+        };
+        assert_eq!(run(Some(true), Some(1.0)), (0, vec![], false));
+        assert_eq!(run(None, None), (1000, vec![], true));
+        // every hop 12 of its 16 ms: more threads are tried and do not help, then the separator goes
+        let (split, modes, on) = run(None, Some(12.0));
+        assert!(split < 600 && modes.last() == Some(&false) && !on, "{split} {modes:?} {on}");
+        assert_eq!(run(Some(false), Some(12.0)).0, 1000);
+    }
 
     // WAKE_CHECK=<file of scene dirs, one a line> WAKE_MODELS=<dir with focus.alk, cue.alk, timbre.alk>: per scene in.f32, enroll.f32 (the print as the SDK makes it) and wake.txt (a word's start and end in s, one a line); the chain over in.f32, Chain::wake 0.3 s after each word's end; gaps.txt: the gap in dB (or none) and far, one a word
     #[test]

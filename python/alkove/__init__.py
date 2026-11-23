@@ -213,6 +213,8 @@ def _events(records: Iterable[tuple]) -> List[dict]:
             level = None
         elif kind == 9:
             out.append({"type": "speechcancel", "start": a})
+        elif kind == 10:
+            out.append({"type": "diag", "code": "focus.mode", "level": "info" if a == 1 and b == 1 else "warn", "data": {"focus": a == 1, "separator": b == 1, "threads": int(c)}})
         elif kind < 5:
             e = _event(kind, a, b, c)
             if kind == 1 and level:
@@ -243,10 +245,10 @@ def _voice(models: Models, voiceprint: Any) -> Tuple[Optional["Voiceprint"], Any
     return Timbre(models).embed(voiceprint), voiceprint
 
 
-def _options(focus: bool, voiceprint: Optional["Voiceprint"], strength: float, cue: Optional[bool], speech: Optional[SpeechParams], normalize: bool, trace: bool, rate: float, words: Optional[Iterable], context: str, sample: Any = None) -> dict:
+def _options(focus: bool, voiceprint: Optional["Voiceprint"], strength: float, cue: Optional[bool], speech: Optional[SpeechParams], normalize: bool, trace: bool, rate: float, words: Optional[Iterable], context: str, sample: Any = None, low_power: bool = False) -> dict:
     ws = [Word.of(w).to_json() for w in words or ()]
     return {
-        "focus": {"print": voiceprint.embedding.tolist() if voiceprint is not None else None, "strength": strength, "sample": np.asarray(sample, dtype=np.float32).reshape(-1).tolist() if sample is not None else None} if focus or voiceprint is not None else None,
+        "focus": {"print": voiceprint.embedding.tolist() if voiceprint is not None else None, "strength": strength, "sample": np.asarray(sample, dtype=np.float32).reshape(-1).tolist() if sample is not None else None, "lowPower": low_power} if focus or voiceprint is not None else None,
         "cue": cue,
         "speech": (speech or SpeechParams())._dict(),
         "normalize": normalize,
@@ -279,10 +281,11 @@ class Processor:
         rate: int = RATE,
         words: Optional[Iterable] = None,
         context: str = "anywhere",
+        low_power: bool = False,
         _sample: Any = None,
     ):
         voiceprint, sample = _voice(models, voiceprint)
-        opts = _options(focus, voiceprint, strength, cue, speech, normalize, trace, rate, words, context, sample if _sample is None else _sample)
+        opts = _options(focus, voiceprint, strength, cue, speech, normalize, trace, rate, words, context, sample if _sample is None else _sample, low_power)
         _check(models, opts)
         self._p = _alkove.Processor(models.get("focus"), models.get("cue"), models.get("spot"), opts, models.get("timbre"))
 
@@ -318,11 +321,12 @@ def process(
     trace: bool = False,
     words: Optional[Iterable] = None,
     context: str = "anywhere",
+    low_power: bool = False,
     _sample: Any = None,  # the lab's benches: a sample apart from the print
 ) -> Part:
-    """A whole recording, as real time would go through it: the audio as long as the input at 16 kHz, the speech, the wakes, the diag. `voiceprint`, a `Voiceprint` or a few seconds of the user alone at 16 kHz (its print, and Focus's sample from the first word), runs Focus without `focus=True`."""
+    """A whole recording, as real time would go through it: the audio as long as the input at 16 kHz, the speech, the wakes, the diag. `voiceprint`, a `Voiceprint` or a few seconds of the user alone at 16 kHz (its print, and Focus's sample from the first word), runs Focus without `focus=True`. `low_power`: Focus without its separator, as a device too slow for it runs."""
     voiceprint, sample = _voice(models, voiceprint)
-    opts = _options(focus, voiceprint, strength, cue, speech, normalize, trace, RATE, words, context, sample if _sample is None else _sample)
+    opts = _options(focus, voiceprint, strength, cue, speech, normalize, trace, RATE, words, context, sample if _sample is None else _sample, low_power)
     _check(models, opts)
     x = _samples(pcm)
     if rate != RATE:
@@ -441,14 +445,15 @@ class Chain:
         near: bool = False,
         turn: Union[bool, TurnParams] = False,
         interrupt: Union[bool, InterruptParams] = False,
+        low_power: Optional[bool] = None,
     ):
-        """`voiceprint`: a `Voiceprint`, or a recording of the user at 16 kHz (its print and Focus's sample). Each speechend carries its level (`voiceDb`, Focus's output before the leveling; `noiseDb`, the mic's floor; `refDb`, the session's main voice, None until heard twice). `near`: a voice 10 dB under the session's main one is no speech, but a diag `speech.far`.
+        """`low_power`: True, Focus without its separator (a step-by-step chain never adapts to the machine by itself; `Live` does). `voiceprint`: a `Voiceprint`, or a recording of the user at 16 kHz (its print and Focus's sample). Each speechend carries its level (`voiceDb`, Focus's output before the leveling; `noiseDb`, the mic's floor; `refDb`, the session's main voice, None until heard twice). `near`: a voice 10 dB under the session's main one is no speech, but a diag `speech.far`.
         `turn` (True or `TurnParams`): `turn` every 0.1 s of a pause (`pause`, `probability` of the turn's end, `hesitation`, `at`), then `turnend` (`start`, `end`, `probability`, `hesitation`, `at`). `interrupt` (True or `InterruptParams`): `interruptstart`, `interrupt`, `interruptcancel` for speech that starts while `far_end_active`."""
         _needs(models, "focus", "cue")
         self._models = models
         voiceprint, sample = _voice(models, voiceprint)
         print_ = _samples(voiceprint.embedding) if voiceprint is not None else None
-        self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep=True, speech_params=(speech or SpeechParams())._tuple(), print=print_, levels=True, near=_near(near), turn=_opt(turn), interrupt=_opt(interrupt), timbre=models.get("timbre"))
+        self._c = _alkove.Chain(models.get("focus"), models.get("cue"), gate, normalize, strength, sleep=True, speech_params=(speech or SpeechParams())._tuple(), print=print_, levels=True, near=_near(near), turn=_opt(turn), interrupt=_opt(interrupt), timbre=models.get("timbre"), low_power=low_power)
         if sample is not None:
             self._c.set_sample(_samples(sample))
 
@@ -556,15 +561,16 @@ class Live:
         near: bool = False,
         turn: Union[bool, TurnParams] = False,
         interrupt: Union[bool, InterruptParams] = False,
+        low_power: Optional[bool] = None,
     ):
-        """`voiceprint`, `near`, `turn` and `interrupt` as for `Chain`; each speechend carries its level."""
+        """`voiceprint`, `near`, `turn` and `interrupt` as for `Chain`. `low_power`: True, Focus without its separator; False, never cut; None, adapts to the machine in real time: more threads first, then without the separator, then the raw mic when Focus alone does not keep up, each tried again later (a diag `focus.mode` with `focus`, `separator`, `threads`); each speechend carries its level."""
         _needs(models, "focus", "cue")
         self._models = models
         voiceprint, sample = _voice(models, voiceprint)
         print_ = _samples(voiceprint.embedding) if voiceprint is not None else None
         self.rate = rate
         """The stream's rate, in and out, in Hz."""
-        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep=True, speech_params=(speech or SpeechParams())._tuple(), print=print_, levels=True, near=_near(near), turn=_opt(turn), interrupt=_opt(interrupt), timbre=models.get("timbre"))
+        self._l = _alkove.Live(models.get("focus"), models.get("cue"), float(rate), gate, normalize, strength, sleep=True, speech_params=(speech or SpeechParams())._tuple(), print=print_, levels=True, near=_near(near), turn=_opt(turn), interrupt=_opt(interrupt), timbre=models.get("timbre"), low_power=low_power)
         if sample is not None:
             self._l.set_sample(_samples(sample))
 

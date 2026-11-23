@@ -18,6 +18,8 @@ export interface ChainOptions {
   sample?: ArrayLike<number> | null
   speech?: Partial<SpeechParams>
   sleep?: boolean
+  // true: Focus without its separator; a step-by-step chain never adapts to the device by itself
+  lowPower?: boolean
 }
 
 const bytes = (x: Float32Array) => new Uint8Array(x.buffer, x.byteOffset, x.byteLength)
@@ -40,7 +42,8 @@ export class Chain {
   ) {
     const o = { gate: false, normalize: true, strength: 1, sleep: true, ...opts }
     const s = { ...SPEECH_DEFAULTS, ...opts.speech }
-    const make = (p: number, n: number) => alk.x.alk_chain(focus.ptr, cue.ptr, +o.gate, +o.normalize, +o.sleep, o.strength, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, p, n)
+    const low = opts.lowPower === undefined ? -1 : +opts.lowPower
+    const make = (p: number, n: number) => alk.x.alk_chain(focus.ptr, cue.ptr, +o.gate, +o.normalize, +o.sleep, o.strength, s.confidence, s.exitConfidence, s.startSecs, s.stopSecs, p, n, low)
     const print = opts.print ? Float32Array.from(opts.print) : null
     this.ptr = print ? alk.with(bytes(print), (p) => make(p, print.length)) : make(0, 0)
     if (!this.ptr) alk.fail('chain')
@@ -133,6 +136,9 @@ export class Chain {
           break
         case 6:
           this.onCue?.(a, b)
+          break
+        case 10:
+          emit({ type: 'diag', code: 'focus.mode', level: a === 1 && b === 1 ? 'info' : 'warn', data: { focus: a === 1, separator: b === 1, threads: c } })
       }
     }
     return this.mix

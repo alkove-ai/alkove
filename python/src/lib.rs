@@ -102,6 +102,7 @@ fn record(e: &ChainEvent) -> (u8, f64, f64, f64) {
         ChainEvent::Level { voice_db, noise_db, ref_db } => (7, voice_db, noise_db, ref_db),
         ChainEvent::Far { start, end } => (8, start, end, 0.0),
         ChainEvent::Cancel { start } => (9, start, 0.0, 0.0),
+        ChainEvent::Mode { focus, separator, threads } => (10, b(focus), b(separator), threads as f64),
     }
 }
 
@@ -159,7 +160,7 @@ struct Chain {
 #[pymethods]
 impl Chain {
     #[new]
-    #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None, timbre=None))]
+    #[pyo3(signature = (focus, cue, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None, timbre=None, low_power=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         focus: &Model,
@@ -175,8 +176,9 @@ impl Chain {
         turn: Option<&Bound<'_, PyAny>>,
         interrupt: Option<&Bound<'_, PyAny>>,
         timbre: Option<&Model>,
+        low_power: Option<bool>,
     ) -> PyResult<Self> {
-        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, sample: None, speech: speech(speech_params), sleep, levels, near };
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, sample: None, speech: speech(speech_params), sleep, levels, near, low_power };
         let turns = turns(turn, interrupt, &opts.speech)?;
         let mut inner = alkove_core::Chain::new(&focus.inner, &cue.inner, opts).map_err(error)?;
         if let Some(t) = timbre {
@@ -329,7 +331,7 @@ struct Live {
 #[pymethods]
 impl Live {
     #[new]
-    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None, timbre=None))]
+    #[pyo3(signature = (focus, cue, rate, gate, normalize, strength, sleep, speech_params, print=None, levels=false, near=None, turn=None, interrupt=None, timbre=None, low_power=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         focus: &Model,
@@ -346,8 +348,9 @@ impl Live {
         turn: Option<&Bound<'_, PyAny>>,
         interrupt: Option<&Bound<'_, PyAny>>,
         timbre: Option<&Model>,
+        low_power: Option<bool>,
     ) -> PyResult<Self> {
-        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, sample: None, speech: speech(speech_params), sleep, levels, near };
+        let opts = ChainOptions { gate, normalize, strength, print: print.map(floats).transpose()?, sample: None, speech: speech(speech_params), sleep, levels, near, low_power };
         let turns = turns(turn, interrupt, &opts.speech)?;
         let mut inner = alkove_core::Live::new(&focus.inner, &cue.inner, rate, opts).map_err(error)?;
         if let Some(t) = timbre {

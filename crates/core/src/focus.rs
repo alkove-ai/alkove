@@ -24,8 +24,10 @@ struct Told {
     sample: Session,
     // a sample is in: `split` runs in place of `net`, its user output goes out
     on: bool,
-    // `split` takes `net`'s state at its next hop (or `net` takes `split`'s back)
-    moved: bool,
+    // a device too slow for `split`: `net` runs alone, sample or not
+    light: bool,
+    // `split` ran the last hop: a change hands the state over
+    active: bool,
     every: usize,
     frames: usize,
     // heads x bands, dims of a key
@@ -95,7 +97,8 @@ impl Told {
             split,
             sample,
             on: false,
-            moved: false,
+            light: false,
+            active: false,
             every: SAMPLE_FRAMES.div_ceil(frames),
             frames,
             rows: k[0] * k[1],
@@ -174,6 +177,24 @@ impl Focus {
         self.told.is_some()
     }
 
+    pub fn set_threads(&mut self, n: usize) {
+        self.net.set_threads(n);
+        if let Some(t) = &mut self.told {
+            t.split.set_threads(n);
+            t.sample.set_threads(n);
+        }
+    }
+
+    pub fn set_light(&mut self, on: bool) {
+        if let Some(t) = &mut self.told {
+            t.light = on;
+        }
+    }
+
+    pub fn splitting(&self) -> bool {
+        self.told.as_ref().is_some_and(|t| t.active)
+    }
+
     // whether a sample is in: the user's voice alone comes out
     pub fn has_sample(&self) -> bool {
         self.told.as_ref().is_some_and(|t| t.on)
@@ -182,12 +203,8 @@ impl Focus {
     // the user's voice, a few seconds of it at 16 kHz: from the next hop the separator keeps that voice; None, or under a second of speech, goes back to the print alone. `narrow`: the stream is held narrow (band.rs), the sample gets its noise. False: no sample is in
     pub fn set_sample(&mut self, pcm: Option<&[f32]>, narrow: bool) -> bool {
         let Some(t) = &mut self.told else { return false };
-        let was = t.on;
         t.reading = None;
         t.on = pcm.is_some_and(|x| t.begin(x, narrow) && t.read(usize::MAX));
-        if t.on != was {
-            t.moved = true;
-        }
         t.on
     }
 
@@ -216,31 +233,30 @@ impl Focus {
         self.net.clear_state();
         if let Some(t) = &mut self.told {
             t.split.clear_state();
-            t.moved = false;
         }
     }
 
     pub fn step(&mut self, chunk: &[f32], out: &mut [f32]) {
         if let Some(t) = &mut self.told {
-            if t.read(READ_A_HOP) {
-                // read while `split` may have been running on the sample before: it goes on with the new one
-                t.moved |= !t.on;
+            // light, a sample being read waits: the device that cut the separator would pay for a bank it does not use
+            if !t.light && t.read(READ_A_HOP) {
                 t.on = true;
             }
             let (n, all) = (t.front.len(), t.split.plan().state_len());
-            if t.moved {
+            let run = t.on && !t.light;
+            if run != t.active {
                 // each plan starts from nothing but the last hop heard: a front that ran with a print loses the voice when it goes on without one, and the separator was taught from a stream's start
-                let (from, to) = if t.on { (&mut self.net, &mut t.split) } else { (&mut t.split, &mut self.net) };
-                let len = if t.on { n } else { all };
+                let (from, to) = if run { (&mut self.net, &mut t.split) } else { (&mut t.split, &mut self.net) };
+                let len = if run { n } else { all };
                 from.state(&mut t.state[..len]);
                 let live = t.state[..len].iter().any(|&v| v != 0.0);
-                let len = if t.on { all } else { n };
+                let len = if run { all } else { n };
                 t.state[FOCUS.chunk..len].fill(0.0);
                 to.set_state(&t.state[..len]);
-                t.since = if live && t.on { 0 } else { FADE };
-                t.moved = false;
+                t.since = if live && run { 0 } else { FADE };
+                t.active = run;
             }
-            if t.on {
+            if run {
                 t.split.input_mut("audio").expect("checked").copy_from_slice(chunk);
                 t.split.run();
                 out.copy_from_slice(t.split.output("user_out").expect("checked"));

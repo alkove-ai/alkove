@@ -80,11 +80,11 @@ final class Lock {
 }
 
 // a print runs Focus; `sample` apart from the print only for the tests
-func processOptions(focus: Bool, print: Voiceprint?, strength: Double, cue: Bool?, speech: SpeechParams?, normalize: Bool, trace: Bool, rate: Int, words: [WordSource]?, context: String, sample: [Float]? = nil) throws -> Value {
+func processOptions(focus: Bool, print: Voiceprint?, strength: Double, cue: Bool?, speech: SpeechParams?, normalize: Bool, trace: Bool, rate: Int, words: [WordSource]?, context: String, sample: [Float]? = nil, lowPower: Bool = false) throws -> Value {
     let ws = try (words ?? []).map { try $0.word().value }
     // ProcessOptions reads the print and the sample as JSON numbers
     let numbers = { (x: [Float]) in Value.arr(x.map { .num(Double($0)) }) }
-    let f: [(String, Value)] = [("print", print.map { numbers($0.embedding) } ?? .null), ("strength", .num(strength))] + (sample.map { [("sample", numbers($0))] } ?? [])
+    let f: [(String, Value)] = [("print", print.map { numbers($0.embedding) } ?? .null), ("strength", .num(strength)), ("lowPower", .bool(lowPower))] + (sample.map { [("sample", numbers($0))] } ?? [])
     return .obj([
         ("focus", focus || print != nil ? .obj(f) : .null),
         ("cue", .of(cue)),
@@ -106,9 +106,9 @@ public final class Processor: @unchecked Sendable {
     private let handle: Handle
     private let lock = Lock()
 
-    public init(models: Models, focus: Bool = false, voiceprint: VoiceprintSource? = nil, strength: Double = 1, cue: Bool? = nil, speech: SpeechParams? = nil, normalize: Bool = false, trace: Bool = false, rate: Int = Alkove.rate, words: [WordSource]? = nil, context: String = "anywhere") throws {
+    public init(models: Models, focus: Bool = false, voiceprint: VoiceprintSource? = nil, strength: Double = 1, cue: Bool? = nil, speech: SpeechParams? = nil, normalize: Bool = false, trace: Bool = false, rate: Int = Alkove.rate, words: [WordSource]? = nil, context: String = "anywhere", lowPower: Bool = false) throws {
         let (print, sample) = try voiceOf(models, voiceprint)
-        let opts = try processOptions(focus: focus, print: print, strength: strength, cue: cue, speech: speech, normalize: normalize, trace: trace, rate: rate, words: words, context: context, sample: sample)
+        let opts = try processOptions(focus: focus, print: print, strength: strength, cue: cue, speech: speech, normalize: normalize, trace: trace, rate: rate, words: words, context: context, sample: sample, lowPower: lowPower)
         try check(models, opts)
         handle = try models.pinned {
             try Handle(Native.bytes(opts.encoded()) { p, n in try Native.call { alk_processor_new(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), models.ptr("timbre"), p, n, $0) } }) { alk_processor_free($0) }
@@ -130,9 +130,9 @@ public final class Processor: @unchecked Sendable {
 }
 
 /// A whole recording, as real time would go through it: the audio as long as the input at 16 kHz, the speech, the wakes, the diag. `voiceprint` as in `Processor`.
-public func process(models: Models, pcm: [Float], rate: Int = Alkove.rate, focus: Bool = false, voiceprint: VoiceprintSource? = nil, strength: Double = 1, cue: Bool? = nil, speech: SpeechParams? = nil, normalize: Bool = false, trace: Bool = false, words: [WordSource]? = nil, context: String = "anywhere") throws -> Part {
+public func process(models: Models, pcm: [Float], rate: Int = Alkove.rate, focus: Bool = false, voiceprint: VoiceprintSource? = nil, strength: Double = 1, cue: Bool? = nil, speech: SpeechParams? = nil, normalize: Bool = false, trace: Bool = false, words: [WordSource]? = nil, context: String = "anywhere", lowPower: Bool = false) throws -> Part {
     let (print, sample) = try voiceOf(models, voiceprint)
-    return try processWith(models, pcm, rate, try processOptions(focus: focus, print: print, strength: strength, cue: cue, speech: speech, normalize: normalize, trace: trace, rate: Alkove.rate, words: words, context: context, sample: sample))
+    return try processWith(models, pcm, rate, try processOptions(focus: focus, print: print, strength: strength, cue: cue, speech: speech, normalize: normalize, trace: trace, rate: Alkove.rate, words: words, context: context, sample: sample, lowPower: lowPower))
 }
 
 // the options as they are, a sample apart from the print included
@@ -146,10 +146,10 @@ func processWith(_ models: Models, _ pcm: [Float], _ rate: Int, _ opts: Value) t
     }
 }
 
-func chainOptions(gate: Bool, normalize: Bool, strength: Double, print: Voiceprint?, sample: [Float]?, speech: SpeechParams?, sleep: Bool, near: Bool) -> Value {
+func chainOptions(gate: Bool, normalize: Bool, strength: Double, print: Voiceprint?, sample: [Float]?, speech: SpeechParams?, sleep: Bool, near: Bool, lowPower: Bool? = nil) -> Value {
     var f: [(String, Value)] = [("gate", .bool(gate)), ("normalize", .bool(normalize)), ("strength", .num(strength)), ("print", print.map { .floats($0.embedding) } ?? .null)]
     if let sample { f.append(("sample", .floats(sample))) }
-    return .obj(f + [("speech", (speech ?? SpeechParams()).value), ("sleep", .bool(sleep)), ("levels", true), ("near", .bool(near))])
+    return .obj(f + [("speech", (speech ?? SpeechParams()).value), ("sleep", .bool(sleep)), ("levels", true), ("near", .bool(near)), ("lowPower", .of(lowPower))])
 }
 
 /// The real-time chain, one hop of 256 samples at 16 kHz at a time: Focus, Cue, the mix with the raw mic, the level, the gate; its output is `delay` samples late, each speech end carries its `PhraseLevel`. `voiceprint` as for `Processor`; `near`: a voice 10 dB under the session's main one is no speech, but a diag `speech.far`.
@@ -162,11 +162,12 @@ public final class Chain: @unchecked Sendable {
     private let lock = Lock()
     private var records = [Double](repeating: 0, count: 4 * 16)
 
-    public init(models: Models, gate: Bool = false, normalize: Bool = true, strength: Double = 1, voiceprint: VoiceprintSource? = nil, speech: SpeechParams? = nil, sleep: Bool = true, near: Bool = false) throws {
+    /// `lowPower`: true, Focus without its separator (a step-by-step chain never adapts to the device by itself; `Live` does).
+    public init(models: Models, gate: Bool = false, normalize: Bool = true, strength: Double = 1, voiceprint: VoiceprintSource? = nil, speech: SpeechParams? = nil, sleep: Bool = true, near: Bool = false, lowPower: Bool? = nil) throws {
         try models.need("focus", "cue")
         self.models = models
         let (print, sample) = try voiceOf(models, voiceprint)
-        let o = chainOptions(gate: gate, normalize: normalize, strength: strength, print: print, sample: sample, speech: speech, sleep: sleep, near: near)
+        let o = chainOptions(gate: gate, normalize: normalize, strength: strength, print: print, sample: sample, speech: speech, sleep: sleep, near: near, lowPower: lowPower)
         handle = try models.pinned {
             try Handle(Native.bytes(o.encoded()) { p, n in try Native.call { alk_chain_new(models.ptr("focus"), models.ptr("cue"), models.ptr("timbre"), p, n, $0) } }) { alk_chain_free($0) }
         }
@@ -245,12 +246,13 @@ public final class Live: @unchecked Sendable {
     private let lock = Lock()
     private var out = [Float]()
 
-    public init(models: Models, rate: Int, gate: Bool = false, normalize: Bool = false, strength: Double = 1, voiceprint: VoiceprintSource? = nil, speech: SpeechParams? = nil, sleep: Bool = true, near: Bool = false) throws {
+    /// `lowPower`: true, Focus without its separator; false, never cut; nil, adapts to the device: more threads, then without the separator, then the raw mic (diag `focus.mode`).
+    public init(models: Models, rate: Int, gate: Bool = false, normalize: Bool = false, strength: Double = 1, voiceprint: VoiceprintSource? = nil, speech: SpeechParams? = nil, sleep: Bool = true, near: Bool = false, lowPower: Bool? = nil) throws {
         try models.need("focus", "cue")
         self.rate = rate
         self.models = models
         let (print, sample) = try voiceOf(models, voiceprint)
-        let o = chainOptions(gate: gate, normalize: normalize, strength: strength, print: print, sample: sample, speech: speech, sleep: sleep, near: near)
+        let o = chainOptions(gate: gate, normalize: normalize, strength: strength, print: print, sample: sample, speech: speech, sleep: sleep, near: near, lowPower: lowPower)
         handle = try models.pinned {
             try Handle(Native.bytes(o.encoded()) { p, n in try Native.call { alk_live_new(models.ptr("focus"), models.ptr("cue"), models.ptr("timbre"), Double(rate), p, n, $0) } }) { alk_live_free($0) }
         }

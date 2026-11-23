@@ -61,6 +61,8 @@ export interface FocusOptions extends CommonOptions {
   voiceprint?: VoiceprintInput
   farEnd?: MediaStreamTrack | AudioNode
   near?: boolean
+  // true: Focus without its separator; false: never cut by itself; unset: the SDK adapts to the device (diag `focus.mode`)
+  lowPower?: boolean
   trace?: boolean
   keepRecent?: number
 }
@@ -887,7 +889,7 @@ class CallInput extends AlkoveInput {
 
   protected chainOptions(): NonNullable<RealtimeOptions['chain']> {
     const print = printOf(this.opts.voiceprint)
-    return { gate: true, normalize: true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, sample: this.sample, levels: true, near: !!this.opts.near }
+    return { gate: true, normalize: true, strength: this.opts.strength ?? 1, print: print?.embedding ?? null, sample: this.sample, levels: true, near: !!this.opts.near, ...(this.opts.lowPower !== undefined ? { lowPower: this.opts.lowPower } : {}) }
   }
 
   protected wantsBackground(): boolean {
@@ -1031,7 +1033,7 @@ class AgentInput extends AlkoveInput {
     return {
       pipeline: 'agent',
       onlyMyVoice: !!this.opts.onlyMyVoice,
-      chain: { gate: false, normalize: true, strength: 1, print: print?.embedding ?? null, sample: this.sample, levels: true, near: !!this.opts.near },
+      chain: { gate: false, normalize: true, strength: 1, print: print?.embedding ?? null, sample: this.sample, levels: true, near: !!this.opts.near, ...(this.opts.lowPower !== undefined ? { lowPower: this.opts.lowPower } : {}) },
       learn: this.learning,
       keepRecent: this.opts.keepRecent,
       trace: this.opts.trace,

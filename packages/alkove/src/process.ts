@@ -8,7 +8,7 @@ import { encodeWav } from './dsp/wav'
 import { RATE } from './manifest'
 
 export interface ProcessOptions {
-  focus?: boolean | { voiceprint?: VoiceprintInput; strength?: number }
+  focus?: boolean | { voiceprint?: VoiceprintInput; strength?: number; lowPower?: boolean }
   cue?: boolean | Partial<SpeechParams>
   spot?: { words: readonly (Word | WordJSON | string)[]; context?: Context }
   normalize?: boolean
@@ -49,7 +49,7 @@ export interface ProcessPart {
 }
 
 // the focus options on their way to the core: a recording given as the voiceprint becomes its print and this sample
-type FocusWire = { voiceprint?: VoiceprintInput; strength?: number; sample?: Float32Array }
+type FocusWire = { voiceprint?: VoiceprintInput; strength?: number; sample?: Float32Array; lowPower?: boolean }
 
 // the core's options for these: { focus, cue, speech, normalize, trace, rate, spot }
 export function coreOptions(opts: Omit<ProcessOptions, 'onProgress' | 'signal'>, rate = RATE) {
@@ -58,7 +58,7 @@ export function coreOptions(opts: Omit<ProcessOptions, 'onProgress' | 'signal'>,
   const print = printOf(f.voiceprint)?.embedding
   const words = opts.spot?.words.map(wordOf) ?? []
   return {
-    focus: focus ? { print: print ? Array.from(print) : null, strength: f.strength ?? 1, ...(f.sample ? { sample: Array.from(f.sample) } : {}) } : null,
+    focus: focus ? { print: print ? Array.from(print) : null, strength: f.strength ?? 1, lowPower: !!f.lowPower, ...(f.sample ? { sample: Array.from(f.sample) } : {}) } : null,
     // an object of settings turns Cue on, as true does
     cue: opts.cue === undefined || opts.cue === null ? null : opts.cue !== false,
     speech: { ...SPEECH_DEFAULTS, ...(typeof opts.cue === 'object' ? opts.cue : {}) },

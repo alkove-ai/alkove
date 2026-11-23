@@ -17,11 +17,13 @@ pub struct FocusOptions {
     pub strength: f64,
     // a few seconds of the user's voice (16 kHz) for a Focus that reads a sample; without one the recording gives its own
     pub sample: Option<Vec<f32>>,
+    // Focus without its separator, as on a device too slow for it; a recording is never judged by the device's speed
+    pub low_power: bool,
 }
 
 impl Default for FocusOptions {
     fn default() -> Self {
-        FocusOptions { print: None, strength: 1.0, sample: None }
+        FocusOptions { print: None, strength: 1.0, sample: None, low_power: false }
     }
 }
 
@@ -136,7 +138,18 @@ impl Processor {
         let model = |m: &Option<Arc<Model>>, name| m.clone().ok_or(Error::Missing(name));
         let (mut chain, mut cue, mut tracker) = (None, None, None);
         if let Some(f) = &opts.focus {
-            let o = ChainOptions { gate: false, normalize: opts.normalize, strength: f.strength, print: f.print.clone(), sample: None, speech: opts.speech, sleep: true, levels: false, near: None };
+            let o = ChainOptions {
+                gate: false,
+                normalize: opts.normalize,
+                strength: f.strength,
+                print: f.print.clone(),
+                sample: None,
+                speech: opts.speech,
+                sleep: true,
+                levels: false,
+                near: None,
+                low_power: Some(f.low_power),
+            };
             let mut c = Chain::new(&model(&models.focus, "focus")?, &model(&models.cue, "cue")?, o)?;
             if let Some(t) = &models.timbre {
                 c.attach_timbre(t)?;
@@ -356,7 +369,7 @@ pub fn process(models: &Models, pcm: &[f32], opts: ProcessOptions) -> Result<Par
 }
 
 impl ProcessOptions {
-    // { focus: null | { print, strength }, cue: null | bool, speech: { confidence, exitConfidence, startSecs, stopSecs }, normalize, trace, rate, spot: null | { words, context } }
+    // { focus: null | { print, strength, sample, lowPower }, cue: null | bool, speech: { confidence, exitConfidence, startSecs, stopSecs }, normalize, trace, rate, spot: null | { words, context } }
     pub fn from_value(v: &Value) -> Result<ProcessOptions, Error> {
         let d = ProcessOptions::default();
         let num = |o: &Value, k: &str, or: f64| o.get(k).and_then(Value::num).unwrap_or(or);
@@ -365,7 +378,7 @@ impl ProcessOptions {
             Some(f @ Value::Obj(_)) => {
                 let print = f.get("print").and_then(Value::arr).map(|a| a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect());
                 let sample = f.get("sample").and_then(Value::arr).map(|a| a.iter().map(|x| x.num().unwrap_or(f64::NAN) as f32).collect());
-                Some(FocusOptions { print, strength: num(f, "strength", 1.0), sample })
+                Some(FocusOptions { print, strength: num(f, "strength", 1.0), sample, low_power: f.get("lowPower").and_then(Value::bool).unwrap_or(false) })
             }
             _ => None,
         };

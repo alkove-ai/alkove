@@ -17,6 +17,7 @@ pub(crate) fn record(e: &ChainEvent) -> [f64; 4] {
         ChainEvent::Level { voice_db, noise_db, ref_db } => [7.0, voice_db, noise_db, ref_db],
         ChainEvent::Far { start, end } => [8.0, start, end, 0.0],
         ChainEvent::Cancel { start } => [9.0, start, 0.0, 0.0],
+        ChainEvent::Mode { focus, separator, threads } => [10.0, b(focus), b(separator), threads as f64],
     }
 }
 
@@ -47,6 +48,7 @@ pub unsafe extern "C" fn alk_chain(
     stop_secs: f64,
     print_at: *const f32,
     print_len: usize,
+    low_power: i32,
 ) -> *mut ChainHandle {
     let speech = SpeechParams { confidence, exit_confidence, start_secs, stop_secs };
     let opts = ChainOptions {
@@ -59,6 +61,8 @@ pub unsafe extern "C" fn alk_chain(
         sleep: sleep != 0,
         levels: false,
         near: None,
+        // -1 unset, 0 never cut, 1 no separator
+        low_power: (low_power >= 0).then_some(low_power == 1),
     };
     match Chain::new(&shared(focus), &shared(cue), opts) {
         Ok(chain) => Box::into_raw(Box::new(ChainHandle { chain, hop: vec![0.0; 256], events: Vec::with_capacity(16), records: Vec::with_capacity(64) })),
@@ -534,6 +538,14 @@ pub unsafe extern "C" fn alk_pipeline_step(p: *mut PipelineHandle, far_quiet_ms:
     let out = h.p.step(&h.hop, far_quiet_ms);
     h.out.copy_from_slice(out);
     h.out.as_ptr()
+}
+
+// Safety: `p` is live; the milliseconds the last step took, measured by the host (wasm has no clock)
+#[no_mangle]
+pub unsafe extern "C" fn alk_pipeline_spent(p: *mut PipelineHandle, ms: f64) {
+    if let Some(c) = (*p).p.chain_mut() {
+        c.spent(ms);
+    }
 }
 
 // Safety: `p` is live, `m` a live Spot model: for the words and the enrollment set from now on

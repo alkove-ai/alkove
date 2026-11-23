@@ -90,6 +90,7 @@ internal fun chainEvents(r: DoubleArray, count: Int): List<Event> {
                 level = null
             }
             9 -> out.add(Event.SpeechCancel(a))
+            10 -> out.add(Event.Diag("focus.mode", if (a == 1.0 && b == 1.0) "info" else "warn", mapOf("focus" to (a == 1.0), "separator" to (b == 1.0), "threads" to c.toInt())))
         }
     }
     return out
@@ -118,11 +119,11 @@ internal fun voiceOf(models: Models, voiceprint: Any?): Pair<Voiceprint?, FloatA
 }
 
 // a print runs Focus; `sample` apart from the print only for the tests
-internal fun processOptions(focus: Boolean, print: Voiceprint?, strength: Double, cue: Boolean?, speech: SpeechParams?, normalize: Boolean, trace: Boolean, rate: Int, words: List<Any>?, context: String, sample: FloatArray? = null): Map<String, Any?> {
+internal fun processOptions(focus: Boolean, print: Voiceprint?, strength: Double, cue: Boolean?, speech: SpeechParams?, normalize: Boolean, trace: Boolean, rate: Int, words: List<Any>?, context: String, sample: FloatArray? = null, lowPower: Boolean = false): Map<String, Any?> {
     val ws = words.orEmpty().map { Word.of(it).value }
     return mapOf(
         // ProcessOptions reads the print and the sample as JSON numbers, not as a FloatArray
-        "focus" to if (focus || print != null) mapOf("print" to print?.embedding?.map(Float::toDouble), "strength" to strength) + (if (sample != null) mapOf("sample" to sample.map(Float::toDouble)) else emptyMap()) else null,
+        "focus" to if (focus || print != null) mapOf("print" to print?.embedding?.map(Float::toDouble), "strength" to strength, "lowPower" to lowPower) + (if (sample != null) mapOf("sample" to sample.map(Float::toDouble)) else emptyMap()) else null,
         "cue" to cue,
         "speech" to (speech ?: SpeechParams()).value(),
         "normalize" to normalize,
@@ -150,12 +151,14 @@ class Processor @JvmOverloads constructor(
     rate: Int = Alkove.RATE,
     words: List<Any>? = null,
     context: String = "anywhere",
+    /** Focus without its separator, as a device too slow for it runs; a recording never depends on the device's speed. */
+    lowPower: Boolean = false,
 ) : AutoCloseable {
     private val handle: Handle
 
     init {
         val (print, sample) = voiceOf(models, voiceprint)
-        val opts = processOptions(focus, print, strength, cue, speech, normalize, trace, rate, words, context, sample)
+        val opts = processOptions(focus, print, strength, cue, speech, normalize, trace, rate, words, context, sample, lowPower)
         check(models, opts)
         val o = Values.encode(opts)
         handle = models.pinned { Handle(Native.processorNew(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), models.ptr("timbre"), o), Native::processorFree) }
@@ -194,9 +197,10 @@ fun process(
     trace: Boolean = false,
     words: List<Any>? = null,
     context: String = "anywhere",
+    lowPower: Boolean = false,
 ): Part {
     val (print, sample) = voiceOf(models, voiceprint)
-    return processWith(models, pcm, rate, processOptions(focus, print, strength, cue, speech, normalize, trace, Alkove.RATE, words, context, sample))
+    return processWith(models, pcm, rate, processOptions(focus, print, strength, cue, speech, normalize, trace, Alkove.RATE, words, context, sample, lowPower))
 }
 
 // the options as they are, a sample apart from the print included
@@ -207,8 +211,8 @@ internal fun processWith(models: Models, pcm: FloatArray, rate: Int, opts: Map<S
     return partOf(models.pinned { Native.process(models.ptr("focus"), models.ptr("cue"), models.ptr("spot"), models.ptr("timbre"), x, x.size, o) })
 }
 
-private fun chainOptions(gate: Boolean, normalize: Boolean, strength: Double, print: Voiceprint?, sample: FloatArray?, speech: SpeechParams?, sleep: Boolean, near: Boolean) =
-    Values.encode(mapOf("gate" to gate, "normalize" to normalize, "strength" to strength, "print" to print?.embedding, "sample" to sample, "speech" to (speech ?: SpeechParams()).value(), "sleep" to sleep, "levels" to true, "near" to near))
+private fun chainOptions(gate: Boolean, normalize: Boolean, strength: Double, print: Voiceprint?, sample: FloatArray?, speech: SpeechParams?, sleep: Boolean, near: Boolean, lowPower: Boolean?) =
+    Values.encode(mapOf("gate" to gate, "normalize" to normalize, "strength" to strength, "print" to print?.embedding, "sample" to sample, "speech" to (speech ?: SpeechParams()).value(), "sleep" to sleep, "levels" to true, "near" to near, "lowPower" to lowPower))
 
 /** The real-time chain, one hop of 256 samples at 16 kHz at a time: Focus, Cue, the mix with the raw mic, the level, the gate; its output is [delay] samples late, each speech end carries its [PhraseLevel]. `voiceprint` as for [Processor]; `near`: a voice 10 dB under the session's main one is no speech, but a diag `speech.far`. */
 class Chain @JvmOverloads constructor(
@@ -220,6 +224,8 @@ class Chain @JvmOverloads constructor(
     speech: SpeechParams? = null,
     sleep: Boolean = true,
     near: Boolean = false,
+    /** True: Focus without its separator (a step-by-step chain never adapts to the device by itself; [Live] does). */
+    lowPower: Boolean? = null,
 ) : AutoCloseable {
     private val handle: Handle
     private val records = DoubleArray(4 * 16)
@@ -227,7 +233,7 @@ class Chain @JvmOverloads constructor(
     init {
         models.need("focus", "cue")
         val (print, sample) = voiceOf(models, voiceprint)
-        val o = chainOptions(gate, normalize, strength, print, sample, speech, sleep, near)
+        val o = chainOptions(gate, normalize, strength, print, sample, speech, sleep, near, lowPower)
         handle = models.pinned { Handle(Native.chainNew(models.ptr("focus"), models.ptr("cue"), models.ptr("timbre"), o), Native::chainFree) }
     }
 
@@ -308,6 +314,8 @@ class Live @JvmOverloads constructor(
     speech: SpeechParams? = null,
     sleep: Boolean = true,
     near: Boolean = false,
+    /** True: Focus without its separator; false: never cut; null: adapts to the device, more threads, then without the separator, then the raw mic (diag `focus.mode`). */
+    lowPower: Boolean? = null,
 ) : AutoCloseable {
     private val handle: Handle
     private var out = FloatArray(0)
@@ -315,7 +323,7 @@ class Live @JvmOverloads constructor(
     init {
         models.need("focus", "cue")
         val (print, sample) = voiceOf(models, voiceprint)
-        val o = chainOptions(gate, normalize, strength, print, sample, speech, sleep, near)
+        val o = chainOptions(gate, normalize, strength, print, sample, speech, sleep, near, lowPower)
         handle = models.pinned { Handle(Native.liveNew(models.ptr("focus"), models.ptr("cue"), models.ptr("timbre"), rate.toDouble(), o), Native::liveFree) }
     }
 

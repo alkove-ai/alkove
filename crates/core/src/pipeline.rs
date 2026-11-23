@@ -577,6 +577,8 @@ impl Pipeline {
 
     // one hop of 256 samples; `far_quiet_ms` how long the far end has been quiet; the output is valid until the next call
     pub fn step(&mut self, hop: &[f32], far_quiet_ms: f64) -> &[f32] {
+        #[cfg(not(target_arch = "wasm32"))]
+        let t0 = std::time::Instant::now();
         self.far_quiet_ms = far_quiet_ms;
         let raw = (self.record.is_some() || self.recent.is_some() || self.stats.is_some()).then(|| hop.to_vec());
         if self.chain.is_some() {
@@ -654,6 +656,11 @@ impl Pipeline {
             self.extras(&raw, &out);
         }
         self.out = out;
+        // the whole hop, Spot and the rest included: what the device must fit in real time; wasm's host times it instead
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(c) = &mut self.chain {
+            c.spent(t0.elapsed().as_secs_f64() * 1e3);
+        }
         &self.out
     }
 

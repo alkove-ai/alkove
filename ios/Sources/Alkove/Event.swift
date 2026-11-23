@@ -127,6 +127,7 @@ func chainEvents(_ r: UnsafeBufferPointer<Double>, _ count: Int) -> [Event] {
             out.append(.diag(Diag(code: "speech.far", level: "info", data: .obj(data))))
             level = nil
         case 9: out.append(.speechCancel(start: a))
+        case 10: out.append(.diag(Diag(code: "focus.mode", level: a == 1 && b == 1 ? "info" : "warn", data: .obj([("focus", .bool(a == 1)), ("separator", .bool(b == 1)), ("threads", .num(c))]))))
         default: break
         }
     }

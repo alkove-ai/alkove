@@ -885,8 +885,11 @@ public struct AgentOptions: Sendable {
     public var turn = TurnParams()
     /// Wake words on the raw microphone: each decides whether the user is far for what follows (diag `wake.far`) and, without a print, gives Focus the voice that said it (`wake.print`); the wakes come on `events`.
     public var wake: WakeWords?
+    /// True: Focus without its separator; false: never cut; nil: adapts to the device, more threads, then without the separator, then the raw mic (diag `focus.mode`).
+    public var lowPower: Bool?
 
-    public init(voiceprint: VoiceprintSource? = nil, onlyMyVoice: Bool = false, output: Output = Output(), keepRecent: Double = 0, trace: Bool = false, near: Bool = false, turn: TurnParams = TurnParams(), wake: WakeWords? = nil) {
+    public init(voiceprint: VoiceprintSource? = nil, onlyMyVoice: Bool = false, output: Output = Output(), keepRecent: Double = 0, trace: Bool = false, near: Bool = false, turn: TurnParams = TurnParams(), wake: WakeWords? = nil, lowPower: Bool? = nil) {
+        self.lowPower = lowPower
         self.voiceprint = voiceprint
         self.onlyMyVoice = onlyMyVoice
         self.output = output
@@ -972,7 +975,7 @@ public final class AgentInput: AlkoveInput, @unchecked Sendable {
 
     override func pipelineOptions() -> Value {
         .obj([
-            ("chain", chainOptions(gate: false, normalize: true, strength: 1, print: print, sample: sample, speech: nil, sleep: true, near: opts.near)),
+            ("chain", chainOptions(gate: false, normalize: true, strength: 1, print: print, sample: sample, speech: nil, sleep: true, near: opts.near, lowPower: opts.lowPower)),
             ("onlyMyVoice", .bool(opts.onlyMyVoice)),
             ("learn", .bool(learning)),
             ("keepRecent", .num(opts.keepRecent)),

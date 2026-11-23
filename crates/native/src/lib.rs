@@ -52,6 +52,7 @@ fn records(events: &[ChainEvent], taps: bool, into: &mut Vec<f64>) {
             ChainEvent::Level { voice_db, noise_db, ref_db } => [7.0, voice_db, noise_db, ref_db],
             ChainEvent::Far { start, end } => [8.0, start, end, 0.0],
             ChainEvent::Cancel { start } => [9.0, start, 0.0, 0.0],
+            ChainEvent::Mode { focus, separator, threads } => [10.0, b(focus), b(separator), threads as f64],
             ChainEvent::Focus { .. } | ChainEvent::Cue { .. } => continue,
         };
         into.extend(r);

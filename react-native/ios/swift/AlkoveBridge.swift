@@ -242,7 +242,8 @@ import Alkove
       trace: o["trace"] as? Bool ?? false,
       near: o["near"] as? Bool ?? false,
       turn: turn ?? TurnParams(),
-      wake: wake
+      wake: wake,
+      lowPower: o["lowPower"] as? Bool
     )
   }
 

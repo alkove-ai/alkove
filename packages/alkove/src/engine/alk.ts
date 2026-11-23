@@ -19,7 +19,7 @@ export interface AlkExports {
   alk_io_count(m: number, plan: number, kind: number): number
   alk_io_name(m: number, plan: number, kind: number, i: number, out: number, cap: number): number
   alk_io_shape(m: number, plan: number, kind: number, i: number, dims: number, cap: number): number
-  alk_chain(focus: number, cue: number, gate: number, normalize: number, sleep: number, strength: number, confidence: number, exitConfidence: number, startSecs: number, stopSecs: number, print: number, printLen: number): number
+  alk_chain(focus: number, cue: number, gate: number, normalize: number, sleep: number, strength: number, confidence: number, exitConfidence: number, startSecs: number, stopSecs: number, print: number, printLen: number, lowPower: number): number
   alk_chain_free(c: number): void
   alk_chain_hop(c: number): number
   alk_chain_step(c: number): number
@@ -68,6 +68,7 @@ export interface AlkExports {
   alk_pipeline_hop(p: number): number
   alk_pipeline_step(p: number, farQuietMs: number): number
   alk_pipeline_raw(p: number): void
+  alk_pipeline_spent(p: number, ms: number): void
   alk_pipeline_spot(p: number, m: number): void
   alk_pipeline_timbre(p: number, m: number): number
   alk_pipeline_outs(p: number): number

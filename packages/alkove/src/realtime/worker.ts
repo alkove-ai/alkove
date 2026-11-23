@@ -173,6 +173,7 @@ function onHop(r: Realtime, buf: ArrayBuffer, port: MessagePort): void {
   const t0 = performance.now()
   const out = r.p.step(hop, f[HOP]!)
   const ms = performance.now() - t0
+  r.p.spent(ms)
   f.set(out)
   port.postMessage(buf, [buf])
   drain(r)

@@ -273,6 +273,7 @@ class AlkoveModule(context: ReactApplicationContext) : NativeAlkoveSpec(context)
         turn = turn?.let { TurnParams(it.num("threshold", 0.6), it.num("minPause", 0.3), it.num("maxPause", 1.5)) } ?: TurnParams(),
         wake = o.optJSONObject("wake")?.let { w -> WakeWords(strings(w.getJSONArray("words")), w.optJSONArray("lang")?.let(::strings) ?: listOfNotNull(w.optString("lang").ifEmpty { null }), w.optString("context", "pause")) },
         onlyMyVoice = o.optBoolean("onlyMyVoice"),
+        lowPower = if (o.has("lowPower") && !o.isNull("lowPower")) o.getBoolean("lowPower") else null,
       )
     }
 

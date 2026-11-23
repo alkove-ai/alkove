@@ -75,6 +75,8 @@ impl Live {
         let mut at = 0;
         while let Some(h) = self.hops.next(&self.in16, &mut at) {
             self.hop.copy_from_slice(h);
+            #[cfg(not(target_arch = "wasm32"))]
+            let t0 = std::time::Instant::now();
             let from = events.len();
             self.out16.extend_from_slice(self.chain.step(&self.hop, events));
             let far_quiet_ms = self.far.tick(1000.0 * FOCUS.chunk as f64 / RATE);
@@ -83,6 +85,8 @@ impl Live {
                     self.chain.reset_turn();
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            self.chain.spent(t0.elapsed().as_secs_f64() * 1e3);
         }
         self.up.push(&self.out16, out);
     }

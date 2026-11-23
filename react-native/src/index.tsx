@@ -212,6 +212,8 @@ export interface AgentOptions {
   voiceprint?: VoiceprintJSON | number[] | null;
   output?: Partial<{ format: 'f32' | 's16'; rate: number; chunkMs: number }>;
   near?: boolean;
+  // true: Focus without its separator; false: never cut; unset: adapts to the device (diag `focus.mode`)
+  lowPower?: boolean;
   turn?: Partial<{ threshold: number; minPause: number; maxPause: number }>;
   wake?: { words: readonly (Word | Record<string, unknown> | string)[]; lang?: Lang | Lang[]; context?: Context };
   onlyMyVoice?: boolean;

@@ -407,6 +407,11 @@ export class NativePipeline {
     return this.out
   }
 
+  // the milliseconds the last step took: the chain drops Focus's separator on a device too slow for it
+  spent(ms: number): void {
+    this.alk.x.alk_pipeline_spent(live(this.ptr), ms)
+  }
+
   spot(model: Model): void {
     this.alk.x.alk_pipeline_spot(live(this.ptr), model.ptr)
   }

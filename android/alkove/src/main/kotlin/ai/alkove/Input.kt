@@ -867,6 +867,8 @@ data class AgentOptions @JvmOverloads constructor(
     val wake: WakeWords? = null,
     /** Phrases, turns and interruptions only in the print's voice (`voiceprint`, or the one learned): Timbre hears 0.6 s of each first, another voice gives a diag `speech.other-voice`. */
     val onlyMyVoice: Boolean = false,
+    /** True: Focus without its separator; false: never cut; null: adapts to the device, more threads, then without the separator, then the raw mic (diag `focus.mode`). */
+    val lowPower: Boolean? = null,
 ) {
     init {
         checkVoice(voiceprint)
@@ -875,7 +877,7 @@ data class AgentOptions @JvmOverloads constructor(
 
 internal fun agentPipelineOptions(opts: AgentOptions, print: Voiceprint?, output: Map<String, Any?>, sample: FloatArray? = null, learn: Boolean = false) =
     mapOf(
-        "chain" to mapOf("gate" to false, "normalize" to true, "strength" to 1.0, "print" to print?.embedding, "sample" to sample, "levels" to true, "near" to opts.near),
+        "chain" to mapOf("gate" to false, "normalize" to true, "strength" to 1.0, "print" to print?.embedding, "sample" to sample, "levels" to true, "near" to opts.near, "lowPower" to opts.lowPower),
         "learn" to learn,
         "keepRecent" to opts.keepRecent,
         "trace" to opts.trace,
