@@ -34,7 +34,7 @@ const r = await Alkove.process(file, {
 })
 ```
 
-- `focus`: `true` keeps the closest voice. `{ voiceprint }` keeps one person: their print, or a few seconds of them alone at 16 kHz, which also lets Focus tell them apart from another voice at once (from a print alone, it takes its own sample from the recording); `{ strength }` mixes Focus with the original (1 by default). Without `focus`, `r.audio` is the input, resampled.
+- `focus`: `true` keeps the closest voice. `{ voiceprint }` keeps one person: their print, or a few seconds of them alone at 16 kHz, which also lets Focus tell them apart from another voice at once (from a print alone, it takes its own sample from the recording); `{ strength }` mixes Focus with the original (1 by default); `{ lowPower: true }` runs Focus without its separator, as a slower device would. Without `focus`, `r.audio` is the input, resampled.
 - `cue`: speech segments. `true`, or the speech parameters to tune ([`SpeechParams`](/docs/reference/interfaces/speechparams/)). With `focus`, Cue listens to Focus's output.
 - `spot`: `{ words, context }`, the words to find. With `focus`, Spot listens behind Focus. `context` is `'anywhere'` by default here.
 - `normalize`: level the voice as a call input does. Off by default for files.

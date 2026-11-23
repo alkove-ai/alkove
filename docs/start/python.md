@@ -42,6 +42,7 @@ The output comes back aligned with the input: the first `part.audio` is shorter 
 
 ```python
 live = alkove.Live(models, 16000, near=True)       # a voice 10 dB under the user's opens no phrase
+live = alkove.Live(models, 16000, low_power=True)  # Focus without its separator, as on a slower device
 audio, events = live.push(frame)
 # {'type': 'speechend', 'start': …, 'end': …, 'voiceDb': -19.2, 'noiseDb': …, 'refDb': -18.7}
 # {'type': 'diag', 'code': 'speech.far', 'level': 'info', 'data': {'start': …, 'end': …, 'voiceDb': -40.2, …}}

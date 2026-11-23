@@ -63,6 +63,7 @@ Focus is always on in [`createCallInput()`](/docs/start/call/) and [`createAgent
 | `wake` | Agent inputs: wake words heard on the raw microphone; each one gives Focus the voice that said it, and decides whether the raw microphone passes for the request. |
 | `farEnd` | What the other side plays (a remote track, your TTS), or `farEndActive()` from the app: no learning while it plays. An agent input learns once it has one or the other. |
 | `strength` | Call inputs: from 0 (the raw microphone) to 1 (Focus only, the default), a mix of both, delay-aligned. |
+| `lowPower` | `true`: Focus without its separator from the start. `false`: Focus is never cut for the device's speed. Unset: Focus adapts to the device (below). |
 
 The input learns the user's print while they talk, then keeps only them: Focus uses it from their first 1.5 s of voice, and the print is ready after about 6 s. It emits `learn` with the progress and `voiceprint` when the print changes.
 
@@ -83,6 +84,18 @@ const both = r.toWav('both') // raw on the left, Focus on the right
 ## Latency
 
 Focus adds 16 ms (one step) on top of its 16 ms step. A live input reports its total delay in `input.latency` (milliseconds): Focus, the audio queue and, on a call, the 100 ms look-ahead of the gate that opens when the user starts speaking.
+
+## On a slower device
+
+A live input times each 16 ms step and adapts Focus to the device, in this order:
+
+1. **More threads**, up to 4, natively (Android, iOS, Python); the browser runs one. A thread more is kept only when the step gets faster. The output is the same, bit for bit, on any number of threads.
+2. **Without the separator**, the part of Focus that reads its user's sample and keeps their voice while another voice talks over it. Focus still keeps the closest voice, or the voice of the print, and removes the noise; two voices at once are no longer split. The separator is left off from the start when the step without it shows it would not fit.
+3. **The raw microphone**, when Focus does not keep up even without the separator: the output, Cue and Spot hear the microphone as it is.
+
+Each cut is tried again, after 30 s, then twice as long each time, up to 5 minutes. The diag `focus.mode` gives what runs, `focus`, `separator` and `threads`, at each change. The same device can need more on one occasion than another: an app in the background, the screen off, runs on slower cores.
+
+`lowPower` (`low_power` in Python) sets it: `true` runs Focus without the separator from the start, the raw microphone staying possible; `false` never cuts the separator or Focus, threads still adapting. `process()` and step-by-step chains never adapt by themselves: a recording gives the same output on every device.
 
 ## Performance
 

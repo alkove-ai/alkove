@@ -135,6 +135,7 @@ const off = Alkove.onDiag((d) => console.warn(d.code, d))
 | `queue` | info | every 2 s, the worklet's queue | `queueMs`, `debtMs`, `droppedMs`, `latencyMs` | latency analysis |
 | `idle` | info | Focus and Cue go to sleep in a silence, or wake up | `asleep`, `at` | nothing |
 | `focus.print` | info | a print was applied | `print`, `after`, `why` | nothing |
+| `focus.mode` | info, warn | Focus adapted to the device's speed: warn when its separator or Focus whole is cut (the raw microphone then passes), info when they run again | `focus`, `separator`, `threads` | nothing, or tell the user that voice isolation is reduced; see [Focus on a slower device](/docs/models/focus/#on-a-slower-device) |
 | `print.learn` / `print.reject` / `print.restart` | info | a learning window was accepted, refused, or the print started over | `score`, `progress`, `ms` | nothing |
 | `voiceprint.reset` | warn | a print from another version of Timbre was ignored (`voiceprint`, `setVoiceprint`), such as one made before 0.5 | | let it learn again |
 | `engine.crash` | warn | the engine stopped: raw microphone, a new engine after the retry delay | `error` | nothing, or tell the user |
